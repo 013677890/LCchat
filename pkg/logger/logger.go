@@ -1,10 +1,10 @@
 package logger
 
 import (
+	"context"
 	"os"
 	"strings"
 	"time"
-	"context"
 
 	"ChatServer/config"
 
@@ -39,13 +39,13 @@ func Build(cfg config.LoggerConfig) (*zap.Logger, error) {
 	}
 
 	encoderCfg := zapcore.EncoderConfig{
-		TimeKey:        "ts",  // 时间戳
-		LevelKey:       "level", // 日志级别
-		NameKey:        "logger", // 日志名称
-		CallerKey:      "caller", // 调用者
-		MessageKey:     "msg", // 消息
-		StacktraceKey:  "stack", // 堆栈
-		LineEnding:     zapcore.DefaultLineEnding, // 行结束符
+		TimeKey:        "ts",                                          // 时间戳
+		LevelKey:       "level",                                       // 日志级别
+		NameKey:        "logger",                                      // 日志名称
+		CallerKey:      "caller",                                      // 调用者
+		MessageKey:     "msg",                                         // 消息
+		StacktraceKey:  "stack",                                       // 堆栈
+		LineEnding:     zapcore.DefaultLineEnding,                     // 行结束符
 		EncodeTime:     zapcore.TimeEncoderOfLayout(time.RFC3339Nano), // 统一时间格式
 		EncodeDuration: zapcore.MillisDurationEncoder,                 // 耗时以毫秒输出
 		EncodeCaller:   zapcore.ShortCallerEncoder,                    // 文件:行 短路径
@@ -61,7 +61,7 @@ func Build(cfg config.LoggerConfig) (*zap.Logger, error) {
 		encoder = zapcore.NewConsoleEncoder(encoderCfg) // 控制台编码器
 	} else {
 		encoderCfg.EncodeLevel = zapcore.LowercaseLevelEncoder // 小写等级
-		encoder = zapcore.NewJSONEncoder(encoderCfg) // JSON编码器
+		encoder = zapcore.NewJSONEncoder(encoderCfg)           // JSON编码器
 	}
 
 	outSync := buildSyncer(cfg.OutputPaths, zapcore.AddSync(os.Stdout))      // 普通日志输出
@@ -106,7 +106,6 @@ func buildSyncer(paths []string, fallback zapcore.WriteSyncer) zapcore.WriteSync
 	}
 	return zapcore.NewMultiWriteSyncer(syncers...)
 }
-
 
 func Info(ctx context.Context, msg string, fields ...zap.Field) {
 	if ctx == nil {
@@ -166,4 +165,47 @@ func Debug(ctx context.Context, msg string, fields ...zap.Field) {
 		}
 		global.Debug(msg, fields...)
 	}
+}
+
+// ========== Field 辅助函数封装 ==========
+// 以下函数用于创建日志字段，业务代码无需直接导入 zap 包
+
+// String 创建字符串类型字段
+func String(key, value string) zap.Field {
+	return zap.String(key, value)
+}
+
+// Int 创建整数类型字段
+func Int(key string, value int) zap.Field {
+	return zap.Int(key, value)
+}
+
+// Int64 创建 int64 类型字段
+func Int64(key string, value int64) zap.Field {
+	return zap.Int64(key, value)
+}
+
+// Bool 创建布尔类型字段
+func Bool(key string, value bool) zap.Field {
+	return zap.Bool(key, value)
+}
+
+// ErrorField 创建错误类型字段
+func ErrorField(key string, err error) zap.Field {
+	return zap.Error(err)
+}
+
+// Any 创建任意类型字段
+func Any(key string, value interface{}) zap.Field {
+	return zap.Any(key, value)
+}
+
+// Duration 创建时间间隔类型字段
+func Duration(key string, value time.Duration) zap.Field {
+	return zap.Duration(key, value)
+}
+
+// Time 创建时间类型字段
+func Time(key string, value time.Time) zap.Field {
+	return zap.Time(key, value)
 }
