@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 
-	"ChatServer/apps/user/internal/domain"
 	"ChatServer/apps/user/internal/handler"
 	"ChatServer/apps/user/internal/repository"
 	"ChatServer/apps/user/internal/server"
@@ -51,19 +50,15 @@ func main() {
 	friendService := service.NewFriendService(userRepo, relationRepo, applyRepo)
 	deviceService := service.NewDeviceService(deviceRepo)
 
-	// 5. 组装依赖 - Domain层
-	loginDomain := domain.NewLoginDomain(authService, deviceService)
-
-	// 6. 组装依赖 - Handler层
+	// 5. 组装依赖 - Handler层
 	userHandler := handler.NewUserServiceHandler(
-		loginDomain,
 		authService,
 		userQueryService,
 		friendService,
 		deviceService,
 	)
 
-	// 7. 启动gRPC Server
+	// 6. 启动gRPC Server
 	opts := server.Options{
 		Address:          ":9090",
 		EnableHealth:     true,

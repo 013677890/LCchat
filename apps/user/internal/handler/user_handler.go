@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"ChatServer/apps/user/internal/domain"
 	"ChatServer/apps/user/internal/dto"
 	"ChatServer/apps/user/internal/service"
 	pb "ChatServer/apps/user/pb"
@@ -11,15 +10,12 @@ import (
 // UserServiceHandler gRPC服务Handler层
 // 职责：
 //   - 解析gRPC请求参数，转换为DTO
-//   - 调用Domain/Service层执行业务逻辑
+//   - 调用Service层执行业务逻辑
 //   - 将DTO结果转换为gRPC Response
-//   - 不包含任何业务逻辑（业务逻辑在Domain/Service层）
+//   - 不包含任何业务逻辑（业务逻辑在Service层）
 type UserServiceHandler struct {
 	pb.UnimplementedUserServiceServer
-	
-	// Domain层
-	loginDomain *domain.LoginDomain
-	
+
 	// Service层
 	authService   service.AuthService
 	userService   service.UserQueryService
@@ -29,14 +25,12 @@ type UserServiceHandler struct {
 
 // NewUserServiceHandler 创建Handler实例
 func NewUserServiceHandler(
-	loginDomain *domain.LoginDomain,
 	authService service.AuthService,
 	userService service.UserQueryService,
 	friendService service.FriendService,
 	deviceService service.DeviceService,
 ) *UserServiceHandler {
 	return &UserServiceHandler{
-		loginDomain:   loginDomain,
 		authService:   authService,
 		userService:   userService,
 		friendService: friendService,
@@ -58,8 +52,8 @@ func (h *UserServiceHandler) Login(ctx context.Context, req *pb.LoginRequest) (*
 		DeviceInfo: req.DeviceInfo,
 	}
 
-	// 2. 调用Domain层执行登录业务流程
-	loginResp, err := h.loginDomain.Login(ctx, loginReq)
+	// 2. 调用Service层执行登录业务流程
+	loginResp, err := h.authService.Login(ctx, loginReq)
 	if err != nil {
 		return nil, err
 	}
@@ -577,4 +571,3 @@ func (h *UserServiceHandler) GetUsersOnlineState(ctx context.Context, req *pb.Ge
 		OnlineStates: onlineStates,
 	}, nil
 }
-
