@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"ChatServer/apps/user/internal/handler"
 	"ChatServer/apps/user/internal/interceptors"
@@ -14,6 +15,7 @@ import (
 	"ChatServer/config"
 	"ChatServer/pkg/logger"
 	"ChatServer/pkg/mysql"
+	pkgredis "ChatServer/pkg/redis"
 
 	"google.golang.org/grpc"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
@@ -40,13 +42,33 @@ func main() {
 	}
 	mysql.ReplaceGlobal(db)
 
-	// 3. 组装依赖 - Repository层
-	userRepo := repository.NewUserRepository(db)
+	// 3. 初始化Redis
+	redisCfg := config.DefaultRedisConfig()
+	// 调整 Redis 超时时间为 50ms（快速失败）
+	redisCfg.ReadTimeout = 50 * time.Millisecond
+	redisCfg.WriteTimeout = 50 * time.Millisecond
+	
+	redisClient, err := pkgredis.Build(redisCfg)
+	if err != nil {
+		// Redis 初始化失败不阻塞启动（降级到只用 MySQL）
+		logger.Warn(ctx, "Redis 初始化失败，将降级到 MySQL-Only 模式",
+			logger.ErrorField("error", err),
+		)
+		redisClient = nil
+	} else {
+		pkgredis.ReplaceGlobal(redisClient)
+		logger.Info(ctx, "Redis 初始化成功",
+			logger.String("addr", redisCfg.Addr),
+		)
+	}
+
+	// 4. 组装依赖 - Repository层（注入 Redis）
+	userRepo := repository.NewUserRepository(db, redisClient)
 	relationRepo := repository.NewRelationRepository(db)
 	applyRepo := repository.NewApplyRequestRepository(db)
 	deviceRepo := repository.NewDeviceSessionRepository(db)
 
-	// 4. 组装依赖 - Service层
+	// 5. 组装依赖 - Service层
 	authService := service.NewAuthService(userRepo, deviceRepo)
 	userQueryService := service.NewUserInfoService(userRepo)
 	friendService := service.NewFriendService(userRepo, relationRepo, applyRepo)
