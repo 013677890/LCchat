@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "ChatServer/apps/user/pb";
+
+// 导入通用数据模型
+import "apps/user/pb/common.proto";
+
+import "validate/validate.proto";
+
+// ==================== 设备会话服务接口 ====================
+// 服务名：DeviceService
+// 职责：设备列表、踢出设备、在线状态查询
+
+service DeviceService {
+	// GetDeviceList 获取设备列表
+	rpc GetDeviceList(GetDeviceListRequest) returns (GetDeviceListResponse);
+	
+	// KickDevice 踢出设备
+	rpc KickDevice(KickDeviceRequest) returns (KickDeviceResponse);
+	
+	// GetOnlineStatus 获取用户在线状态
+	rpc GetOnlineStatus(GetOnlineStatusRequest) returns (GetOnlineStatusResponse);
+	
+	// BatchGetOnlineStatus 批量获取在线状态
+	rpc BatchGetOnlineStatus(BatchGetOnlineStatusRequest) returns (BatchGetOnlineStatusResponse);
+}
+
+// ==================== 设备列表 ====================
+
+// GetDeviceListRequest 获取设备列表请求
+message GetDeviceListRequest {}
+
+// DeviceItem 设备项
+message DeviceItem {
+	string device_id = 1;
+	string device_name = 2;
+	string platform = 3;
+	string app_version = 4;
+	bool is_current_device = 5;
+	int32 status = 6;
+	int64 last_seen_at = 7;
+}
+
+// GetDeviceListResponse 获取设备列表响应
+message GetDeviceListResponse {
+	repeated DeviceItem devices = 1;
+}
+
+// ==================== 踢出设备 ====================
+
+// KickDeviceRequest 踢出设备请求
+message KickDeviceRequest {
+	string device_id = 1 [(validate.rules).string.min_len = 1];
+}
+
+// KickDeviceResponse 踢出设备响应
+message KickDeviceResponse {}
+
+// ==================== 在线状态 ====================
+
+// GetOnlineStatusRequest 获取在线状态请求
+message GetOnlineStatusRequest {
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+}
+
+// GetOnlineStatusResponse 获取在线状态响应
+message GetOnlineStatusResponse {
+	OnlineStatus status = 1;
+}
+
+// ==================== 批量在线状态 ====================
+
+// BatchGetOnlineStatusRequest 批量获取在线状态请求
+message BatchGetOnlineStatusRequest {
+	repeated string user_uuids = 1 [(validate.rules).repeated.max_items = 100];
+}
+
+// BatchGetOnlineStatusResponse 批量获取在线状态响应
+message BatchGetOnlineStatusResponse {
+	repeated OnlineStatusItem users = 1;
+}
+
+// ==================== 通用类型定义 ====================
+// 导入自 common.proto：
+// - DeviceInfo (设备信息)
+// - OnlineStatus (在线状态)
+// - OnlineStatusItem (在线状态项）

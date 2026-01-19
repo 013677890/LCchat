@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "ChatServer/apps/user/pb";
+
+// 导入通用数据模型
+import "apps/user/pb/common.proto";
+
+import "validate/validate.proto";
+
+// ==================== 认证服务接口 ====================
+// 服务名：AuthService
+// 职责：用户注册、登录、登出、Token管理、验证码
+
+service AuthService {
+	// Register 用户注册
+	rpc Register(RegisterRequest) returns (RegisterResponse);
+	
+	// Login 用户登录（密码）
+	rpc Login(LoginRequest) returns (LoginResponse);
+	
+	// LoginByCode 验证码登录
+	rpc LoginByCode(LoginByCodeRequest) returns (LoginByCodeResponse);
+	
+	// SendVerifyCode 发送验证码
+	rpc SendVerifyCode(SendVerifyCodeRequest) returns (SendVerifyCodeResponse);
+	
+	// VerifyCode 校验验证码
+	rpc VerifyCode(VerifyCodeRequest) returns (VerifyCodeResponse);
+	
+	// RefreshToken 刷新Token
+	rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+	
+	// Logout 用户登出
+	rpc Logout(LogoutRequest) returns (LogoutResponse);
+	
+	// ResetPassword 重置密码
+	rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+}
+
+// ==================== 注册接口 ====================
+
+// RegisterRequest 注册请求
+message RegisterRequest {
+	string email = 1 [(validate.rules).string.email = true];
+	string password = 2 [(validate.rules).string = {min_len: 6, max_len: 20}];
+	string verify_code = 3 [(validate.rules).string.len = 6];
+	string nickname = 4 [(validate.rules).string = {min_len: 2, max_len: 20}];
+	string telephone = 5 [(validate.rules).string.len = 11];
+}
+
+// RegisterResponse 注册响应
+message RegisterResponse {
+	string user_uuid = 1;
+	string email = 2;
+	string telephone = 3;
+	string nickname = 4;
+}
+
+// ==================== 登录接口 ====================
+
+// LoginRequest 登录请求
+message LoginRequest {
+	string account = 1 [(validate.rules).string = {min_len: 1}];
+	string password = 2 [(validate.rules).string = {min_len: 6, max_len: 20}];
+	DeviceInfo device_info = 3 [(validate.rules).message.required = true];
+}
+
+// LoginResponse 登录响应
+message LoginResponse {
+	string access_token = 1;
+	string refresh_token = 2;
+	string token_type = 3;
+	int64 expires_in = 4; // 秒
+	UserInfo user_info = 5;
+}
+
+// LoginByCodeRequest 验证码登录请求
+message LoginByCodeRequest {
+	string email = 1 [(validate.rules).string.email = true];
+	string verify_code = 2 [(validate.rules).string.len = 6];
+	DeviceInfo device_info = 3;
+}
+
+// LoginByCodeResponse 验证码登录响应，同LoginResponse
+message LoginByCodeResponse {
+	string access_token = 1;
+	string refresh_token = 2;
+	string token_type = 3;
+	int64 expires_in = 4; // 秒
+	UserInfo user_info = 5;
+}
+
+// ==================== 验证码接口 ====================
+
+// SendVerifyCodeRequest 发送验证码请求
+message SendVerifyCodeRequest {
+	string email = 1 [(validate.rules).string.email = true];
+	int32 type = 2 [(validate.rules).int32 = {gt: 0, lte: 4}]; // 1:注册 2:登录 3:重置密码 4:换绑邮箱
+}
+
+// SendVerifyCodeResponse 发送验证码响应
+message SendVerifyCodeResponse {
+	int64 expire_seconds = 1;
+}
+
+// VerifyCodeRequest 校验验证码请求
+message VerifyCodeRequest {
+	string email = 1 [(validate.rules).string.email = true];
+	string verify_code = 2 [(validate.rules).string.len = 6];
+	int32 type = 3 [(validate.rules).int32 = {gt: 0, lte: 4}];
+}
+
+// VerifyCodeResponse 校验验证码响应
+message VerifyCodeResponse {
+	bool valid = 1;
+}
+
+// ==================== Token接口 ====================
+
+// RefreshTokenRequest 刷新Token请求
+message RefreshTokenRequest {
+	string refresh_token = 1 [(validate.rules).string = {min_len: 1}];
+}
+
+// RefreshTokenResponse 刷新Token响应
+message RefreshTokenResponse {
+	string access_token = 1;
+	string token_type = 2;
+	int64 expires_in = 3;
+}
+
+// LogoutRequest 登出请求
+message LogoutRequest {
+	string device_id = 1 [(validate.rules).string = {min_len: 1}];
+}
+
+// LogoutResponse 登出响应
+message LogoutResponse {}
+
+// ==================== 重置密码接口 ====================
+
+// ResetPasswordRequest 重置密码请求
+message ResetPasswordRequest {
+	string email = 1 [(validate.rules).string.email = true];
+	string verify_code = 2 [(validate.rules).string.len = 6];
+	string new_password = 3 [(validate.rules).string = {min_len: 6, max_len: 20}];
+}
+
+// ResetPasswordResponse 重置密码响应
+message ResetPasswordResponse {}

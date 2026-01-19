@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "ChatServer/apps/user/pb";
+
+// 导入通用数据模型
+import "apps/user/pb/common.proto";
+
+import "validate/validate.proto";
+
+// ==================== 用户信息服务接口 ====================
+// 服务名：UserService
+// 职责：用户个人信息管理、头像、密码修改、账号设置、二维码、注销
+
+service UserService {
+	// GetProfile 获取个人信息
+	rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
+	
+	// GetOtherProfile 获取他人信息
+	rpc GetOtherProfile(GetOtherProfileRequest) returns (GetOtherProfileResponse);
+	
+	// UpdateProfile 更新基本信息
+	rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+	
+	// UploadAvatar 上传头像
+	rpc UploadAvatar(UploadAvatarRequest) returns (UploadAvatarResponse);
+	
+	// ChangePassword 修改密码
+	rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+	
+	// ChangeEmail 绑定/换绑邮箱
+	rpc ChangeEmail(ChangeEmailRequest) returns (ChangeEmailResponse);
+	
+	// ChangeTelephone 绑定/换绑手机
+	rpc ChangeTelephone(ChangeTelephoneRequest) returns (ChangeTelephoneResponse);
+	
+	// GetQRCode 获取用户二维码
+	rpc GetQRCode(GetQRCodeRequest) returns (GetQRCodeResponse);
+	
+	// ParseQRCode 解析二维码
+	rpc ParseQRCode(ParseQRCodeRequest) returns (ParseQRCodeResponse);
+	
+	// DeleteAccount 注销账号
+	rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
+	
+	// BatchGetProfile 批量获取用户信息
+	rpc BatchGetProfile(BatchGetProfileRequest) returns (BatchGetProfileResponse);
+}
+
+// ==================== 获取个人信息 ====================
+
+// GetProfileRequest 获取个人信息请求
+message GetProfileRequest {}
+
+// GetProfileResponse 获取个人信息响应
+message GetProfileResponse {
+	UserInfo user_info = 1;
+}
+
+// ==================== 获取他人信息 ====================
+
+// GetOtherProfileRequest 获取他人信息请求
+message GetOtherProfileRequest {
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+}
+
+// GetOtherProfileResponse 获取他人信息响应
+message GetOtherProfileResponse {
+	UserInfo user_info = 1;
+	bool is_friend = 2;
+}
+
+// ==================== 更新基本信息 ====================
+
+// UpdateProfileRequest 更新基本信息请求
+message UpdateProfileRequest {
+	string nickname = 1 [(validate.rules).string = {min_len: 2, max_len: 20}];
+	int32 gender = 2 [(validate.rules).int32 = {gt: 0, lte: 3}];
+	string birthday = 3 [(validate.rules).string = {}]; // YYYY-MM-DD 格式
+	string signature = 4 [(validate.rules).string.max_len = 100];
+}
+
+// UpdateProfileResponse 更新基本信息响应
+message UpdateProfileResponse {
+	UserInfo user_info = 1;
+}
+
+// ==================== 上传头像 ====================
+
+// UploadAvatarRequest 上传头像请求
+message UploadAvatarRequest {
+	bytes avatar_data = 1 [(validate.rules).bytes = {min_len: 1, max_len: 2097152}]; // 最大2MB
+}
+
+// UploadAvatarResponse 上传头像响应
+message UploadAvatarResponse {
+	string avatar_url = 1;
+}
+
+// ==================== 修改密码 ====================
+
+// ChangePasswordRequest 修改密码请求
+message ChangePasswordRequest {
+	string old_password = 1 [(validate.rules).string = {min_len: 6, max_len: 20}];
+	string new_password = 2 [(validate.rules).string = {min_len: 6, max_len: 20}];
+}
+
+// ChangePasswordResponse 修改密码响应
+message ChangePasswordResponse {}
+
+// ==================== 换绑邮箱 ====================
+
+// ChangeEmailRequest 换绑邮箱请求
+message ChangeEmailRequest {
+	string new_email = 1 [(validate.rules).string.email = true];
+	string verify_code = 2 [(validate.rules).string.len = 6];
+}
+
+// ChangeEmailResponse 换绑邮箱响应
+message ChangeEmailResponse {
+	string email = 1;
+}
+
+// ==================== 换绑手机 ====================
+
+// ChangeTelephoneRequest 换绑手机请求
+message ChangeTelephoneRequest {
+	string new_telephone = 1 [(validate.rules).string.len = 11];
+	string verify_code = 2 [(validate.rules).string.len = 6];
+}
+
+// ChangeTelephoneResponse 换绑手机响应
+message ChangeTelephoneResponse {
+	string telephone = 1;
+}
+
+// ==================== 二维码相关 ====================
+
+// GetQRCodeRequest 获取二维码请求
+message GetQRCodeRequest {}
+
+// GetQRCodeResponse 获取二维码响应
+message GetQRCodeResponse {
+	string qrcode = 1;
+	string qrcode_image = 2;
+	string expire_at = 3;
+}
+
+// ParseQRCodeRequest 解析二维码请求
+message ParseQRCodeRequest {
+	string qrcode = 1 [(validate.rules).string.min_len = 1];
+}
+
+// ParseQRCodeResponse 解析二维码响应
+message ParseQRCodeResponse {
+	UserInfo user_info = 1;
+	bool is_friend = 2;
+}
+
+// ==================== 注销账号 ====================
+
+// DeleteAccountRequest 注销账号请求
+message DeleteAccountRequest {
+	string password = 1 [(validate.rules).string = {min_len: 6, max_len: 20}];
+	string reason = 2 [(validate.rules).string.max_len = 255];
+}
+
+// DeleteAccountResponse 注销账号响应
+message DeleteAccountResponse {
+	string delete_at = 1;
+	string recover_deadline = 2;
+}
+
+// ==================== 批量获取用户信息 ====================
+
+// BatchGetProfileRequest 批量获取用户信息请求
+message BatchGetProfileRequest {
+	repeated string user_uuids = 1 [(validate.rules).repeated.max_items = 100];
+}
+
+// BatchGetProfileResponse 批量获取用户信息响应
+message BatchGetProfileResponse {
+	repeated SimpleUserInfo users = 1;
+}
+
+// ==================== 批量获取用户信息（用于增量同步等）====================
+
+message SyncUserInfoRequest {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+	int64 changed_at = 4;
+}
+
+message SyncUserInfoResponse {
+	repeated SyncUserInfoRequest users = 1;
+}

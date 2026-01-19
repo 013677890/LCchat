@@ -25,3 +25,6 @@ Thumbs.db
 # --- Protobuf 生成的文件 ---
 # proto 编译生成的 Go 代码（运行 make proto 时生成）
 *.pb.go
+*.pb.validate.go
+# --- 第三方库 ---
+third_party/

@@ -1,0 +1,281 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "ChatServer/apps/user/pb";
+
+// 导入通用数据模型
+import "apps/user/pb/common.proto";
+
+import "validate/validate.proto";
+
+// ==================== 好友服务接口 ====================
+// 服务名：FriendService
+// 职责：搜索用户、好友申请、好友列表、备注标签
+
+service FriendService {
+	// SearchUser 搜索用户
+	rpc SearchUser(SearchUserRequest) returns (SearchUserResponse);
+	
+	// SendFriendApply 发送好友申请
+	rpc SendFriendApply(SendFriendApplyRequest) returns (SendFriendApplyResponse);
+	
+	// GetFriendApplyList 获取好友申请列表
+	rpc GetFriendApplyList(GetFriendApplyListRequest) returns (GetFriendApplyListResponse);
+	
+	// GetSentApplyList 获取发出的申请列表
+	rpc GetSentApplyList(GetSentApplyListRequest) returns (GetSentApplyListResponse);
+	
+	// HandleFriendApply 处理好友申请
+	rpc HandleFriendApply(HandleFriendApplyRequest) returns (HandleFriendApplyResponse);
+	
+	// GetUnreadApplyCount 获取未读申请数量
+	rpc GetUnreadApplyCount(GetUnreadApplyCountRequest) returns (GetUnreadApplyCountResponse);
+	
+	// MarkApplyAsRead 标记申请已读
+	rpc MarkApplyAsRead(MarkApplyAsReadRequest) returns (MarkApplyAsReadResponse);
+	
+	// GetFriendList 获取好友列表
+	rpc GetFriendList(GetFriendListRequest) returns (GetFriendListResponse);
+	
+	// SyncFriendList 好友增量同步
+	rpc SyncFriendList(SyncFriendListRequest) returns (SyncFriendListResponse);
+	
+	// DeleteFriend 删除好友
+	rpc DeleteFriend(DeleteFriendRequest) returns (DeleteFriendResponse);
+	
+	// SetFriendRemark 设置好友备注
+	rpc SetFriendRemark(SetFriendRemarkRequest) returns (SetFriendRemarkResponse);
+	
+	// SetFriendTag 设置好友标签
+	rpc SetFriendTag(SetFriendTagRequest) returns (SetFriendTagResponse);
+	
+	// GetTagList 获取标签列表
+	rpc GetTagList(GetTagListRequest) returns (GetTagListResponse);
+	
+	// CheckIsFriend 判断是否好友
+	rpc CheckIsFriend(CheckIsFriendRequest) returns (CheckIsFriendResponse);
+	
+	// GetRelationStatus 获取关系状态
+	rpc GetRelationStatus(GetRelationStatusRequest) returns (GetRelationStatusResponse);
+}
+
+// ==================== 搜索用户 ====================
+
+// SearchUserRequest 搜索用户请求
+message SearchUserRequest {
+	string keyword = 1 [(validate.rules).string = {min_len: 1}];
+	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
+	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
+}
+
+// SearchUserResponse 搜索用户响应
+message SearchUserResponse {
+	repeated SimpleUserItem items = 1;
+	PaginationInfo pagination = 2;
+}
+
+// ==================== 好友申请 ====================
+
+// SendFriendApplyRequest 发送好友申请请求
+message SendFriendApplyRequest {
+	string target_uuid = 1 [(validate.rules).string = {min_len: 1}];
+	string reason = 2 [(validate.rules).string.max_len = 255];
+	string source = 3 [(validate.rules).string.max_len = 32];
+}
+
+// SendFriendApplyResponse 发送好友申请响应
+message SendFriendApplyResponse {
+	int64 apply_id = 1;
+}
+
+// GetFriendApplyListRequest 获取好友申请列表请求
+message GetFriendApplyListRequest {
+	int32 status = 1 [(validate.rules).int32 = {gt: 0, lte: 2}]; // 0:待处理 1:已同意 2:已拒绝
+	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
+	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
+}
+
+// FriendApplyItem 好友申请项
+message FriendApplyItem {
+	int64 apply_id = 1 [(validate.rules).int64 = {gt: 0}];
+	string applicant_uuid = 2;
+	SimpleUserInfo applicant_info = 3;
+	string reason = 4;
+	string source = 5;
+	int32 status = 6;
+	bool is_read = 7;
+	int64 created_at = 8;
+}
+
+// GetFriendApplyListResponse 获取好友申请列表响应
+message GetFriendApplyListResponse {
+	repeated FriendApplyItem items = 1;
+	PaginationInfo pagination = 2;
+}
+
+// GetSentApplyListRequest 获取发出的申请列表请求（同GetFriendApplyListRequest，但applicant变target）
+message GetSentApplyListRequest {
+	int32 status = 1 [(validate.rules).int32 = {gt: 0, lte: 2}];
+	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
+	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
+}
+
+// GetSentApplyListResponse 获取发出的申请列表响应
+message GetSentApplyListResponse {
+	repeated SentApplyItem items = 1;
+	PaginationInfo pagination = 2;
+}
+
+// SentApplyItem 发出的申请项
+message SentApplyItem {
+	int64 apply_id = 1;
+	string target_uuid = 2;
+	SimpleUserInfo target_info = 3;
+	int32 status = 4;
+	int64 created_at = 5;
+}
+
+// HandleFriendApplyRequest 处理好友申请请求
+message HandleFriendApplyRequest {
+	int64 apply_id = 1 [(validate.rules).int64 = {gt: 0}];
+	int32 action = 2 [(validate.rules).int32 = {gt: 0, lte: 2}]; // 1:同意 2:拒绝
+	string remark = 3 [(validate.rules).string.max_len = 64];
+}
+
+// HandleFriendApplyResponse 处理好友申请响应
+message HandleFriendApplyResponse {}
+
+// GetUnreadApplyCountRequest 获取未读申请数量请求
+message GetUnreadApplyCountRequest {}
+
+// GetUnreadApplyCountResponse 获取未读申请数量响应
+message GetUnreadApplyCountResponse {
+	int32 unread_count = 1;
+}
+
+// MarkApplyAsReadRequest 标记申请已读请求
+message MarkApplyAsReadRequest {
+	repeated int64 apply_ids = 1;
+}
+
+// MarkApplyAsReadResponse 标记申请已读响应
+message MarkApplyAsReadResponse {}
+
+// ==================== 好友列表 ====================
+
+// GetFriendListRequest 获取好友列表请求
+message GetFriendListRequest {
+	string group_tag = 1;
+	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
+	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
+}
+
+// FriendItem 好友信息
+message FriendItem {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+	int32 gender = 4;
+	string signature = 5;
+	string remark = 6;
+	string group_tag = 7;
+	string source = 8;
+	int64 created_at = 9;
+}
+
+// GetFriendListResponse 获取好友列表响应
+message GetFriendListResponse {
+	repeated FriendItem items = 1;
+	PaginationInfo pagination = 2;
+	int64 version = 3; // 用于增量同步的版本号
+}
+
+// SyncFriendListRequest 增量同步请求
+message SyncFriendListRequest {
+	int64 version = 1 [(validate.rules).int64 = {gte: 0}]; // Unix毫秒时间戳
+	int32 limit = 2 [(validate.rules).int32 = {gte: 1, lte: 500}];
+}
+
+// FriendChange 好友变更
+message FriendChange {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+	int32 gender = 4;
+	string signature = 5;
+	string remark = 6;
+	string group_tag = 7;
+	string source = 8;
+	string change_type = 9; // add/update/delete
+	int64 changed_at = 10;
+}
+
+// SyncFriendListResponse 增量同步响应
+message SyncFriendListResponse {
+	repeated FriendChange changes = 1;
+	bool has_more = 2;
+	int64 latest_version = 3;
+}
+
+// DeleteFriendRequest 删除好友请求
+message DeleteFriendRequest {
+	string user_uuid = 1 [(validate.rules).string = {min_len: 1}];
+}
+
+// DeleteFriendResponse 删除好友响应
+message DeleteFriendResponse {}
+
+// SetFriendRemarkRequest 设置好友备注请求
+message SetFriendRemarkRequest {
+	string user_uuid = 1 [(validate.rules).string = {min_len: 1}];
+	string remark = 2 [(validate.rules).string.max_len = 64];
+}
+
+// SetFriendRemarkResponse 设置好友备注响应
+message SetFriendRemarkResponse {}
+
+// SetFriendTagRequest 设置好友标签请求
+message SetFriendTagRequest {
+	string user_uuid = 1 [(validate.rules).string = {min_len: 1}];
+	string group_tag = 2 [(validate.rules).string.max_len = 32];
+}
+
+// SetFriendTagResponse 设置好友标签响应
+message SetFriendTagResponse {}
+
+// GetTagListRequest 获取标签列表请求
+message GetTagListRequest {}
+
+// GetTagListResponse 获取标签列表响应
+message GetTagListResponse {
+	repeated TagItem tags = 1;
+}
+
+// ==================== 关系判断 ====================
+
+// CheckIsFriendRequest 判断是否好友请求
+message CheckIsFriendRequest {
+	string user_uuid = 1 [(validate.rules).string = {min_len: 1}];
+	string peer_uuid = 2 [(validate.rules).string = {min_len: 1}];
+}
+
+// CheckIsFriendResponse 判断是否好友响应
+message CheckIsFriendResponse {
+	bool is_friend = 1;
+}
+
+// GetRelationStatusRequest 获取关系状态请求
+message GetRelationStatusRequest {
+	string user_uuid = 1 [(validate.rules).string = {min_len: 1}];
+	string peer_uuid = 2 [(validate.rules).string = {min_len: 1}];
+}
+
+// GetRelationStatusResponse 获取关系状态响应
+message GetRelationStatusResponse {
+	string relation = 1; // none/friend/blacklist/deleted
+	bool is_friend = 2;
+	bool is_blacklist = 3;
+	string remark = 4;
+	string group_tag = 5;
+}

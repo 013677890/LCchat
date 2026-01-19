@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "ChatServer/apps/user/pb";
+
+// 导入通用数据模型
+import "apps/user/pb/common.proto";
+
+import "validate/validate.proto";
+
+// ==================== 黑名单服务接口 ====================
+// 服务名：BlacklistService
+// 职责：拉黑、取消拉黑、黑名单列表、判断是否拉黑
+
+service BlacklistService {
+	// AddBlacklist 拉黑用户
+	rpc AddBlacklist(AddBlacklistRequest) returns (AddBlacklistResponse);
+	
+	// RemoveBlacklist 取消拉黑
+	rpc RemoveBlacklist(RemoveBlacklistRequest) returns (RemoveBlacklistResponse);
+	
+	// GetBlacklistList 获取黑名单列表
+	rpc GetBlacklistList(GetBlacklistListRequest) returns (GetBlacklistListResponse);
+	
+	// CheckIsBlacklist 判断是否拉黑
+	rpc CheckIsBlacklist(CheckIsBlacklistRequest) returns (CheckIsBlacklistResponse);
+}
+
+// ==================== 拉黑用户 ====================
+
+// AddBlacklistRequest 拉黑用户请求
+message AddBlacklistRequest {
+	string target_uuid = 1 [(validate.rules).string = {min_len: 1}];
+}
+
+// AddBlacklistResponse 拉黑用户响应
+message AddBlacklistResponse {}
+
+// ==================== 取消拉黑 ====================
+
+// RemoveBlacklistRequest 取消拉黑请求
+message RemoveBlacklistRequest {
+	string user_uuid = 1 [(validate.rules).string = {min_len: 1}];
+}
+
+// RemoveBlacklistResponse 取消拉黑响应
+message RemoveBlacklistResponse {}
+
+// ==================== 获取黑名单列表 ====================
+
+// GetBlacklistListRequest 获取黑名单列表请求
+message GetBlacklistListRequest {
+	int32 page = 1 [(validate.rules).int32 = {gte: 1}];
+	int32 page_size = 2 [(validate.rules).int32 = {gte: 1, lte: 100}];
+}
+
+// BlacklistItem 黑名单项
+message BlacklistItem {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+	int64 blacklisted_at = 4;
+}
+
+// GetBlacklistListResponse 获取黑名单列表响应
+message GetBlacklistListResponse {
+	repeated BlacklistItem items = 1;
+	PaginationInfo pagination = 2;
+}
+
+// ==================== 判断是否拉黑 ====================
+
+// CheckIsBlacklistRequest 判断是否拉黑请求
+message CheckIsBlacklistRequest {
+	string user_uuid = 1 [(validate.rules).string = {min_len: 1}];
+	string target_uuid = 2 [(validate.rules).string = {min_len: 1}];
+}
+
+// CheckIsBlacklistResponse 判断是否拉黑响应
+message CheckIsBlacklistResponse {
+	bool is_blacklist = 1;
+}

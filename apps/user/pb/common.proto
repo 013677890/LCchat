@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "ChatServer/apps/user/pb";
+
+import "validate/validate.proto";
+
+// ==================== 通用数据模型 ====================
+// 本文件定义所有服务共用的数据结构
+// 避免循环依赖和不合理的依赖方向
+
+// ==================== 用户信息 ====================
+
+// UserInfo 用户完整信息
+message UserInfo {
+	string uuid = 1;
+	string nickname = 2;
+	string telephone = 3;
+	string email = 4;
+	string avatar = 5;
+	int32 gender = 6;
+	string signature = 7;
+	string birthday = 8;
+	int32 status = 9;
+}
+
+// SimpleUserInfo 简化用户信息（用于批量查询、搜索结果等）
+message SimpleUserInfo {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+}
+
+// ==================== 设备信息 ====================
+
+// DeviceInfo 设备信息
+message DeviceInfo {
+	string device_name = 1 [(validate.rules).string.max_len = 64];
+	string platform = 2 [(validate.rules).string = {in: ["iOS", "Android", "Web", "Windows", "Mac"]}];
+	string os_version = 3 [(validate.rules).string.max_len = 32];
+	string app_version = 4 [(validate.rules).string.max_len = 32];
+}
+
+// ==================== 分页信息 ====================
+
+// PaginationInfo 分页信息
+message PaginationInfo {
+	int32 page = 1;
+	int32 page_size = 2;
+	int64 total = 3;
+	int32 total_pages = 4;
+}
+
+// ==================== 标签信息 ====================
+
+// TagItem 标签项
+message TagItem {
+	string tag_name = 1;
+	int32 count = 2;
+}
+
+// ==================== 在线状态 ====================
+
+// OnlineStatus 在线状态
+message OnlineStatus {
+	string user_uuid = 1;
+	bool is_online = 2;
+	int64 last_seen_at = 3;
+	repeated string online_platforms = 4;
+}
+
+// OnlineStatusItem 在线状态项（批量）
+message OnlineStatusItem {
+	string user_uuid = 1;
+	bool is_online = 2;
+	int64 last_seen_at = 3;
+}
+
+// ==================== 好友相关 ====================
+
+// SimpleUserItem 简化用户信息（搜索结果）
+message SimpleUserItem {
+	string uuid = 1;
+	string nickname = 2;
+	string email = 3;
+	string avatar = 4;
+	string signature = 5;
+	bool is_friend = 6;
+}
