@@ -74,8 +74,8 @@ func main() {
 	logger.Info(ctx, "用户服务 gRPC 连接创建成功", logger.String("address", userServiceAddr))
 
 	// 3.3 创建 gRPC 客户端
-	userClient := pb.NewUserServiceClient(userServiceConn, userServiceBreaker)
-	logger.Info(ctx, "用户服务 gRPC 客户端初始化完成")
+	userClient := pb.NewUserServiceClient(userServiceConn, userServiceConn, userServiceConn, userServiceConn, userServiceConn, userServiceBreaker)
+	logger.Info(ctx, "用户服务 gRPC 客户端初始化完成", logger.String("address", userServiceAddr))
 
 	// 4. 初始化 Service 层（依赖注入）
 	loginService := service.NewLoginService(userClient)

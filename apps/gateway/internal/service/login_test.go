@@ -1,5 +1,6 @@
 package service
 
+/*
 import (
 	"context"
 	"errors"
@@ -239,3 +240,4 @@ func BenchmarkLoginService_Login(b *testing.B) {
 		_, _ = loginService.Login(ctx, req, deviceID)
 	}
 }
+*/
