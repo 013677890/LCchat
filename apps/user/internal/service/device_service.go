@@ -11,42 +11,32 @@ import (
 
 // deviceServiceImpl 设备会话服务实现
 type deviceServiceImpl struct {
-	deviceRepo repository.DeviceSessionRepository
+	deviceRepo repository.IDeviceRepository
 }
 
 // NewDeviceService 创建设备服务实例
-func NewDeviceService(deviceRepo repository.DeviceSessionRepository) DeviceService {
+func NewDeviceService(deviceRepo repository.IDeviceRepository) DeviceService {
 	return &deviceServiceImpl{
 		deviceRepo: deviceRepo,
 	}
 }
 
-// CreateDeviceSession 创建设备会话
-// 注意：此方法暂未实现，预留接口
-func (s *deviceServiceImpl) CreateDeviceSession(ctx context.Context, req *dto.CreateDeviceSessionRequest) error {
-	return status.Error(codes.Unimplemented, "创建设备会话功能暂未实现")
-}
-
-// GetDeviceSessions 获取设备列表
-// 注意：此方法暂未实现，预留接口
-func (s *deviceServiceImpl) GetDeviceSessions(ctx context.Context, req *dto.GetDeviceSessionsRequest) (*dto.GetDeviceSessionsResponse, error) {
+// GetDeviceList 获取设备列表
+func (s *deviceServiceImpl) GetDeviceList(ctx context.Context) (*dto.GetDeviceListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "获取设备列表功能暂未实现")
 }
 
-// UpdateDeviceOnlineState 更新设备在线状态
-// 注意：此方法暂未实现，预留接口
-func (s *deviceServiceImpl) UpdateDeviceOnlineState(ctx context.Context, req *dto.UpdateDeviceOnlineStateRequest) error {
-	return status.Error(codes.Unimplemented, "更新设备在线状态功能暂未实现")
-}
-
 // KickDevice 踢出设备
-// 注意：此方法暂未实现，预留接口
-func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *dto.KickDeviceRequest) error {
+func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *dto.KickDeviceRequestNew) error {
 	return status.Error(codes.Unimplemented, "踢出设备功能暂未实现")
 }
 
-// GetUsersOnlineState 批量获取用户在线状态
-// 注意：此方法暂未实现，预留接口
-func (s *deviceServiceImpl) GetUsersOnlineState(ctx context.Context, req *dto.GetUsersOnlineStateRequest) (*dto.GetUsersOnlineStateResponse, error) {
+// GetOnlineStatus 获取用户在线状态
+func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *dto.GetOnlineStatusRequest) (*dto.GetOnlineStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "获取用户在线状态功能暂未实现")
+}
+
+// BatchGetOnlineStatus 批量获取在线状态
+func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *dto.BatchGetOnlineStatusRequest) (*dto.BatchGetOnlineStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "批量获取在线状态功能暂未实现")
 }

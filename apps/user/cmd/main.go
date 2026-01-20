@@ -44,10 +44,10 @@ func main() {
 
 	// 3. 初始化Redis
 	redisCfg := config.DefaultRedisConfig()
-	// 调整 Redis 超时时间为 50ms（快速失败）
+	// 调整 Redis 读写超时时间为 50ms（快速失败）
 	redisCfg.ReadTimeout = 50 * time.Millisecond
 	redisCfg.WriteTimeout = 50 * time.Millisecond
-	
+
 	redisClient, err := pkgredis.Build(redisCfg)
 	if err != nil {
 		// Redis 初始化失败不阻塞启动（降级到只用 MySQL）
@@ -62,27 +62,29 @@ func main() {
 		)
 	}
 
-	// 4. 组装依赖 - Repository层（注入 Redis）
-	userRepo := repository.NewUserRepository(db, redisClient)
-	relationRepo := repository.NewRelationRepository(db)
-	applyRepo := repository.NewApplyRequestRepository(db)
-	deviceRepo := repository.NewDeviceSessionRepository(db)
+	// 4. 组装依赖 - Repository 层
+	authRepo := repository.NewAuthRepository(db)
+	userRepo := repository.NewUserRepository(db)
+	friendRepo := repository.NewFriendRepository(db)
+	applyRepo := repository.NewApplyRepository(db)
+	blacklistRepo := repository.NewBlacklistRepository(db)
+	deviceRepo := repository.NewDeviceRepository(db)
 
-	// 5. 组装依赖 - Service层
-	authService := service.NewAuthService(userRepo, deviceRepo)
-	userQueryService := service.NewUserInfoService(userRepo)
-	friendService := service.NewFriendService(userRepo, relationRepo, applyRepo)
+	// 5. 组装依赖 - Service 层
+	authService := service.NewAuthService(authRepo, deviceRepo)
+	userService := service.NewUserService(userRepo)
+	friendService := service.NewFriendService(userRepo, friendRepo, applyRepo)
+	blacklistService := service.NewBlacklistService(blacklistRepo)
 	deviceService := service.NewDeviceService(deviceRepo)
 
-	// 5. 组装依赖 - Handler层
-	userHandler := handler.NewUserServiceHandler(
-		authService,
-		userQueryService,
-		friendService,
-		deviceService,
-	)
+	// 6. 组装依赖 - Handler 层
+	authHandler := handler.NewAuthHandler(authService)
+	userHandler := handler.NewUserHandler(authService, userService, friendService, deviceService)
+	friendHandler := handler.NewFriendHandler(friendService)
+	blacklistHandler := handler.NewBlacklistHandler(blacklistService)
+	deviceHandler := handler.NewDeviceHandler(deviceService)
 
-	// 6. 启动gRPC Server
+	// 7. 启动 gRPC Server
 	opts := server.Options{
 		Address:          ":9090",
 		EnableHealth:     true,
@@ -92,8 +94,16 @@ func main() {
 	logger.Info(ctx, "准备启动用户服务", logger.String("address", opts.Address))
 
 	if err := server.Start(ctx, opts, func(s *grpc.Server, hs healthgrpc.HealthServer) {
+		// 注册认证服务
+		userpb.RegisterAuthServiceServer(s, authHandler)
 		// 注册用户服务
 		userpb.RegisterUserServiceServer(s, userHandler)
+		// 注册好友服务
+		userpb.RegisterFriendServiceServer(s, friendHandler)
+		// 注册黑名单服务
+		userpb.RegisterBlacklistServiceServer(s, blacklistHandler)
+		// 注册设备服务
+		userpb.RegisterDeviceServiceServer(s, deviceHandler)
 
 		// 设置健康检查状态
 		if hs != nil {
@@ -107,7 +117,7 @@ func main() {
 		log.Fatalf("启动gRPC服务失败: %v", err)
 	}
 
-	// 7. 启动 Metrics HTTP Server（暴露 Prometheus 指标）
+	// 8. 启动 Metrics HTTP Server（暴露 Prometheus 指标）
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", interceptors.GetMetricsHandler())
 

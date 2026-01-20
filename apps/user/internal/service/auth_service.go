@@ -16,28 +16,33 @@ import (
 
 // authServiceImpl 认证服务实现
 type authServiceImpl struct {
-	userRepo   repository.UserRepository
-	deviceRepo repository.DeviceSessionRepository
+	authRepo   repository.IAuthRepository
+	deviceRepo repository.IDeviceRepository
 }
 
 // NewAuthService 创建认证服务实例
 func NewAuthService(
-	userRepo repository.UserRepository,
-	deviceRepo repository.DeviceSessionRepository,
+	authRepo repository.IAuthRepository,
+	deviceRepo repository.IDeviceRepository,
 ) AuthService {
 	return &authServiceImpl{
-		userRepo:   userRepo,
+		authRepo:   authRepo,
 		deviceRepo: deviceRepo,
 	}
 }
 
-// Login 用户登录
+// Register 用户注册
+func (s *authServiceImpl) Register(ctx context.Context, req *dto.RegisterRequest) (*dto.RegisterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "注册功能暂未实现")
+}
+
+// Login 用户登录（密码）
 // 业务流程：
-//   1. 根据手机号查询用户
-//   2. 校验用户状态（是否被禁用）
-//   3. 校验密码
-//   4. 返回用户信息（供Gateway生成Token）
-// 
+//  1. 根据手机号查询用户
+//  2. 校验用户状态（是否被禁用）
+//  3. 校验密码
+//  4. 返回用户信息（供Gateway生成Token）
+//
 // 错误码映射：
 //   - codes.NotFound: 用户不存在
 //   - codes.Unauthenticated: 密码错误
@@ -47,12 +52,12 @@ func (s *authServiceImpl) Login(ctx context.Context, req *dto.LoginRequest) (*dt
 	// 记录登录请求（手机号脱敏）
 	logger.Info(ctx, "用户登录请求",
 		logger.String("telephone", utils.MaskPhone(req.Telephone)),
-		logger.String("device_id", req.DeviceInfo.GetDeviceId()),
+		logger.String("device_name", req.DeviceInfo.GetDeviceName()),
 		logger.String("platform", req.DeviceInfo.GetPlatform()),
 	)
 
 	// 1. 根据手机号查询用户
-	user, err := s.userRepo.GetByPhone(ctx, req.Telephone)
+	user, err := s.authRepo.GetByPhone(ctx, req.Telephone)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warn(ctx, "用户不存在",
@@ -90,7 +95,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *dto.LoginRequest) (*dt
 	logger.Info(ctx, "用户登录成功",
 		logger.String("user_uuid", user.Uuid),
 		logger.String("telephone", utils.MaskPhone(req.Telephone)),
-		logger.String("device_id", req.DeviceInfo.GetDeviceId()),
+		logger.String("device_id", req.DeviceInfo.GetDeviceName()),
 	)
 
 	// 返回用户信息
@@ -99,32 +104,32 @@ func (s *authServiceImpl) Login(ctx context.Context, req *dto.LoginRequest) (*dt
 	}, nil
 }
 
-// Register 用户注册
-// 注意：此方法暂未实现，预留接口
-func (s *authServiceImpl) Register(ctx context.Context, req *dto.RegisterRequest) (*dto.RegisterResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "注册功能暂未实现")
+// LoginByCode 验证码登录
+func (s *authServiceImpl) LoginByCode(ctx context.Context, req *dto.LoginByCodeRequest) (*dto.LoginByCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "验证码登录功能暂未实现")
+}
+
+// SendVerifyCode 发送验证码
+func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *dto.SendVerifyCodeRequest) (*dto.SendVerifyCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "发送验证码功能暂未实现")
+}
+
+// VerifyCode 校验验证码
+func (s *authServiceImpl) VerifyCode(ctx context.Context, req *dto.VerifyCodeRequest) (*dto.VerifyCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "校验验证码功能暂未实现")
 }
 
 // RefreshToken 刷新Token
-// 注意：此方法暂未实现，预留接口
 func (s *authServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.RefreshTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "刷新Token功能暂未实现")
 }
 
 // Logout 用户登出
-// 注意：此方法暂未实现，预留接口
 func (s *authServiceImpl) Logout(ctx context.Context, req *dto.LogoutRequest) error {
 	return status.Error(codes.Unimplemented, "登出功能暂未实现")
 }
 
-// SendSmsCode 发送短信验证码
-// 注意：此方法暂未实现，预留接口
-func (s *authServiceImpl) SendSmsCode(ctx context.Context, telephone string, codeType int32) error {
-	return status.Error(codes.Unimplemented, "发送验证码功能暂未实现")
-}
-
-// ValidateSmsCode 验证短信验证码
-// 注意：此方法暂未实现，预留接口
-func (s *authServiceImpl) ValidateSmsCode(ctx context.Context, telephone, code string, codeType int32) (bool, error) {
-	return false, status.Error(codes.Unimplemented, "验证码校验功能暂未实现")
+// ResetPassword 重置密码
+func (s *authServiceImpl) ResetPassword(ctx context.Context, req *dto.ResetPasswordRequest) error {
+	return status.Error(codes.Unimplemented, "重置密码功能暂未实现")
 }
