@@ -218,3 +218,94 @@ func ConvertToProtoResetPasswordRequest(dto *ResetPasswordRequest) *userpb.Reset
 		NewPassword: dto.NewPassword,
 	}
 }
+
+// ==================== 认证服务 gRPC响应到DTO转换函数 ====================
+
+// ConvertRegisterResponseFromProto 将 Protobuf 注册响应转换为 DTO
+func ConvertRegisterResponseFromProto(pb *userpb.RegisterResponse) *RegisterResponse {
+	if pb == nil {
+		return nil
+	}
+	return &RegisterResponse{
+		UserUUID:  pb.UserUuid,
+		Email:     pb.Email,
+		Telephone: pb.Telephone,
+		Nickname:  pb.Nickname,
+	}
+}
+
+// ConvertLoginResponseFromProto 将 Protobuf 登录响应转换为 DTO
+func ConvertLoginResponseFromProto(pb *userpb.LoginResponse) *LoginResponse {
+	if pb == nil {
+		return nil
+	}
+	return &LoginResponse{
+		AccessToken:  pb.AccessToken,
+		RefreshToken: pb.RefreshToken,
+		TokenType:    pb.TokenType,
+		ExpiresIn:    pb.ExpiresIn,
+		UserInfo:     ConvertUserInfoFromProto(pb.UserInfo),
+	}
+}
+
+// ConvertLoginByCodeResponseFromProto 将 Protobuf 验证码登录响应转换为 DTO
+func ConvertLoginByCodeResponseFromProto(pb *userpb.LoginByCodeResponse) *LoginByCodeResponse {
+	if pb == nil {
+		return nil
+	}
+	return &LoginByCodeResponse{
+		AccessToken:  pb.AccessToken,
+		RefreshToken: pb.RefreshToken,
+		TokenType:    pb.TokenType,
+		ExpiresIn:    pb.ExpiresIn,
+		UserInfo:     ConvertUserInfoFromProto(pb.UserInfo),
+	}
+}
+
+// ConvertSendVerifyCodeResponseFromProto 将 Protobuf 发送验证码响应转换为 DTO
+func ConvertSendVerifyCodeResponseFromProto(pb *userpb.SendVerifyCodeResponse) *SendVerifyCodeResponse {
+	if pb == nil {
+		return nil
+	}
+	return &SendVerifyCodeResponse{
+		ExpireSeconds: pb.ExpireSeconds,
+	}
+}
+
+// ConvertVerifyCodeResponseFromProto 将 Protobuf 校验验证码响应转换为 DTO
+func ConvertVerifyCodeResponseFromProto(pb *userpb.VerifyCodeResponse) *VerifyCodeResponse {
+	if pb == nil {
+		return nil
+	}
+	return &VerifyCodeResponse{
+		Valid: pb.Valid,
+	}
+}
+
+// ConvertRefreshTokenResponseFromProto 将 Protobuf 刷新Token响应转换为 DTO
+func ConvertRefreshTokenResponseFromProto(pb *userpb.RefreshTokenResponse) *RefreshTokenResponse {
+	if pb == nil {
+		return nil
+	}
+	return &RefreshTokenResponse{
+		AccessToken: pb.AccessToken,
+		TokenType:   pb.TokenType,
+		ExpiresIn:   pb.ExpiresIn,
+	}
+}
+
+// ConvertLogoutResponseFromProto 将 Protobuf 登出响应转换为 DTO
+func ConvertLogoutResponseFromProto(pb *userpb.LogoutResponse) *LogoutResponse {
+	if pb == nil {
+		return nil
+	}
+	return &LogoutResponse{}
+}
+
+// ConvertResetPasswordResponseFromProto 将 Protobuf 重置密码响应转换为 DTO
+func ConvertResetPasswordResponseFromProto(pb *userpb.ResetPasswordResponse) *ResetPasswordResponse {
+	if pb == nil {
+		return nil
+	}
+	return &ResetPasswordResponse{}
+}

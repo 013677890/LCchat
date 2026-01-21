@@ -210,3 +210,118 @@ func ConvertToProtoBatchGetProfileRequest(dto *BatchGetProfileRequest) *userpb.B
 		UserUuids: dto.UserUUIDs,
 	}
 }
+
+// ==================== 用户信息 gRPC响应到DTO转换函数 ====================
+
+// ConvertGetProfileResponseFromProto 将 Protobuf 获取个人信息响应转换为 DTO
+func ConvertGetProfileResponseFromProto(pb *userpb.GetProfileResponse) *GetProfileResponse {
+	if pb == nil {
+		return nil
+	}
+	return &GetProfileResponse{
+		UserInfo: ConvertUserInfoFromProto(pb.UserInfo),
+	}
+}
+
+// ConvertGetOtherProfileResponseFromProto 将 Protobuf 获取他人信息响应转换为 DTO
+func ConvertGetOtherProfileResponseFromProto(pb *userpb.GetOtherProfileResponse) *GetOtherProfileResponse {
+	if pb == nil {
+		return nil
+	}
+	return &GetOtherProfileResponse{
+		UserInfo: ConvertUserInfoFromProto(pb.UserInfo),
+		IsFriend: pb.IsFriend,
+	}
+}
+
+// ConvertUpdateProfileResponseFromProto 将 Protobuf 更新基本信息响应转换为 DTO
+func ConvertUpdateProfileResponseFromProto(pb *userpb.UpdateProfileResponse) *UpdateProfileResponse {
+	if pb == nil {
+		return nil
+	}
+	return &UpdateProfileResponse{
+		UserInfo: ConvertUserInfoFromProto(pb.UserInfo),
+	}
+}
+
+// ConvertUploadAvatarResponseFromProto 将 Protobuf 上传头像响应转换为 DTO
+func ConvertUploadAvatarResponseFromProto(pb *userpb.UploadAvatarResponse) *UploadAvatarResponse {
+	if pb == nil {
+		return nil
+	}
+	return &UploadAvatarResponse{
+		AvatarURL: pb.AvatarUrl,
+	}
+}
+
+// ConvertChangePasswordResponseFromProto 将 Protobuf 修改密码响应转换为 DTO
+func ConvertChangePasswordResponseFromProto(pb *userpb.ChangePasswordResponse) *ChangePasswordResponse {
+	if pb == nil {
+		return nil
+	}
+	return &ChangePasswordResponse{}
+}
+
+// ConvertChangeEmailResponseFromProto 将 Protobuf 换绑邮箱响应转换为 DTO
+func ConvertChangeEmailResponseFromProto(pb *userpb.ChangeEmailResponse) *ChangeEmailResponse {
+	if pb == nil {
+		return nil
+	}
+	return &ChangeEmailResponse{
+		Email: pb.Email,
+	}
+}
+
+// ConvertChangeTelephoneResponseFromProto 将 Protobuf 换绑手机响应转换为 DTO
+func ConvertChangeTelephoneResponseFromProto(pb *userpb.ChangeTelephoneResponse) *ChangeTelephoneResponse {
+	if pb == nil {
+		return nil
+	}
+	return &ChangeTelephoneResponse{
+		Telephone: pb.Telephone,
+	}
+}
+
+// ConvertGetQRCodeResponseFromProto 将 Protobuf 获取二维码响应转换为 DTO
+func ConvertGetQRCodeResponseFromProto(pb *userpb.GetQRCodeResponse) *GetQRCodeResponse {
+	if pb == nil {
+		return nil
+	}
+	return &GetQRCodeResponse{
+		QRCode:      pb.Qrcode,
+		QRCodeImage: pb.QrcodeImage,
+		ExpireAt:    pb.ExpireAt,
+	}
+}
+
+// ConvertParseQRCodeResponseFromProto 将 Protobuf 解析二维码响应转换为 DTO
+func ConvertParseQRCodeResponseFromProto(pb *userpb.ParseQRCodeResponse) *ParseQRCodeResponse {
+	if pb == nil {
+		return nil
+	}
+	return &ParseQRCodeResponse{
+		UserInfo: ConvertUserInfoFromProto(pb.UserInfo),
+		IsFriend: pb.IsFriend,
+	}
+}
+
+// ConvertDeleteAccountResponseFromProto 将 Protobuf 注销账号响应转换为 DTO
+func ConvertDeleteAccountResponseFromProto(pb *userpb.DeleteAccountResponse) *DeleteAccountResponse {
+	if pb == nil {
+		return nil
+	}
+	return &DeleteAccountResponse{
+		DeleteAt:        pb.DeleteAt,
+		RecoverDeadline: pb.RecoverDeadline,
+	}
+}
+
+// ConvertBatchGetProfileResponseFromProto 将 Protobuf 批量获取用户信息响应转换为 DTO
+func ConvertBatchGetProfileResponseFromProto(pb *userpb.BatchGetProfileResponse) *BatchGetProfileResponse {
+	if pb == nil {
+		return nil
+	}
+	return &BatchGetProfileResponse{
+		Users: ConvertSimpleUserItemsFromProto(pb.Users),
+	}
+}

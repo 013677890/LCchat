@@ -336,3 +336,290 @@ func ConvertToProtoGetRelationStatusRequest(dto *GetRelationStatusRequest) *user
 		PeerUuid: dto.PeerUUID,
 	}
 }
+
+// ==================== 好友服务 gRPC响应到DTO转换函数 ====================
+
+// ConvertSearchUserResponseFromProto 将 Protobuf 搜索用户响应转换为 DTO
+func ConvertSearchUserResponseFromProto(pb *userpb.SearchUserResponse) *SearchUserResponse {
+	if pb == nil {
+		return nil
+	}
+
+	items := make([]*SimpleUserItem, 0, len(pb.Items))
+	for _, item := range pb.Items {
+		items = append(items, ConvertSimpleUserItemFromProto(item))
+	}
+
+	return &SearchUserResponse{
+		Items:      items,
+		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+	}
+}
+
+// ConvertSimpleUserItemFromProto 将 Protobuf 简化用户项转换为 DTO
+func ConvertSimpleUserItemFromProto(pb *userpb.SimpleUserItem) *SimpleUserItem {
+	if pb == nil {
+		return nil
+	}
+	return &SimpleUserItem{
+		UUID:      pb.Uuid,
+		Nickname:  pb.Nickname,
+		Email:     pb.Email,
+		Avatar:    pb.Avatar,
+		Signature: pb.Signature,
+		IsFriend:  pb.IsFriend,
+	}
+}
+
+// ConvertFriendApplyResponseFromProto 将 Protobuf 发送好友申请响应转换为 DTO
+func ConvertFriendApplyResponseFromProto(pb *userpb.SendFriendApplyResponse) *SendFriendApplyResponse {
+	if pb == nil {
+		return nil
+	}
+	return &SendFriendApplyResponse{
+		ApplyID: pb.ApplyId,
+	}
+}
+
+// ConvertFriendApplyItemFromProto 将 Protobuf 好友申请项转换为 DTO
+func ConvertFriendApplyItemFromProto(pb *userpb.FriendApplyItem) *FriendApplyItem {
+	if pb == nil {
+		return nil
+	}
+
+	applicantInfo := ConvertSimpleUserInfoFromProto(pb.ApplicantInfo)
+
+	return &FriendApplyItem{
+		ApplyID:           pb.ApplyId,
+		ApplicantUUID:     pb.ApplicantUuid,
+		ApplicantNickname: applicantInfo.Nickname,
+		ApplicantAvatar:   applicantInfo.Avatar,
+		Reason:            pb.Reason,
+		Source:            pb.Source,
+		Status:            pb.Status,
+		IsRead:            pb.IsRead,
+		CreatedAt:         pb.CreatedAt,
+	}
+}
+
+// ConvertGetFriendApplyListResponseFromProto 将 Protobuf 获取好友申请列表响应转换为 DTO
+func ConvertGetFriendApplyListResponseFromProto(pb *userpb.GetFriendApplyListResponse) *GetFriendApplyListResponse {
+	if pb == nil {
+		return nil
+	}
+
+	items := make([]*FriendApplyItem, 0, len(pb.Items))
+	for _, item := range pb.Items {
+		items = append(items, ConvertFriendApplyItemFromProto(item))
+	}
+
+	return &GetFriendApplyListResponse{
+		Items:      items,
+		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+	}
+}
+
+// ConvertSentApplyItemFromProto 将 Protobuf 发出的申请项转换为 DTO
+func ConvertSentApplyItemFromProto(pb *userpb.SentApplyItem) *SentApplyItem {
+	if pb == nil {
+		return nil
+	}
+	return &SentApplyItem{
+		ApplyID:    pb.ApplyId,
+		TargetUUID:  pb.TargetUuid,
+		TargetInfo: ConvertSimpleUserInfoFromProto(pb.TargetInfo),
+		Status:     pb.Status,
+		CreatedAt:  pb.CreatedAt,
+	}
+}
+
+// ConvertGetSentApplyListResponseFromProto 将 Protobuf 获取发出的申请列表响应转换为 DTO
+func ConvertGetSentApplyListResponseFromProto(pb *userpb.GetSentApplyListResponse) *GetSentApplyListResponse {
+	if pb == nil {
+		return nil
+	}
+
+	items := make([]*SentApplyItem, 0, len(pb.Items))
+	for _, item := range pb.Items {
+		items = append(items, ConvertSentApplyItemFromProto(item))
+	}
+
+	return &GetSentApplyListResponse{
+		Items:      items,
+		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+	}
+}
+
+// ConvertHandleFriendApplyResponseFromProto 将 Protobuf 处理好友申请响应转换为 DTO
+func ConvertHandleFriendApplyResponseFromProto(pb *userpb.HandleFriendApplyResponse) *HandleFriendApplyResponse {
+	if pb == nil {
+		return nil
+	}
+	return &HandleFriendApplyResponse{}
+}
+
+// ConvertGetUnreadApplyCountResponseFromProto 将 Protobuf 获取未读申请数量响应转换为 DTO
+func ConvertGetUnreadApplyCountResponseFromProto(pb *userpb.GetUnreadApplyCountResponse) *GetUnreadApplyCountResponse {
+	if pb == nil {
+		return nil
+	}
+	return &GetUnreadApplyCountResponse{
+		UnreadCount: pb.UnreadCount,
+	}
+}
+
+// ConvertMarkApplyAsReadResponseFromProto 将 Protobuf 标记申请已读响应转换为 DTO
+func ConvertMarkApplyAsReadResponseFromProto(pb *userpb.MarkApplyAsReadResponse) *MarkApplyAsReadResponse {
+	if pb == nil {
+		return nil
+	}
+	return &MarkApplyAsReadResponse{}
+}
+
+// ConvertFriendItemFromProto 将 Protobuf 好友项转换为 DTO
+func ConvertFriendItemFromProto(pb *userpb.FriendItem) *FriendItem {
+	if pb == nil {
+		return nil
+	}
+	return &FriendItem{
+		UUID:      pb.Uuid,
+		Nickname:  pb.Nickname,
+		Avatar:    pb.Avatar,
+		Gender:    pb.Gender,
+		Signature: pb.Signature,
+		Remark:    pb.Remark,
+		GroupTag:  pb.GroupTag,
+		Source:    pb.Source,
+		CreatedAt: pb.CreatedAt,
+	}
+}
+
+// ConvertGetFriendListResponseFromProto 将 Protobuf 获取好友列表响应转换为 DTO
+func ConvertGetFriendListResponseFromProto(pb *userpb.GetFriendListResponse) *GetFriendListResponse {
+	if pb == nil {
+		return nil
+	}
+
+	items := make([]*FriendItem, 0, len(pb.Items))
+	for _, item := range pb.Items {
+		items = append(items, ConvertFriendItemFromProto(item))
+	}
+
+	return &GetFriendListResponse{
+		Items:      items,
+		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+		Version:    pb.Version,
+	}
+}
+
+// ConvertFriendChangeFromProto 将 Protobuf 好友变更转换为 DTO
+func ConvertFriendChangeFromProto(pb *userpb.FriendChange) *FriendChange {
+	if pb == nil {
+		return nil
+	}
+	return &FriendChange{
+		UUID:       pb.Uuid,
+		Nickname:   pb.Nickname,
+		Avatar:     pb.Avatar,
+		Gender:     pb.Gender,
+		Signature:  pb.Signature,
+		Remark:     pb.Remark,
+		GroupTag:   pb.GroupTag,
+		Source:     pb.Source,
+		ChangeType: pb.ChangeType,
+		ChangedAt:  pb.ChangedAt,
+	}
+}
+
+// ConvertSyncFriendListResponseFromProto 将 Protobuf 增量同步响应转换为 DTO
+func ConvertSyncFriendListResponseFromProto(pb *userpb.SyncFriendListResponse) *SyncFriendListResponse {
+	if pb == nil {
+		return nil
+	}
+
+	changes := make([]*FriendChange, 0, len(pb.Changes))
+	for _, change := range pb.Changes {
+		changes = append(changes, ConvertFriendChangeFromProto(change))
+	}
+
+	return &SyncFriendListResponse{
+		Changes:       changes,
+		HasMore:       pb.HasMore,
+		LatestVersion: pb.LatestVersion,
+	}
+}
+
+// ConvertDeleteFriendResponseFromProto 将 Protobuf 删除好友响应转换为 DTO
+func ConvertDeleteFriendResponseFromProto(pb *userpb.DeleteFriendResponse) *DeleteFriendResponse {
+	if pb == nil {
+		return nil
+	}
+	return &DeleteFriendResponse{}
+}
+
+// ConvertSetFriendRemarkResponseFromProto 将 Protobuf 设置好友备注响应转换为 DTO
+func ConvertSetFriendRemarkResponseFromProto(pb *userpb.SetFriendRemarkResponse) *SetFriendRemarkResponse {
+	if pb == nil {
+		return nil
+	}
+	return &SetFriendRemarkResponse{}
+}
+
+// ConvertSetFriendTagResponseFromProto 将 Protobuf 设置好友标签响应转换为 DTO
+func ConvertSetFriendTagResponseFromProto(pb *userpb.SetFriendTagResponse) *SetFriendTagResponse {
+	if pb == nil {
+		return nil
+	}
+	return &SetFriendTagResponse{}
+}
+
+// ConvertTagItemFromProto 将 Protobuf 标签项转换为 DTO
+func ConvertTagItemFromProto(pb *userpb.TagItem) *TagItem {
+	if pb == nil {
+		return nil
+	}
+	return &TagItem{
+		TagName: pb.TagName,
+		Count:   pb.Count,
+	}
+}
+
+// ConvertGetTagListResponseFromProto 将 Protobuf 获取标签列表响应转换为 DTO
+func ConvertGetTagListResponseFromProto(pb *userpb.GetTagListResponse) *GetTagListResponse {
+	if pb == nil {
+		return nil
+	}
+
+	tags := make([]*TagItem, 0, len(pb.Tags))
+	for _, tag := range pb.Tags {
+		tags = append(tags, ConvertTagItemFromProto(tag))
+	}
+
+	return &GetTagListResponse{
+		Tags: tags,
+	}
+}
+
+// ConvertCheckIsFriendResponseFromProto 将 Protobuf 判断是否好友响应转换为 DTO
+func ConvertCheckIsFriendResponseFromProto(pb *userpb.CheckIsFriendResponse) *CheckIsFriendResponse {
+	if pb == nil {
+		return nil
+	}
+	return &CheckIsFriendResponse{
+		IsFriend: pb.IsFriend,
+	}
+}
+
+// ConvertGetRelationStatusResponseFromProto 将 Protobuf 获取关系状态响应转换为 DTO
+func ConvertGetRelationStatusResponseFromProto(pb *userpb.GetRelationStatusResponse) *GetRelationStatusResponse {
+	if pb == nil {
+		return nil
+	}
+	return &GetRelationStatusResponse{
+		Relation:    pb.Relation,
+		IsFriend:    pb.IsFriend,
+		IsBlacklist: pb.IsBlacklist,
+		Remark:      pb.Remark,
+		GroupTag:    pb.GroupTag,
+	}
+}

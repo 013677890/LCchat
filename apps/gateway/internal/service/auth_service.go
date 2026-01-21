@@ -79,20 +79,13 @@ func (s *AuthServiceImpl) Login(ctx context.Context, req *dto.LoginRequest, devi
 		}
 	}
 */
-	// 6. 构造完整的登录响应
-	userInfo := dto.ConvertUserInfoFromProto(grpcResp.UserInfo)
-
 	// 记录成功日志
 	logger.Info(ctx, "登录服务处理成功",
 		logger.String("user_uuid", grpcResp.UserInfo.Uuid),
 		logger.Duration("duration", time.Since(startTime)),
 	)
 
-	return &dto.LoginResponse{
-		UserInfo: userInfo,
-		TokenType: "Bearer",
-		ExpiresIn: int64(utils.AccessExpire / time.Second),
-	}, nil
+	return dto.ConvertLoginResponseFromProto(grpcResp), nil
 }
 
 

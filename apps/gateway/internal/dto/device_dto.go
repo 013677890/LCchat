@@ -153,3 +153,53 @@ func ConvertOnlineStatusItemsFromProto(pbs []*userpb.OnlineStatusItem) []*Online
 	}
 	return result
 }
+
+// ==================== 设备服务 gRPC响应到DTO转换函数 ====================
+
+// ConvertGetDeviceListResponseFromProto 将 Protobuf 获取设备列表响应转换为 DTO
+func ConvertGetDeviceListResponseFromProto(pb *userpb.GetDeviceListResponse) *GetDeviceListResponse {
+	if pb == nil {
+		return nil
+	}
+
+	devices := make([]*DeviceItem, 0, len(pb.Devices))
+	for _, device := range pb.Devices {
+		devices = append(devices, ConvertDeviceItemFromProto(device))
+	}
+
+	return &GetDeviceListResponse{
+		Devices: devices,
+	}
+}
+
+// ConvertKickDeviceResponseFromProto 将 Protobuf 踢出设备响应转换为 DTO
+func ConvertKickDeviceResponseFromProto(pb *userpb.KickDeviceResponse) *KickDeviceResponse {
+	if pb == nil {
+		return nil
+	}
+	return &KickDeviceResponse{}
+}
+
+// ConvertGetOnlineStatusResponseFromProto 将 Protobuf 获取在线状态响应转换为 DTO
+func ConvertGetOnlineStatusResponseFromProto(pb *userpb.GetOnlineStatusResponse) *GetOnlineStatusResponse {
+	if pb == nil {
+		return nil
+	}
+
+	return &GetOnlineStatusResponse{
+		Status: ConvertOnlineStatusFromProto(pb.Status),
+	}
+}
+
+// ConvertBatchGetOnlineStatusResponseFromProto 将 Protobuf 批量获取在线状态响应转换为 DTO
+func ConvertBatchGetOnlineStatusResponseFromProto(pb *userpb.BatchGetOnlineStatusResponse) *BatchGetOnlineStatusResponse {
+	if pb == nil {
+		return nil
+	}
+
+	users := ConvertOnlineStatusItemsFromProto(pb.Users)
+
+	return &BatchGetOnlineStatusResponse{
+		Users: users,
+	}
+}

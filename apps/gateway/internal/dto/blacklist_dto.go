@@ -111,3 +111,45 @@ func ConvertBlacklistItemsFromProto(pbs []*userpb.BlacklistItem) []*BlacklistIte
 	}
 	return result
 }
+
+// ==================== 黑名单服务 gRPC响应到DTO转换函数 ====================
+
+// ConvertAddBlacklistResponseFromProto 将 Protobuf 拉黑用户响应转换为 DTO
+func ConvertAddBlacklistResponseFromProto(pb *userpb.AddBlacklistResponse) *AddBlacklistResponse {
+	if pb == nil {
+		return nil
+	}
+	return &AddBlacklistResponse{}
+}
+
+// ConvertRemoveBlacklistResponseFromProto 将 Protobuf 取消拉黑响应转换为 DTO
+func ConvertRemoveBlacklistResponseFromProto(pb *userpb.RemoveBlacklistResponse) *RemoveBlacklistResponse {
+	if pb == nil {
+		return nil
+	}
+	return &RemoveBlacklistResponse{}
+}
+
+// ConvertGetBlacklistListResponseFromProto 将 Protobuf 获取黑名单列表响应转换为 DTO
+func ConvertGetBlacklistListResponseFromProto(pb *userpb.GetBlacklistListResponse) *GetBlacklistListResponse {
+	if pb == nil {
+		return nil
+	}
+
+	items := ConvertBlacklistItemsFromProto(pb.Items)
+
+	return &GetBlacklistListResponse{
+		Items:      items,
+		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+	}
+}
+
+// ConvertCheckIsBlacklistResponseFromProto 将 Protobuf 判断是否拉黑响应转换为 DTO
+func ConvertCheckIsBlacklistResponseFromProto(pb *userpb.CheckIsBlacklistResponse) *CheckIsBlacklistResponse {
+	if pb == nil {
+		return nil
+	}
+	return &CheckIsBlacklistResponse{
+		IsBlacklist: pb.IsBlacklist,
+	}
+}
