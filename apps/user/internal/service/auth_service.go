@@ -62,13 +62,13 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	)
 
 	// 1. 根据账号查询用户（邮箱）
-	user, err := s.authRepo.GetByPhone(ctx, req.Account)
+	user, err := s.authRepo.GetByEmail(ctx, req.Account)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
 		} else {
 			logger.Error(ctx, "查询用户失败",
-				logger.String("account", utils.MaskPhone(req.Account)),
+				logger.String("account", utils.MaskEmail(req.Account)),
 				logger.ErrorField("error", err),
 			)
 			return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))

@@ -26,7 +26,11 @@ func (r *authRepositoryImpl) GetByPhone(ctx context.Context, telephone string) (
 
 // GetByEmail 根据邮箱查询用户信息
 func (r *authRepositoryImpl) GetByEmail(ctx context.Context, email string) (*model.UserInfo, error) {
-	return nil, nil // TODO: 根据邮箱查询用户信息
+	var user model.UserInfo
+	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
 }
 
 // ExistsByPhone 检查手机号是否已存在

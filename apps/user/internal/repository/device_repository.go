@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"time"
 
@@ -64,43 +63,29 @@ func (r *deviceRepositoryImpl) GetByDeviceID(ctx context.Context, userUUID, devi
 
 // UpsertSession 创建或更新设备会话（Upsert）
 func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model.DeviceSession) error {
-	// 查询是否存在
-	existingSession, err := r.GetByDeviceID(ctx, session.UserUuid, session.DeviceId)
-
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		// 查询出错（非 NotFound 错误）
-		return fmt.Errorf("query device session failed: %w", err)
-	}
-
 	now := time.Now()
-
-	if existingSession != nil {
-		// 存在则更新
-		updates := map[string]interface{}{
-			"device_name":  session.DeviceName,
-			"platform":     session.Platform,
-			"app_version":  session.AppVersion,
-			"ip":           session.IP,
-			"user_agent":   session.UserAgent,
-			"last_seen_at": &now,
-			"status":       0, // 在线状态
-			"updated_at":   now,
-		}
-
-		// 注意：不更新 Token 和 RefreshToken，它们只存在 Redis 中
-
-		return r.db.WithContext(ctx).
-			Model(&model.DeviceSession{}).
-			Where("user_uuid = ? AND device_id = ?", session.UserUuid, session.DeviceId).
-			Updates(updates).Error
-	} else {
-		// 不存在则插入
-		session.CreatedAt = now
-		session.UpdatedAt = now
-		session.LastSeenAt = &now
-		session.Status = 0 // 在线状态
-		return r.db.WithContext(ctx).Create(session).Error
-	}
+	
+	// 直接执行 INSERT ... ON DUPLICATE KEY UPDATE
+	// 当唯一索引冲突时（user_uuid + device_id 已存在），执行 UPDATE
+	return r.db.WithContext(ctx).
+		Exec(`
+			INSERT INTO device_session (
+				user_uuid, device_id, device_name, platform, 
+				app_version, ip, user_agent, last_seen_at, status, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+			ON DUPLICATE KEY UPDATE
+				device_name = VALUES(device_name),
+				platform = VALUES(platform),
+				app_version = VALUES(app_version),
+				ip = VALUES(ip),
+				user_agent = VALUES(user_agent),
+				last_seen_at = VALUES(last_seen_at),
+				status = 0,
+				updated_at = VALUES(updated_at)
+		`, 
+			session.UserUuid, session.DeviceId, session.DeviceName, session.Platform,
+			session.AppVersion, session.IP, session.UserAgent, now, now, now,
+		).Error
 }
 
 // StoreAccessToken 将 AccessToken 存入 Redis
