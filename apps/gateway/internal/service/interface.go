@@ -21,4 +21,9 @@ type AuthService interface {
 	// req: 注册请求
 	// 返回: 完整的注册响应（包含Token和用户信息）
 	Register(ctx context.Context, req *dto.RegisterRequest) (*dto.RegisterResponse, error)
+	// SendVerifyCode 发送验证码
+	// ctx: 请求上下文
+	// req: 发送验证码请求
+	// 返回: 发送验证码响应
+	SendVerifyCode(ctx context.Context, req *dto.SendVerifyCodeRequest) (*dto.SendVerifyCodeResponse, error)
 }

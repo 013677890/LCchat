@@ -246,7 +246,15 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 
 // SendVerifyCode 发送验证码
 func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *pb.SendVerifyCodeRequest) (*pb.SendVerifyCodeResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "发送验证码功能暂未实现")
+	// 记录发送验证码请求
+	logger.Info(ctx, "发送验证码请求",
+		logger.String("email", req.Email),
+	)
+
+	// 1. 校验邮箱
+	// 2. 限流检查
+	// 3. 发送验证码存入Redis
+	
 }
 
 // VerifyCode 校验验证码

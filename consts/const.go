@@ -87,6 +87,8 @@ const (
 	CodeRemarkTooLong         = 11024 // 备注过长
 	// 理由过长
 	CodeReasonTooLong         = 11025 // 理由过长
+	// 邮箱不存在
+	CodeEmailNotFound         = 11026 // 邮箱不存在
 )
 
 // 好友模块错误 (12xxx)
@@ -258,6 +260,8 @@ var CodeMessage = map[int]string{
 	CodeGenderInvalid:         "性别值无效",
 	CodeRemarkTooLong:         "备注过长",
 	CodeReasonTooLong:         "理由过长",
+	CodeEmailNotFound:         "邮箱不存在",
+
 
 	// 好友模块
 	CodeAlreadyFriend:         "已经是好友",
@@ -335,3 +339,8 @@ func GetMessage(code int) string {
 func IsNonServerError(code int) bool {
 	return code >= 10000 && code < 30000
 }
+
+
+const (
+	VerifyCodeExpireMinutes = 10
+)

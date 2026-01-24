@@ -125,3 +125,45 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// 5. 返回成功响应
 	result.Success(c, registerResp)
 }
+
+// SendVerifyCode 发送验证码接口
+// @Summary 发送验证码
+// @Description 发送验证码
+// @Tags 认证接口
+// @Accept json
+// @Produce json
+// @Param request body dto.SendVerifyCodeRequest true "发送验证码请求"
+// @Success 200 {object} dto.SendVerifyCodeResponse
+// @Router /api/v1/public/send-verify-code [post]
+func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+
+	// 1. 绑定请求数据
+	var req dto.SendVerifyCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 参数错误由客户端输入导致,属于正常业务流程,不记录日志
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	// 2. 调用服务层处理业务逻辑（依赖注入）
+	sendVerifyCodeResp, err := h.authService.SendVerifyCode(ctx, &req)
+	if err != nil {
+		// 检查是否为业务错误
+		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
+			// 业务逻辑失败（如验证码发送失败等）
+			result.Fail(c, nil, utils.ExtractErrorCode(err))
+			return
+		}
+
+		// 其他内部错误
+		logger.Error(ctx, "发送验证码服务内部错误",
+			logger.ErrorField("error", err),
+		)
+		result.Fail(c, nil, consts.CodeInternalError)
+		return
+	}
+
+	// 3. 返回成功响应
+	result.Success(c, sendVerifyCodeResp)
+}
