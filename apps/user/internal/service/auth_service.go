@@ -49,8 +49,8 @@ func NewAuthService(
 func (s *authServiceImpl) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
 	// 记录注册请求
 	logger.Info(ctx, "用户注册请求",
-		logger.String("email", req.Email),
-		logger.String("password", req.Password),
+		logger.String("email", utils.MaskEmail(req.Email)),
+		//logger.String("password", req.Password),
 		logger.String("verify_code", req.VerifyCode),
 		logger.String("nickname", req.Nickname),
 		logger.String("telephone", req.Telephone),
@@ -141,7 +141,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 
 	// 记录登录请求（账号脱敏）
 	logger.Info(ctx, "用户登录请求",
-		logger.String("account", utils.MaskPhone(req.Account)),
+		logger.String("account", utils.MaskEmail(req.Account)),
 		logger.String("device_name", req.DeviceInfo.GetDeviceName()),
 		logger.String("platform", req.DeviceInfo.GetPlatform()),
 	)
@@ -235,7 +235,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 
 	// 10. 登录成功
 	logger.Info(ctx, "用户登录成功",
-		logger.String("account", utils.MaskPhone(req.Account)),
+		logger.String("account", utils.MaskEmail(req.Account)),
 		logger.String("platform", req.DeviceInfo.GetPlatform()),
 	)
 
@@ -271,7 +271,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 
 	// 记录验证码登录请求（邮箱脱敏）
 	logger.Info(ctx, "验证码登录请求",
-		logger.String("email", utils.MaskPhone(req.Email)),
+		logger.String("email", utils.MaskEmail(req.Email)),
 		logger.String("device_name", req.DeviceInfo.GetDeviceName()),
 		logger.String("platform", req.DeviceInfo.GetPlatform()),
 	)
@@ -383,7 +383,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 
 	// 10. 登录成功，记录日志
 	logger.Info(ctx, "验证码登录成功",
-		logger.String("email", utils.MaskPhone(req.Email)),
+		logger.String("email", utils.MaskEmail(req.Email)),
 		logger.String("platform", req.DeviceInfo.GetPlatform()),
 	)
 
@@ -480,7 +480,7 @@ func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *pb.SendVerify
 func (s *authServiceImpl) VerifyCode(ctx context.Context, req *pb.VerifyCodeRequest) (*pb.VerifyCodeResponse, error) {
 	// 记录校验验证码请求（邮箱脱敏）
 	logger.Info(ctx, "校验验证码请求",
-		logger.String("email", utils.MaskPhone(req.Email)),
+		logger.String("email", utils.MaskEmail(req.Email)),
 		logger.Int("type", int(req.Type)),
 	)
 
@@ -499,7 +499,7 @@ func (s *authServiceImpl) VerifyCode(ctx context.Context, req *pb.VerifyCodeRequ
 
 	// 2. 返回验证结果
 	logger.Info(ctx, "验证码校验结果",
-		logger.String("email", utils.MaskPhone(req.Email)),
+		logger.String("email", utils.MaskEmail(req.Email)),
 		logger.Bool("valid", isValid),
 	)
 
@@ -648,7 +648,7 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) err
 func (s *authServiceImpl) ResetPassword(ctx context.Context, req *pb.ResetPasswordRequest) error {
 	// 记录重置密码请求（邮箱脱敏）
 	logger.Info(ctx, "用户重置密码请求",
-		logger.String("email", utils.MaskPhone(req.Email)),
+		logger.String("email", utils.MaskEmail(req.Email)),
 	)
 
 	// 1. 根据邮箱查询用户
@@ -718,7 +718,7 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *pb.ResetPasswo
 
 	// 7. 重置成功
 	logger.Info(ctx, "用户密码重置成功",
-		logger.String("email", utils.MaskPhone(req.Email)),
+		logger.String("email", utils.MaskEmail(req.Email)),
 	)
 
 	return nil

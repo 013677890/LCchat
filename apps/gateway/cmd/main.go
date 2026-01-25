@@ -81,14 +81,20 @@ func main() {
 	authService := service.NewAuthService(userClient)
 	logger.Info(ctx, "认证服务初始化完成")
 
+	userService := service.NewUserService(userClient)
+	logger.Info(ctx, "用户信息服务初始化完成")
+
 	// 5. 初始化 Handler 层（依赖注入）
 	authHandler := v1.NewAuthHandler(authService)
 	logger.Info(ctx, "认证处理器初始化完成")
 
+	userHandler := v1.NewUserHandler(userService)
+	logger.Info(ctx, "用户信息处理器初始化完成")
+
 	// 6. 初始化路由（依赖注入）
 	// Gin 模式设置: ReleaseMode/DebugMode/TestMode
 	gin.SetMode(gin.ReleaseMode)
-	r := router.InitRouter(authHandler)
+	r := router.InitRouter(authHandler, userHandler)
 	logger.Info(ctx, "路由初始化完成")
 
 	// 7. 配置服务器

@@ -10,8 +10,9 @@ import (
 )
 
 // InitRouter 初始化路由
-// loginHandler: 登录处理器（依赖注入）
-func InitRouter(authHandler *v1.AuthHandler) *gin.Engine {
+// authHandler: 认证处理器（依赖注入）
+// userHandler: 用户信息处理器（依赖注入）
+func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler) *gin.Engine {
 	r := gin.New()
 
 	// 恢复中间件
@@ -68,8 +69,13 @@ func InitRouter(authHandler *v1.AuthHandler) *gin.Engine {
 		// 认证相关接口
 		auth.POST("/logout", authHandler.Logout)
 
-		// 用户相关接口（预留，后续添加需要认证的用户接口）
-		_ = api.Group("/user")
+		// 用户相关接口（需要认证）
+		user := api.Group("/user")
+		user.Use(middleware.JWTAuthMiddleware()) // 应用 JWT 认证中间件  测试环境下不启用
+		{
+			user.GET("/profile", userHandler.GetProfile)
+			user.GET("/profile/:userUuid", userHandler.GetOtherProfile)
+		}
 	}
 
 	return r

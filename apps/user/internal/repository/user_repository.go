@@ -3,6 +3,7 @@ package repository
 import (
 	"ChatServer/model"
 	"context"
+	"errors"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -10,7 +11,7 @@ import (
 
 // userRepositoryImpl 用户信息数据访问层实现
 type userRepositoryImpl struct {
-	db *gorm.DB
+	db          *gorm.DB
 	redisClient *redis.Client
 }
 
@@ -21,7 +22,15 @@ func NewUserRepository(db *gorm.DB, redisClient *redis.Client) IUserRepository {
 
 // GetByUUID 根据UUID查询用户信息
 func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model.UserInfo, error) {
-	return nil, nil // TODO: 实现查询用户信息
+	var user model.UserInfo
+	err := r.db.WithContext(ctx).Where("uuid = ? AND deleted_at IS NULL", uuid).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, WrapDBError(err)
+	}
+	return &user, nil
 }
 
 // GetByPhone 根据手机号查询用户信息
