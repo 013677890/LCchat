@@ -26,13 +26,16 @@ type IAuthRepository interface {
 	Create(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error)
 
 	// VerifyVerifyCode 校验验证码
-	VerifyVerifyCode(ctx context.Context, email, verifyCode string) (bool, error)
+	// type: 验证码类型 (1:注册 2:登录 3:重置密码 4:换绑邮箱)
+	VerifyVerifyCode(ctx context.Context, email, verifyCode string, codeType int32) (bool, error)
 
 	// StoreVerifyCode 存储验证码到Redis（带过期时间）
-	StoreVerifyCode(ctx context.Context, email, verifyCode string, expireDuration time.Duration) error
+	// type: 验证码类型 (1:注册 2:登录 3:重置密码 4:换绑邮箱)
+	StoreVerifyCode(ctx context.Context, email, verifyCode string, codeType int32, expireDuration time.Duration) error
 
 	// DeleteVerifyCode 删除验证码（消耗验证码）
-	DeleteVerifyCode(ctx context.Context, email string) error
+	// type: 验证码类型 (1:注册 2:登录 3:重置密码 4:换绑邮箱)
+	DeleteVerifyCode(ctx context.Context, email string, codeType int32) error
 
 	// UpdateLastLogin 更新最后登录时间
 	UpdateLastLogin(ctx context.Context, userUUID string) error

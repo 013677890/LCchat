@@ -56,8 +56,8 @@ func (s *authServiceImpl) Register(ctx context.Context, req *pb.RegisterRequest)
 		logger.String("telephone", req.Telephone),
 	)
 
-	// 1. 校验验证码
-	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode)
+	// 1. 校验验证码（type=1: 注册）
+	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, 1)
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
@@ -296,8 +296,8 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 		return nil, status.Error(codes.PermissionDenied, strconv.Itoa(consts.CodeUserDisabled))
 	}
 
-	// 3. 校验验证码
-	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode)
+	// 3. 校验验证码（type=2: 登录）
+	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, 2)
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
@@ -313,7 +313,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 	}
 
 	// 验证成功后立即删除验证码（消耗验证码，防止重复使用）
-	if err := s.authRepo.DeleteVerifyCode(ctx, req.Email); err != nil {
+	if err := s.authRepo.DeleteVerifyCode(ctx, req.Email, 2); err != nil {
 		logger.Warn(ctx, "删除验证码失败",
 			logger.ErrorField("error", err),
 		)
@@ -434,7 +434,7 @@ func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *pb.SendVerify
 	}
 
 	// 4. 存储验证码到Redis（2分钟过期）
-	err = s.authRepo.StoreVerifyCode(ctx, req.Email, code, 2*time.Minute)
+	err = s.authRepo.StoreVerifyCode(ctx, req.Email, code, req.Type, 2*time.Minute)
 	if err != nil {
 		logger.Error(ctx, "存储验证码失败",
 			logger.ErrorField("error", err),
@@ -484,8 +484,8 @@ func (s *authServiceImpl) VerifyCode(ctx context.Context, req *pb.VerifyCodeRequ
 		logger.Int("type", int(req.Type)),
 	)
 
-	// 1. 校验验证码
-	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode)
+	// 1. 校验验证码（type参数：1:注册 2:登录 3:重置密码 4:换绑邮箱）
+	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, req.Type)
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
@@ -666,8 +666,8 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *pb.ResetPasswo
 		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
 	}
 
-	// 2. 校验验证码
-	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode)
+	// 2. 校验验证码（type=3: 重置密码）
+	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, 3)
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
@@ -709,7 +709,7 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *pb.ResetPasswo
 	}
 
 	// 6. 删除验证码（消耗验证码，防止重复使用）
-	if err := s.authRepo.DeleteVerifyCode(ctx, req.Email); err != nil {
+	if err := s.authRepo.DeleteVerifyCode(ctx, req.Email, 3); err != nil {
 		logger.Warn(ctx, "删除验证码失败",
 			logger.ErrorField("error", err),
 		)

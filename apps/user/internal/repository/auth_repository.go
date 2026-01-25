@@ -37,9 +37,11 @@ func (r *authRepositoryImpl) GetByEmail(ctx context.Context, email string) (*mod
 }
 
 // VerifyVerifyCode 校验验证码
-func (r *authRepositoryImpl) VerifyVerifyCode(ctx context.Context, email, verifyCode string) (bool, error) {
+// type: 验证码类型 (1:注册 2:登录 3:重置密码 4:换绑邮箱)
+func (r *authRepositoryImpl) VerifyVerifyCode(ctx context.Context, email, verifyCode string, codeType int32) (bool, error) {
 	// 从Redis中获取验证码
-	verifyCodeKey := fmt.Sprintf("user:verify_code:%s", email)
+	// 格式：user:verify_code:{email}:{type}
+	verifyCodeKey := fmt.Sprintf("user:verify_code:%s:%d", email, codeType)
 	verifyCodeValue, err := r.redisClient.Get(ctx, verifyCodeKey).Result()
 	if err != nil {
 		return false, WrapRedisError(err)
@@ -48,8 +50,10 @@ func (r *authRepositoryImpl) VerifyVerifyCode(ctx context.Context, email, verify
 }
 
 // StoreVerifyCode 存储验证码到Redis（带过期时间）
-func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyCode string, expireDuration time.Duration) error {
-	verifyCodeKey := fmt.Sprintf("user:verify_code:%s", email)
+// type: 验证码类型 (1:注册 2:登录 3:重置密码 4:换绑邮箱)
+func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyCode string, codeType int32, expireDuration time.Duration) error {
+	// 格式：user:verify_code:{email}:{type}
+	verifyCodeKey := fmt.Sprintf("user:verify_code:%s:%d", email, codeType)
 
 	// 使用 Set 方法设置值并指定过期时间
 	err := r.redisClient.Set(ctx, verifyCodeKey, verifyCode, expireDuration).Err()
@@ -60,8 +64,10 @@ func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyC
 }
 
 // DeleteVerifyCode 删除验证码（消耗验证码）
-func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string) error {
-	verifyCodeKey := fmt.Sprintf("user:verify_code:%s", email)
+// type: 验证码类型 (1:注册 2:登录 3:重置密码 4:换绑邮箱)
+func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string, codeType int32) error {
+	// 格式：user:verify_code:{email}:{type}
+	verifyCodeKey := fmt.Sprintf("user:verify_code:%s:%d", email, codeType)
 	err := r.redisClient.Del(ctx, verifyCodeKey).Err()
 	if err != nil {
 		return WrapRedisError(err)
