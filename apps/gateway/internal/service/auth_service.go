@@ -195,3 +195,33 @@ func (s *AuthServiceImpl) Logout(ctx context.Context, req *dto.LogoutRequest) (*
 
 	return dto.ConvertLogoutResponseFromProto(nil), nil
 }
+
+// ResetPassword 重置密码
+// ctx: 请求上下文
+// req: 重置密码请求
+// 返回: 重置密码响应
+func (s *AuthServiceImpl) ResetPassword(ctx context.Context, req *dto.ResetPasswordRequest) (*dto.ResetPasswordResponse, error) {
+	startTime := time.Now()
+
+	// 1. 转换 DTO 为 Protobuf 请求
+	grpcReq := dto.ConvertToProtoResetPasswordRequest(req)
+
+	// 2. 调用用户服务进行重置密码(gRPC)
+	_, err := s.userClient.ResetPassword(ctx, grpcReq)
+	if err != nil {
+		// gRPC 调用失败，提取业务错误码
+		code := utils.ExtractErrorCode(err)
+		// 记录错误日志
+		logger.Error(ctx, "调用用户服务 gRPC 失败",
+			logger.ErrorField("error", err),
+			logger.Int("business_code", code),
+			logger.String("business_message", consts.GetMessage(code)),
+			logger.Duration("duration", time.Since(startTime)),
+		)
+
+		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
+		return nil, err
+	}
+
+	return dto.ConvertResetPasswordResponseFromProto(nil), nil
+}

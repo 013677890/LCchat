@@ -56,6 +56,7 @@ func InitRouter(authHandler *v1.AuthHandler) *gin.Engine {
 				user.POST("/login-by-code", authHandler.LoginByCode)
 				user.POST("/register", authHandler.Register)
 				user.POST("/send-verify-code", authHandler.SendVerifyCode)
+				user.POST("/reset-password", authHandler.ResetPassword)
 			}
 		}
 

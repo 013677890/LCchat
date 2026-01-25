@@ -95,7 +95,13 @@ func (r *authRepositoryImpl) UpdateLastLogin(ctx context.Context, userUUID strin
 
 // UpdatePassword 更新密码
 func (r *authRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, password string) error {
-	return nil // TODO: 更新密码
+	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).
+		Where("uuid = ?", userUUID).
+		Update("password", password).Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+	return nil
 }
 
 // VerifyVerifyCodeRateLimit 验证码限流校验

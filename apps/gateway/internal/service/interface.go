@@ -39,4 +39,10 @@ type AuthService interface {
 	// req: 登出请求
 	// 返回: 登出响应
 	Logout(ctx context.Context, req *dto.LogoutRequest) (*dto.LogoutResponse, error)
+
+	// ResetPassword 重置密码
+	// ctx: 请求上下文
+	// req: 重置密码请求
+	// 返回: 重置密码响应
+	ResetPassword(ctx context.Context, req *dto.ResetPasswordRequest) (*dto.ResetPasswordResponse, error)
 }

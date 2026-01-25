@@ -520,6 +520,94 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) err
 }
 
 // ResetPassword 重置密码
+// 业务流程：
+//  1. 根据邮箱查询用户
+//  2. 校验验证码
+//  3. 校验新密码是否与旧密码相同
+//  4. 生成新密码哈希
+//  5. 更新密码
+//  6. 删除验证码
+//
+// 错误码映射：
+//   - codes.NotFound: 用户不存在
+//   - codes.Unauthenticated: 验证码错误或已过期
+//   - codes.FailedPrecondition: 新密码不能与旧密码相同
+//   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) ResetPassword(ctx context.Context, req *pb.ResetPasswordRequest) error {
-	return status.Error(codes.Unimplemented, "重置密码功能暂未实现")
+	// 记录重置密码请求（邮箱脱敏）
+	logger.Info(ctx, "用户重置密码请求",
+		logger.String("email", utils.MaskPhone(req.Email)),
+	)
+
+	// 1. 根据邮箱查询用户
+	user, err := s.authRepo.GetByEmail(ctx, req.Email)
+	if err != nil {
+		// 使用 errors.Is 判断错误类型
+		if errors.Is(err, repository.ErrRecordNotFound) {
+			return status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+		}
+
+		// 其他数据库错误
+		logger.Error(ctx, "查询用户失败",
+			logger.ErrorField("error", err),
+		)
+		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 2. 校验验证码
+	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode)
+	if err != nil {
+		// 判断是 Redis Key 不存在还是其他错误
+		if errors.Is(err, repository.ErrRedisNil) {
+			return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeExpire))
+		}
+		logger.Error(ctx, "校验验证码失败",
+			logger.ErrorField("error", err),
+		)
+		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+	if !isValid {
+		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
+	}
+
+	// 3. 校验新密码是否与旧密码相同
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.NewPassword))
+	if err == nil {
+		// 密码相同
+		return status.Error(codes.FailedPrecondition, strconv.Itoa(consts.CodePasswordSameAsOld))
+	}
+
+	// 4. 生成新密码哈希
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		logger.Error(ctx, "生成密码哈希失败",
+			logger.ErrorField("error", err),
+		)
+		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 5. 更新密码
+	err = s.authRepo.UpdatePassword(ctx, user.Uuid, string(hashedPassword))
+	if err != nil {
+		logger.Error(ctx, "更新密码失败",
+			logger.String("user_uuid", user.Uuid),
+			logger.ErrorField("error", err),
+		)
+		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 6. 删除验证码（消耗验证码，防止重复使用）
+	if err := s.authRepo.DeleteVerifyCode(ctx, req.Email); err != nil {
+		logger.Warn(ctx, "删除验证码失败",
+			logger.ErrorField("error", err),
+		)
+		// 删除失败不影响重置密码流程，只记录警告日志
+	}
+
+	// 7. 重置成功
+	logger.Info(ctx, "用户密码重置成功",
+		logger.String("email", utils.MaskPhone(req.Email)),
+	)
+
+	return nil
 }
