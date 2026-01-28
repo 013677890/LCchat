@@ -23,6 +23,8 @@ type UserService interface {
 	UpdateProfile(ctx context.Context, req *dto.UpdateProfileRequest) (*dto.UpdateProfileResponse, error)
 	// ChangePassword 修改密码
 	ChangePassword(ctx context.Context, req *dto.ChangePasswordRequest) error
+	// ChangeEmail 绑定/换绑邮箱
+	ChangeEmail(ctx context.Context, req *dto.ChangeEmailRequest) (*dto.ChangeEmailResponse, error)
 }
 
 // UserServiceImpl 用户服务实现
@@ -232,4 +234,33 @@ func (s *UserServiceImpl) ChangePassword(ctx context.Context, req *dto.ChangePas
 	}
 
 	return nil
+}
+
+// ChangeEmail 绑定/换绑邮箱
+// ctx: 请求上下文
+// req: 换绑邮箱请求
+// 返回: 换绑邮箱响应
+func (s *UserServiceImpl) ChangeEmail(ctx context.Context, req *dto.ChangeEmailRequest) (*dto.ChangeEmailResponse, error) {
+	startTime := time.Now()
+
+	// 1. 转换 DTO 为 Protobuf 请求
+	grpcReq := dto.ConvertToProtoChangeEmailRequest(req)
+
+	// 2. 调用用户服务换绑邮箱(gRPC)
+	grpcResp, err := s.userClient.ChangeEmail(ctx, grpcReq)
+	if err != nil {
+		// gRPC 调用失败，提取业务错误码
+		code := utils.ExtractErrorCode(err)
+		// 记录错误日志
+		logger.Error(ctx, "调用用户服务 gRPC 失败",
+			logger.ErrorField("error", err),
+			logger.Int("business_code", code),
+			logger.String("business_message", consts.GetMessage(code)),
+			logger.Duration("duration", time.Since(startTime)),
+		)
+		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
+		return nil, err
+	}
+
+	return dto.ConvertChangeEmailResponseFromProto(grpcResp), nil
 }

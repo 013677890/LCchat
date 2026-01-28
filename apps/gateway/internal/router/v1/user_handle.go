@@ -193,3 +193,45 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	// 4. 返回成功响应
 	result.Success(c, profileResp)
 }
+
+// ChangeEmail 换绑邮箱接口
+// @Summary 换绑邮箱
+// @Description 更换绑定邮箱（需验证码）
+// @Tags 用户信息接口
+// @Accept json
+// @Produce json
+// @Param request body dto.ChangeEmailRequest true "换绑邮箱请求"
+// @Success 200 {object} dto.ChangeEmailResponse
+// @Router /api/v1/user/change-email [post]
+func (h *UserHandler) ChangeEmail(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+
+	// 1. 绑定请求数据
+	var req dto.ChangeEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 参数错误由客户端输入导致,属于正常业务流程,不记录日志
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	// 2. 调用服务层处理业务逻辑（依赖注入）
+	emailResp, err := h.userService.ChangeEmail(ctx, &req)
+	if err != nil {
+		// 检查是否为业务错误
+		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
+			// 业务逻辑失败（如邮箱已被使用、验证码错误等）
+			result.Fail(c, nil, utils.ExtractErrorCode(err))
+			return
+		}
+
+		// 其他内部错误
+		logger.Error(ctx, "换绑邮箱服务内部错误",
+			logger.ErrorField("error", err),
+		)
+		result.Fail(c, nil, consts.CodeInternalError)
+		return
+	}
+
+	// 3. 返回成功响应
+	result.Success(c, emailResp)
+}

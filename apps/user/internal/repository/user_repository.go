@@ -154,7 +154,27 @@ func (r *userRepositoryImpl) UpdateBasicInfo(ctx context.Context, userUUID strin
 
 // UpdateEmail 更新邮箱
 func (r *userRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email string) error {
-	return nil // TODO: 实现更新邮箱
+	// 更新邮箱到数据库
+	err := r.db.WithContext(ctx).
+		Model(&model.UserInfo{}).
+		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		Update("email", email).
+		Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+
+	// 更新成功后，删除Redis缓存
+	cacheKey := fmt.Sprintf("user:info:%s", userUUID)
+	err = r.redisClient.Del(ctx, cacheKey).Err()
+	if err != nil {
+		// 发送到重试队列
+		task := mq.BuildDelTask(cacheKey).
+			WithSource("UserRepository.UpdateEmail")
+		LogAndRetryRedisError(ctx, task, err)
+	}
+
+	return nil
 }
 
 // UpdateTelephone 更新手机号
@@ -174,7 +194,16 @@ func (r *userRepositoryImpl) ExistsByPhone(ctx context.Context, telephone string
 
 // ExistsByEmail 检查邮箱是否已存在
 func (r *userRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	return false, nil // TODO: 实现检查邮箱是否已存在
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&model.UserInfo{}).
+		Where("email = ? AND deleted_at IS NULL", email).
+		Count(&count).
+		Error
+	if err != nil {
+		return false, WrapDBError(err)
+	}
+	return count > 0, nil
 }
 
 // UpdatePassword 更新密码

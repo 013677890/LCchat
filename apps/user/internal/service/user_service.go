@@ -3,10 +3,12 @@ package service
 import (
 	"ChatServer/apps/user/internal/converter"
 	"ChatServer/apps/user/internal/repository"
+	"ChatServer/apps/user/internal/utils"
 	pb "ChatServer/apps/user/pb"
 	"ChatServer/consts"
 	"ChatServer/pkg/logger"
 	"context"
+	"errors"
 	"regexp"
 	"strconv"
 	"time"
@@ -19,12 +21,14 @@ import (
 // userServiceImpl 用户信息服务实现
 type userServiceImpl struct {
 	userRepo repository.IUserRepository
+	authRepo repository.IAuthRepository
 }
 
 // NewUserService 创建用户信息服务实例
-func NewUserService(userRepo repository.IUserRepository) UserService {
+func NewUserService(userRepo repository.IUserRepository, authRepo repository.IAuthRepository) UserService {
 	return &userServiceImpl{
 		userRepo: userRepo,
+		authRepo: authRepo,
 	}
 }
 
@@ -283,8 +287,118 @@ func (s *userServiceImpl) ChangePassword(ctx context.Context, req *pb.ChangePass
 }
 
 // ChangeEmail 绑定/换绑邮箱
+// 业务流程：
+//  1. 从context中获取用户UUID
+//  2. 检查新邮箱是否已被使用
+//  3. 校验验证码是否正确
+//  4. 更新邮箱
+//  5. 删除验证码
+//
+// 错误码映射：
+//   - codes.NotFound: 用户不存在
+//   - codes.AlreadyExists: 邮箱已被使用
+//   - codes.Unauthenticated: 验证码错误或已过期
+//   - codes.Internal: 系统内部错误
 func (s *userServiceImpl) ChangeEmail(ctx context.Context, req *pb.ChangeEmailRequest) (*pb.ChangeEmailResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "绑定/换绑邮箱功能暂未实现")
+	// 1. 从context中获取用户UUID
+	userUUID, ok := ctx.Value("user_uuid").(string)
+	if !ok || userUUID == "" {
+		logger.Error(ctx, "获取用户UUID失败")
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+	}
+
+	// 记录换绑邮箱请求（新旧邮箱脱敏）
+	logger.Info(ctx, "用户换绑邮箱请求",
+		logger.String("user_uuid", userUUID),
+		logger.String("new_email", utils.MaskEmail(req.NewEmail)),
+	)
+
+	// 2. 检查新邮箱是否已被使用
+	exists, err := s.userRepo.ExistsByEmail(ctx, req.NewEmail)
+	if err != nil {
+		logger.Error(ctx, "检查邮箱是否存在失败",
+			logger.String("email", utils.MaskEmail(req.NewEmail)),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+	if exists {
+		logger.Warn(ctx, "邮箱已被使用",
+			logger.String("email", utils.MaskEmail(req.NewEmail)),
+		)
+		return nil, status.Error(codes.AlreadyExists, strconv.Itoa(consts.CodeEmailAlreadyExist))
+	}
+
+	// 3. 校验验证码（type=4: 换绑邮箱）
+	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.NewEmail, req.VerifyCode, 4)
+	if err != nil {
+		// 判断是 Redis Key 不存在还是其他错误
+		if errors.Is(err, repository.ErrRedisNil) {
+			logger.Warn(ctx, "验证码已过期",
+				logger.String("email", utils.MaskEmail(req.NewEmail)),
+			)
+			return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeExpire))
+		}
+		logger.Error(ctx, "校验验证码失败",
+			logger.String("email", utils.MaskEmail(req.NewEmail)),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+	if !isValid {
+		logger.Warn(ctx, "验证码错误",
+			logger.String("email", utils.MaskEmail(req.NewEmail)),
+		)
+		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
+	}
+
+	// 4. 查询用户当前信息，获取旧邮箱用于日志记录
+	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
+	if err != nil {
+		logger.Error(ctx, "查询用户信息失败",
+			logger.String("user_uuid", userUUID),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+	if userInfo == nil {
+		logger.Warn(ctx, "用户不存在",
+			logger.String("user_uuid", userUUID),
+		)
+		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+	}
+
+	// 5. 更新邮箱
+	err = s.userRepo.UpdateEmail(ctx, userUUID, req.NewEmail)
+	if err != nil {
+		logger.Error(ctx, "更新邮箱失败",
+			logger.String("user_uuid", userUUID),
+			logger.String("old_email", utils.MaskEmail(userInfo.Email)),
+			logger.String("new_email", utils.MaskEmail(req.NewEmail)),
+			logger.ErrorField("error", err),
+		)
+		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+	}
+
+	// 6. 删除验证码（type=4: 换绑邮箱）
+	if err := s.authRepo.DeleteVerifyCode(ctx, req.NewEmail, 4); err != nil {
+		logger.Warn(ctx, "删除验证码失败",
+			logger.String("email", utils.MaskEmail(req.NewEmail)),
+			logger.ErrorField("error", err),
+		)
+		// 删除失败不影响换绑邮箱流程，只记录警告日志
+	}
+
+	// 7. 换绑成功
+	logger.Info(ctx, "邮箱更换成功",
+		logger.String("user_uuid", userUUID),
+		logger.String("old_email", utils.MaskEmail(userInfo.Email)),
+		logger.String("new_email", utils.MaskEmail(req.NewEmail)),
+	)
+
+	return &pb.ChangeEmailResponse{
+		Email: req.NewEmail,
+	}, nil
 }
 
 // ChangeTelephone 绑定/换绑手机

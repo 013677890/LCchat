@@ -74,6 +74,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler) *gin.E
 				user.PUT("/profile", userHandler.UpdateProfile)
 				user.GET("/profile/:userUuid", userHandler.GetOtherProfile)
 				user.POST("/change-password", userHandler.ChangePassword)
+				user.POST("/change-email", userHandler.ChangeEmail)
 				user.POST("/logout", authHandler.Logout)
 			}
 		}
