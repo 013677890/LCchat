@@ -14,11 +14,11 @@ type Repository interface {
 	// GetByOwnerAndConvId 查询单个会话
 	GetByOwnerAndConvId(ctx context.Context, ownerUuid, convId string) (*model.Conversation, error)
 
-	// List 分页查询会话列表（支持全量/增量同步）
-	//   - updatedSince=0 全量，>0 增量（只返回 updated_at > updatedSince 的记录）
-	//   - cursor: 复合游标 "{updated_at}_{id}"，首页传 ""
-	//   - 返回：会话列表, hasMore, error
-	List(ctx context.Context, ownerUuid string, updatedSince int64, cursor string, pageSize int) ([]*model.Conversation, bool, error)
+	// ListP2P 专属查询单聊（极速，纯走 B+ 树索引）
+	ListP2P(ctx context.Context, ownerUuid string, updatedSince, cursorTimeMs, cursorId int64, pageSize int) ([]*model.Conversation, error)
+
+	// ListGroup 专属查询群聊（核心魔法：联表 JOIN 替换真实时间）
+	ListGroup(ctx context.Context, ownerUuid string, updatedSince, cursorTimeMs, cursorId int64, pageSize int) ([]*model.Conversation, error)
 
 	// Upsert 创建或更新个人会话（发消息时调用）
 	//   - 按 (owner_uuid, conv_id) 唯一键 upsert
@@ -47,9 +47,4 @@ type Repository interface {
 
 	// GetGroupConv 查询单个群的热数据
 	GetGroupConv(ctx context.Context, groupUuid string) (*model.GroupConversation, error)
-
-	// BatchGetGroupConvs 批量查询群会话热数据
-	//   - 用于 GetConversations 时，将群聊的真实 max_seq / last_msg_* 拼装回去
-	//   - 返回 map[group_uuid]*GroupConversation
-	BatchGetGroupConvs(ctx context.Context, groupUuids []string) (map[string]*model.GroupConversation, error)
 }

@@ -3,8 +3,6 @@ package conversation
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
@@ -40,59 +38,62 @@ func (r *repositoryImpl) GetByOwnerAndConvId(ctx context.Context, ownerUuid, con
 	return &conv, nil
 }
 
-// List 分页查询会话列表
-//
-// 分页方式：游标分页（基于 updated_at_id），降序排列
-// hasMore 判断：N+1 Trick
-func (r *repositoryImpl) List(ctx context.Context, ownerUuid string, updatedSince int64, cursor string, pageSize int) ([]*model.Conversation, bool, error) {
-	if pageSize <= 0 || pageSize > 200 {
-		pageSize = 50
-	}
+// ListP2P 专属查询单聊
+func (r *repositoryImpl) ListP2P(ctx context.Context, ownerUuid string, updatedSince, cursorTimeMs, cursorId int64, pageSize int) ([]*model.Conversation, error) {
+	var convs []*model.Conversation
+	query := r.db.WithContext(ctx).
+		Where("owner_uuid = ? AND type = 1", ownerUuid) // type=1 为单聊
 
-	query := r.db.WithContext(ctx).Where("owner_uuid = ?", ownerUuid)
-
+	// 增量同步：返回所有变更记录（包括 status=1 已删除的，用于多端同步删除状态）
 	if updatedSince > 0 {
-		// 增量同步：返回所有变更记录（包括 status=1 已删除的，用于多端同步删除状态）
-		sinceTime := time.UnixMilli(updatedSince)
-		query = query.Where("updated_at > ?", sinceTime)
+		query = query.Where("updated_at > ?", time.UnixMilli(updatedSince))
 	} else {
 		// 全量拉取：只返回活跃会话
 		query = query.Where("status = 0")
 	}
 
-	// 解析复合游标
-	if cursor != "" {
-		var curUpdatedAtStr, curIdStr string
-		parts := strings.SplitN(cursor, "_", 2)
-		if len(parts) == 2 {
-			curUpdatedAtStr = parts[0]
-			curIdStr = parts[1]
-
-			curUpdatedAt, err1 := strconv.ParseInt(curUpdatedAtStr, 10, 64)
-			curId, err2 := strconv.ParseInt(curIdStr, 10, 64)
-
-			if err1 == nil && err2 == nil {
-				curTime := time.UnixMilli(curUpdatedAt)
-				// 核心游标逻辑：严格小于上一页最后一条的 (updated_at, id)
-				query = query.Where("(updated_at < ?) OR (updated_at = ? AND id < ?)", curTime, curTime, curId)
-			}
-		}
+	if cursorTimeMs > 0 && cursorId > 0 {
+		curTime := time.UnixMilli(cursorTimeMs)
+		query = query.Where("(updated_at < ?) OR (updated_at = ? AND id < ?)", curTime, curTime, cursorId)
 	}
 
-	var convs []*model.Conversation
 	err := query.Order("updated_at DESC, id DESC").
-		Limit(pageSize + 1).
+		Limit(pageSize).
 		Find(&convs).Error
-	if err != nil {
-		return nil, false, fmt.Errorf("List: db query failed: %w", err)
+
+	return convs, err
+}
+
+// ListGroup 专属查询群聊（联表 JOIN 替换真实时间）
+func (r *repositoryImpl) ListGroup(ctx context.Context, ownerUuid string, updatedSince, cursorTimeMs, cursorId int64, pageSize int) ([]*model.Conversation, error) {
+	var convs []*model.Conversation
+
+	// 核心：Select 中将 gc.last_msg_at 别名赋给 updated_at，让 GORM 自动映射到 model 的 UpdatedAt 用于后续内存排序
+	query := r.db.WithContext(ctx).Table("conversation c").
+		Select("c.*, gc.max_seq as max_seq, gc.last_msg_id as last_msg_id, gc.last_msg_preview as last_msg_preview, gc.last_msg_at as updated_at").
+		Joins("INNER JOIN group_conversation gc ON c.target_uuid = gc.group_uuid").
+		Where("c.owner_uuid = ? AND c.type = 2", ownerUuid) // type=2 为群聊
+
+	// 增量同步必须看个人表 c.updated_at（设置变更、删除会话等）
+	if updatedSince > 0 {
+		query = query.Where("c.updated_at > ?", time.UnixMilli(updatedSince))
+	} else {
+		// 全量拉取：只返回活跃会话
+		query = query.Where("c.status = 0")
 	}
 
-	hasMore := len(convs) > pageSize
-	if hasMore {
-		convs = convs[:pageSize]
+	if cursorTimeMs > 0 && cursorId > 0 {
+		curTime := time.UnixMilli(cursorTimeMs)
+		// 注意：游标必须依赖 gc 的真实活跃时间
+		query = query.Where("(gc.last_msg_at < ?) OR (gc.last_msg_at = ? AND c.id < ?)", curTime, curTime, cursorId)
 	}
 
-	return convs, hasMore, nil
+	// 按照真实的群活跃时间排序
+	err := query.Order("gc.last_msg_at DESC, c.id DESC").
+		Limit(pageSize).
+		Find(&convs).Error
+
+	return convs, err
 }
 
 // Upsert 创建或更新个人会话
@@ -228,28 +229,4 @@ func (r *repositoryImpl) GetGroupConv(ctx context.Context, groupUuid string) (*m
 		return nil, fmt.Errorf("GetGroupConv: db query failed: %w", err)
 	}
 	return &gc, nil
-}
-
-// BatchGetGroupConvs 批量查询群会话热数据
-//
-// 【Bug2 修复】用于 GetConversations 拼装群聊真实 max_seq / last_msg_*
-// 返回 map[group_uuid]*GroupConversation，调用方按 target_uuid 匹配
-func (r *repositoryImpl) BatchGetGroupConvs(ctx context.Context, groupUuids []string) (map[string]*model.GroupConversation, error) {
-	if len(groupUuids) == 0 {
-		return map[string]*model.GroupConversation{}, nil
-	}
-
-	var gcs []*model.GroupConversation
-	err := r.db.WithContext(ctx).
-		Where("group_uuid IN ?", groupUuids).
-		Find(&gcs).Error
-	if err != nil {
-		return nil, fmt.Errorf("BatchGetGroupConvs: db query failed: %w", err)
-	}
-
-	result := make(map[string]*model.GroupConversation, len(gcs))
-	for _, gc := range gcs {
-		result[gc.GroupUuid] = gc
-	}
-	return result, nil
 }

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
@@ -109,65 +112,90 @@ func (s *Service) GetByOwnerAndConvId(ctx context.Context, ownerUuid, convId str
 
 // ==================== GetConversations ====================
 
-// GetConversations 查询会话列表
-//
-// 完整流程：
-//  1. 查出个人的所有会话 (conversation 表)
-//  2. 收集 Type=2 (群聊) 的 target_uuid
-//  3. 批量查 group_conversation 表拿到群的真实 max_seq / last_msg_*
-//  4. 内存替换：把个人会话中群聊记录的 max_seq / last_msg 替换成群热数据的真实值
-//  5. 重新计算群聊未读数：real_max_seq - read_seq
-//  6. 转 proto 返回
+// GetConversations 查询会话列表 (双协程并发多路归并版)
 func (s *Service) GetConversations(ctx context.Context, ownerUuid string, updatedSince int64, cursor string, pageSize int) ([]*pb.ConversationItem, bool, string, error) {
-	convs, hasMore, err := s.repo.List(ctx, ownerUuid, updatedSince, cursor, pageSize)
-	if err != nil {
-		return nil, false, "", fmt.Errorf("GetConversations: query failed: %w", err)
+	if pageSize <= 0 || pageSize > 200 {
+		pageSize = 50
 	}
 
-	// ---- 收集群聊 ID，批量查群热数据 ----
-	var groupIds []string
-	for _, c := range convs {
-		if c.Type == 2 { // GROUP
-			groupIds = append(groupIds, c.TargetUuid)
+	// 1. 解析游标
+	var cursorTimeMs int64 = 0
+	var cursorId int64 = 0
+	if cursor != "" {
+		parts := strings.SplitN(cursor, "_", 2)
+		if len(parts) == 2 {
+			cursorTimeMs, _ = strconv.ParseInt(parts[0], 10, 64)
+			cursorId, _ = strconv.ParseInt(parts[1], 10, 64)
 		}
 	}
 
-	var groupMap map[string]*model.GroupConversation
-	if len(groupIds) > 0 {
-		groupMap, err = s.repo.BatchGetGroupConvs(ctx, groupIds)
-		if err != nil {
-			// 群热数据查询失败不阻断，降级使用个人会话里的（可能过时的）数据
-			groupMap = map[string]*model.GroupConversation{}
+	// 2. 双协程并发拉取数据 (各拉 pageSize + 1 条用于判断 hasMore)
+	var p2pConvs []*model.Conversation
+	var groupConvs []*model.Conversation
+	var err1, err2 error
+	var wg sync.WaitGroup
+
+	fetchSize := pageSize + 1
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		p2pConvs, err1 = s.repo.ListP2P(ctx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+	}()
+
+	go func() {
+		defer wg.Done()
+		groupConvs, err2 = s.repo.ListGroup(ctx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+	}()
+
+	wg.Wait()
+	if err1 != nil {
+		return nil, false, "", fmt.Errorf("GetConversations P2P failed: %w", err1)
+	}
+	if err2 != nil {
+		return nil, false, "", fmt.Errorf("GetConversations Group failed: %w", err2)
+	}
+
+	// 3. 内存合并数据
+	merged := append(p2pConvs, groupConvs...)
+
+	// 如果数据为空，提前返回
+	if len(merged) == 0 {
+		return []*pb.ConversationItem{}, false, strconv.FormatInt(updatedSince, 10), nil
+	}
+
+	// 4. 内存降序排序 (核心：由于 ListGroup 已映射真实时间到 UpdatedAt，直接通用比较)
+	sort.Slice(merged, func(i, j int) bool {
+		timeI := merged[i].UpdatedAt.UnixMilli()
+		timeJ := merged[j].UpdatedAt.UnixMilli()
+		if timeI == timeJ {
+			return merged[i].Id > merged[j].Id // 时间相同，比较 ID (降序)
 		}
+		return timeI > timeJ // 时间不同，比较时间 (降序)
+	})
+
+	// 5. 截断控制：判断是否有下一页
+	hasMore := len(merged) > pageSize
+	if hasMore {
+		merged = merged[:pageSize] // 严格切出前 pageSize 条
 	}
 
-	// ---- 转换 + 拼装群热数据 ----
-	items := make([]*pb.ConversationItem, 0, len(convs))
-	if len(convs) == 0 {
-		// 结果为空时返回 updated_since，便于客户端断点续传
-		return items, hasMore, strconv.FormatInt(updatedSince, 10), nil
-	}
-
+	// 6. 组装返回结果
+	items := make([]*pb.ConversationItem, 0, len(merged))
 	var nextCursorStr string
-	for _, conv := range convs {
-		// 如果是群聊，用群热数据替换 max_seq / last_msg_*，并重新计算未读数
-		if conv.Type == 2 && groupMap != nil {
-			if gc, ok := groupMap[conv.TargetUuid]; ok {
-				conv.MaxSeq = gc.MaxSeq
-				conv.LastMsgId = gc.LastMsgId
-				conv.LastMsgPrev = gc.LastMsgPrev
-				conv.LastMsgAt = gc.LastMsgAt
-				// 动态计算未读数 = 群真实 max_seq - 个人 read_seq
-				unread := int(gc.MaxSeq - conv.ReadSeq)
-				if unread < 0 {
-					unread = 0
-				}
-				conv.UnreadCount = unread
+
+	for _, conv := range merged {
+		// 群聊未读数动态计算（此时 conv.MaxSeq 已经是真实的群 MaxSeq）
+		if conv.Type == int8(pb.ConvType_CONV_TYPE_GROUP) {
+			unread := int(conv.MaxSeq - conv.ReadSeq)
+			if unread < 0 {
+				unread = 0
 			}
+			conv.UnreadCount = unread
 		}
 
 		items = append(items, modelToConvItem(conv))
-		// 最后一条的 updated_at 和 id 组合成联合游标，防止毫秒级时间冲突导致丢数据
+		// 最后一条记录构成下一次的联合游标
 		nextCursorStr = fmt.Sprintf("%d_%d", conv.UpdatedAt.UnixMilli(), conv.Id)
 	}
 
