@@ -36,6 +36,13 @@ in this project. It is intended for AI agents and new contributors.
   - `internal/handler/`: gRPC 薄层，跨域操作→workflow，单域操作→直调 domain service
   - `mq/producer.go`: Kafka `msg.push` 生产者
   - **设计原则**：domain 不互相依赖；只有 usecase 可协调多 domain + 写 Kafka
+  - **Handler 路由规则（DDD 惯例）**：
+    - 跨领域操作（涉及 2+ domain 或 Kafka）→ 委托 usecase workflow（如 SendMessage / RecallMessage / MarkRead）
+    - 单领域操作 → 直接调用对应 domain service（如 PullMessages / GetConversations / DeleteConversation）
+    - handler 本身不含业务逻辑，仅做参数转换 + 错误映射
+  - **Usecase 非阻断策略**：
+    - 消息落库成功即视为发送成功，后续 Kafka 投递 / 会话 Upsert 失败仅 `logger.Warn`，不回滚消息
+    - 原因：客户端下次 PullMessages 可自愈；会话 Upsert 下条消息会重试覆盖
   - **数据模型**：
     - `model.Message` — 消息表（ULID msg_id，uidx_sender_client 幂等索引）
     - `model.Conversation` — 个人会话视图表（每人一条，记录 read_seq / mute / pin / clear_seq）
@@ -57,6 +64,10 @@ in this project. It is intended for AI agents and new contributors.
   the message, then extracted in gateway via `utils.ExtractErrorCode`.
 - Use `consts.IsNonServerError(code)` to decide if it is a user-facing error.
 - Log internal errors with context and return `CodeInternalError`.
+- **gRPC 错误码映射公式**：`status.Error(codes.Xxx, strconv.Itoa(consts.CodeXxx))`
+  - 已知业务错误（如 `ErrMessageNotFound`）使用 `errors.Is` 匹配后返回对应 `codes.NotFound` / `codes.PermissionDenied` 等
+  - 未知错误统一返回 `codes.Internal` + `consts.CodeInternalError`，并在返回前 `logger.Error` 记录
+  - 参考实现：`apps/msg/internal/handler/msg_handler.go` 的 `mapMsgDomainError` / `mapConvDomainError`
 
 #### 3.2 DTO ↔ Protobuf Conversion
 - Gateway request DTOs live in `apps/gateway/internal/dto`.
@@ -71,6 +82,12 @@ in this project. It is intended for AI agents and new contributors.
 
 #### 3.4 Logging
 - Use `logger.Info/Warn/Error` and include key fields (email, device, ip).
+- **日志用中文**：日志消息统一使用中文，字段 key 保持英文不变。
+- **Handler 层日志策略**：
+  - `grpcx.LoggingUnaryInterceptor` 已统一记录每次请求的 `method / cost / code / error`
+  - handler 层**禁止**重复记录入口/出口日志（冗余且噪声大）
+  - handler 仅在业务语义特殊时记录（如幂等缓存命中、降级处理）
+  - 详细的业务日志由 usecase / domain service 层负责
 - **禁止记录的敏感字段**:
   - ❌ `password` / `new_password` / `old_password`
   - ❌ `verify_code` / `verifyCode`
@@ -119,6 +136,12 @@ in this project. It is intended for AI agents and new contributors.
 - Local dev often uses `docker-compose.yml`.
 - Database init SQL: `config/mysql/init.sql`.
 - Avoid committing changes to `data/` (runtime databases).
+- **Service main.go 初始化模板**（标准顺序）：
+  1. Logger → 2. Async 协程池 → 3. MySQL → 4. Redis → 5. Kafka Producer → 6. 雪花算法
+  7. Repository → 8. Service → 9. Usecase → 10. Handler → 11. Metrics HTTP → 12. gRPC Server
+  - 参考：`apps/user/cmd/main.go`、`apps/msg/cmd/main.go`
+  - 环境变量命名：`{SERVICE}_GRPC_ADDR`（如 `MSG_GRPC_ADDR`）、`{SERVICE}_METRICS_ADDR`
+  - msg-service 强依赖 Redis（seq 分配 + 幂等锁），Redis 初始化失败应 `log.Fatalf`
 
 #### 3.10 Database & Models
 - Models in `model/` map to DB tables.
@@ -233,13 +256,45 @@ in this project. It is intended for AI agents and new contributors.
 - 配置：`config/async.go`，默认 `DefaultAsyncConfig()`。
 - 初始化：每个独立进程在 main 中调用 `async.Init`，并 `defer async.Release()`。
 - 上下文透传：业务层通过 `async.SetContextPropagator` 注入需要透传的字段，避免在 async 包内硬编码。
+- **⚠️ 禁止裸 `go func()`**：业务代码中禁止直接使用 `go func()` 启动协程，必须通过协程池管理。
+- **⚠️ 禁止直接调用 `async.Submit`**：`Submit` 是底层 API，不提供 Context 传播和 panic 恢复。业务代码统一使用 `async.RunSafe`。
 - **Submit vs RunSafe 区别**:
-  - `async.Submit`: 简单任务投递，无 Context 传播，无 panic 恢复
-  - `async.RunSafe`: 带 Context 传播、独立超时控制、panic recover（**推荐用于 gRPC 调用**）
+  - `async.Submit`: 底层 API，仅投递任务，无 Context 传播、无 panic 恢复（**仅限 pkg 内部使用**）
+  - `async.RunSafe`: 带 Context 传播、独立超时控制、panic recover（**业务代码唯一入口**）
 - **何时必须使用 RunSafe**:
   - 并发调用 gRPC 服务
   - 需要 trace_id/user_uuid 等上下文信息的异步任务
   - 父请求可能提前取消的场景（避免 context cancelled 错误）
+- **并发等待模式（RunSafe + channel + 优先级 Select）**:
+  当需要并发执行多个任务并等待所有结果时，使用 RunSafe + buffered channel + 优先级 Select 兜底：
+
+  > [!CAUTION]
+  > **⚠️ 禁止使用普通 select 同时监听 dataCh 和 waitCtx.Done()！**
+  > 若 context 超时瞬间数据恰好到达，两 case 同时就绪，Go 伪随机选择，有 **50%** 概率丢弃已有数据并触发多余的同步回退（严重性能损失）。
+
+  **正确写法（优先级 Select）**：
+  ```go
+  ch := make(chan Result, 1)
+  async.RunSafe(ctx, func(taskCtx context.Context) {
+      result, err := doQuery(taskCtx, ...)
+      ch <- Result{result, err}
+  }, 5*time.Second)
+
+  waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+  defer cancel()
+
+  select {
+  case r := <-ch:           // 正常：数据先到
+  case <-waitCtx.Done():    // 超时：但要再做一次非阻塞抢读
+      select {
+      case r := <-ch:       // 优先取数据（防止同时就绪被随机丢弃）
+          _ = r
+      default:              // 确认没有数据，走同步回退
+          result, err = fallbackSync(ctx, ...)
+      }
+  }
+  ```
+
 
 #### 3.19 Cross-domain Aggregation (Gateway)
 - 社交域只返回关系数据（UUID、备注、标签等），避免跨库依赖。
@@ -276,7 +331,7 @@ in this project. It is intended for AI agents and new contributors.
   5. Self-Sync：向发送方其他在线设备同步
 - **Kafka 分区键**：`conv_id`（保证同一会话的消息有序）。
 - **Proto 文件**：
-  - `proto/msg/msg_service.proto`：7 个 RPC（SendMessage / PullMessages / GetMessagesByIds / RecallMessage / GetConversations / MarkRead / DeleteConversation / UpdateConversationSettings）
+  - `proto/msg/msg_service.proto`：8 个 RPC（SendMessage / PullMessages / GetMessagesByIds / RecallMessage / GetConversations / MarkRead / DeleteConversation / UpdateConversationSettings）
   - `proto/msg/msg_common.proto`：`MsgItem`、`ConversationItem`、`ConvType` 枚举
   - `proto/msg/msg_push_event.proto`：`MsgPushEvent`、`RecallNotice`、`MarkReadNotice`
 - **Model**：`model/Message.go`、`model/Conversation.go`。

@@ -3,13 +3,13 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -49,13 +49,17 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	// ============================================================
 	result, err := w.msgService.CreateMessage(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("SendMessageWorkflow: create message failed: %w", err)
+		return nil, fmt.Errorf("SendMessageWorkflow: 创建消息失败: %w", err)
 	}
 
 	msg := result.Msg
 
 	// Step 2: 幂等命中 → 直接返回首次创建的结果
 	if result.IsIdempotent {
+		logger.Info(ctx, "发送消息：幂等命中，返回首次结果",
+			logger.String("msg_id", msg.MsgId),
+			logger.String("conv_id", msg.ConvId),
+		)
 		return &pb.SendMessageResponse{
 			MsgId:    msg.MsgId,
 			Seq:      msg.Seq,
@@ -68,7 +72,10 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	// Step 3: 会话领域 → Upsert 发送方会话
 	// ============================================================
 	if err := w.convService.UpsertForMessage(ctx, req.FromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
-		log.Printf("SendMessageWorkflow: upsert sender conv failed (non-fatal): %v", err)
+		logger.Warn(ctx, "发送消息：更新发送方会话失败（不阻断）",
+			logger.String("conv_id", msg.ConvId),
+			logger.ErrorField("error", err),
+		)
 	}
 
 	// ============================================================
@@ -77,12 +84,19 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	if req.ConvType == pb.ConvType_CONV_TYPE_P2P {
 		// 单聊写扩散：为接收方 upsert 会话 (isSender=false → unread + 1)
 		if err := w.convService.UpsertForMessage(ctx, req.TargetUuid, msg, req.ConvType, req.FromUuid, false); err != nil {
-			log.Printf("SendMessageWorkflow: upsert receiver conv failed (non-fatal): %v", err)
+			logger.Warn(ctx, "发送消息：更新接收方会话失败（不阻断）",
+				logger.String("conv_id", msg.ConvId),
+				logger.String("receiver", req.TargetUuid),
+				logger.ErrorField("error", err),
+			)
 		}
 	} else if req.ConvType == pb.ConvType_CONV_TYPE_GROUP {
 		// 群聊读扩散：只更新群热数据表
 		if err := w.convService.UpsertGroupConv(ctx, msg); err != nil {
-			log.Printf("SendMessageWorkflow: upsert group conv failed (non-fatal): %v", err)
+			logger.Warn(ctx, "发送消息：更新群会话热数据失败（不阻断）",
+				logger.String("conv_id", msg.ConvId),
+				logger.ErrorField("error", err),
+			)
 		}
 	}
 
@@ -103,7 +117,16 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	}
 
 	if err := w.producer.Publish(ctx, msg.ConvId, pushEvent); err != nil {
-		log.Printf("SendMessageWorkflow: publish kafka failed (non-fatal): %v", err)
+		logger.Warn(ctx, "发送消息：投递 Kafka 失败（不阻断）",
+			logger.String("conv_id", msg.ConvId),
+			logger.String("msg_id", msg.MsgId),
+			logger.ErrorField("error", err),
+		)
+	} else {
+		logger.Info(ctx, "发送消息：Kafka 投递成功",
+			logger.String("conv_id", msg.ConvId),
+			logger.String("msg_id", msg.MsgId),
+		)
 	}
 
 	// ============================================================

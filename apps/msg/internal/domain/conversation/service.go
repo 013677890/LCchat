@@ -7,11 +7,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
 const (
@@ -84,7 +85,20 @@ func (s *Service) UpsertForMessage(
 	}
 
 	// isSender 透传给 repository，控制 ON DUPLICATE KEY UPDATE 中的 unread 逻辑
-	return s.repo.Upsert(ctx, conv, isSender)
+	if err := s.repo.Upsert(ctx, conv, isSender); err != nil {
+		role := "接收方"
+		if isSender {
+			role = "发送方"
+		}
+		logger.Error(ctx, "Upsert 个人会话失败",
+			logger.String("owner", ownerUuid),
+			logger.String("conv_id", msg.ConvId),
+			logger.String("role", role),
+			logger.ErrorField("error", err),
+		)
+		return err
+	}
+	return nil
 }
 
 // UpsertGroupConv 发群消息时更新群会话热数据
@@ -102,7 +116,15 @@ func (s *Service) UpsertGroupConv(ctx context.Context, msg *model.Message) error
 		LastMsgAt:   &sendTime,
 	}
 
-	return s.repo.UpsertGroupConv(ctx, gc)
+	if err := s.repo.UpsertGroupConv(ctx, gc); err != nil {
+		logger.Error(ctx, "Upsert 群会话热数据失败",
+			logger.String("group_uuid", msg.ConvId),
+			logger.Int64("max_seq", msg.Seq),
+			logger.ErrorField("error", err),
+		)
+		return err
+	}
+	return nil
 }
 
 // GetByOwnerAndConvId 获取单个个人会话记录
@@ -129,31 +151,79 @@ func (s *Service) GetConversations(ctx context.Context, ownerUuid string, update
 		}
 	}
 
-	// 2. 双协程并发拉取数据 (各拉 pageSize + 1 条用于判断 hasMore)
+	// 2. 使用 RunSafe + channel 并发拉取数据 (各拉 pageSize + 1 条用于判断 hasMore)
+	//
+	// RunSafe 优势：Context 传播 + panic recover + 独立超时控制
+	// 协调策略：channel 通知完成，context.WithTimeout 兜底防止协程池提交失败导致永久阻塞
+	type convResult struct {
+		convs []*model.Conversation
+		err   error
+	}
+
+	fetchSize := pageSize + 1
+	p2pCh := make(chan convResult, 1)
+	groupCh := make(chan convResult, 1)
+
+	const asyncTimeout = 5 * time.Second
+
+	async.RunSafe(ctx, func(taskCtx context.Context) {
+		convs, err := s.repo.ListP2P(taskCtx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+		p2pCh <- convResult{convs, err}
+	}, asyncTimeout)
+
+	async.RunSafe(ctx, func(taskCtx context.Context) {
+		convs, err := s.repo.ListGroup(taskCtx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+		groupCh <- convResult{convs, err}
+	}, asyncTimeout)
+
+	// 收集结果：使用「优先级 Select」模式避免 Go select 伪随机问题。
+	//
+	// ⚠️ 普通 select 的陷阱：当 waitCtx 已超时且 dataCh 也有数据时，两个 case
+	// 同时就绪，Go 会随机选择，有 50% 概率丢弃已有数据并触发多余的同步回退。
+	//
+	// 修复策略：外层 select 先阻塞等待（数据 OR 超时），超时后再用内层非阻塞
+	// select（default 分支）抢读一次 channel，确保「有数据一定优先取数据」。
+	waitCtx, waitCancel := context.WithTimeout(ctx, asyncTimeout)
+	defer waitCancel()
+
 	var p2pConvs []*model.Conversation
 	var groupConvs []*model.Conversation
 	var err1, err2 error
-	var wg sync.WaitGroup
 
-	fetchSize := pageSize + 1
-	wg.Add(2)
+	// 优先级 Select — P2P
+	select {
+	case r := <-p2pCh:
+		p2pConvs, err1 = r.convs, r.err
+	case <-waitCtx.Done():
+		// 超时触发：但先尝试非阻塞读，防止数据在超时瞬间同时到达被随机丢弃
+		select {
+		case r := <-p2pCh:
+			p2pConvs, err1 = r.convs, r.err
+		default:
+			logger.Warn(ctx, "获取会话列表：P2P 异步超时")
+			p2pConvs, err1 = s.repo.ListP2P(ctx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+		}
+	}
 
-	go func() {
-		defer wg.Done()
-		p2pConvs, err1 = s.repo.ListP2P(ctx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
-	}()
+	// 优先级 Select — Group
+	select {
+	case r := <-groupCh:
+		groupConvs, err2 = r.convs, r.err
+	case <-waitCtx.Done():
+		select {
+		case r := <-groupCh:
+			groupConvs, err2 = r.convs, r.err
+		default:
+			logger.Warn(ctx, "获取会话列表：Group 异步超时")
+			groupConvs, err2 = s.repo.ListGroup(ctx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+		}
+	}
 
-	go func() {
-		defer wg.Done()
-		groupConvs, err2 = s.repo.ListGroup(ctx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
-	}()
-
-	wg.Wait()
 	if err1 != nil {
-		return nil, false, "", fmt.Errorf("GetConversations P2P failed: %w", err1)
+		return nil, false, "", fmt.Errorf("获取会话列表 P2P 查询失败: %w", err1)
 	}
 	if err2 != nil {
-		return nil, false, "", fmt.Errorf("GetConversations Group failed: %w", err2)
+		return nil, false, "", fmt.Errorf("获取会话列表 Group 查询失败: %w", err2)
 	}
 
 	// 3. 内存合并数据
@@ -211,11 +281,21 @@ func (s *Service) GetConversations(ctx context.Context, ownerUuid string, update
 func (s *Service) MarkRead(ctx context.Context, ownerUuid, convId string, readSeq int64) (int32, error) {
 	err := s.repo.UpdateReadSeq(ctx, ownerUuid, convId, readSeq)
 	if err != nil {
+		logger.Error(ctx, "标记已读：更新 read_seq 失败",
+			logger.String("owner", ownerUuid),
+			logger.String("conv_id", convId),
+			logger.ErrorField("error", err),
+		)
 		return 0, err
 	}
 	// 查询最新的会话状态获取 unread_count
 	conv, err := s.repo.GetByOwnerAndConvId(ctx, ownerUuid, convId)
 	if err != nil {
+		logger.Error(ctx, "标记已读：查询会话状态失败",
+			logger.String("owner", ownerUuid),
+			logger.String("conv_id", convId),
+			logger.ErrorField("error", err),
+		)
 		return 0, err
 	}
 	return int32(conv.UnreadCount), nil
@@ -228,14 +308,30 @@ func (s *Service) MarkRead(ctx context.Context, ownerUuid, convId string, readSe
 // status=1 + clear_seq=max_seq + read_seq=max_seq + unread=0
 // 收到新消息时 Upsert 自动 status=0 重新激活
 func (s *Service) DeleteConversation(ctx context.Context, ownerUuid, convId string) error {
-	return s.repo.Delete(ctx, ownerUuid, convId)
+	if err := s.repo.Delete(ctx, ownerUuid, convId); err != nil {
+		logger.Error(ctx, "逻辑删除会话失败",
+			logger.String("owner", ownerUuid),
+			logger.String("conv_id", convId),
+			logger.ErrorField("error", err),
+		)
+		return err
+	}
+	return nil
 }
 
 // ==================== UpdateSettings ====================
 
 // UpdateSettings 更新会话设置（免打扰/置顶）
 func (s *Service) UpdateSettings(ctx context.Context, ownerUuid, convId string, mute *bool, pin *bool) error {
-	return s.repo.UpdateSettings(ctx, ownerUuid, convId, mute, pin)
+	if err := s.repo.UpdateSettings(ctx, ownerUuid, convId, mute, pin); err != nil {
+		logger.Error(ctx, "更新会话设置失败",
+			logger.String("owner", ownerUuid),
+			logger.String("conv_id", convId),
+			logger.ErrorField("error", err),
+		)
+		return err
+	}
+	return nil
 }
 
 // ==================== 辅助方法 ====================

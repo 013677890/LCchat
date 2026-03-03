@@ -3,12 +3,12 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -41,8 +41,13 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 	// ============================================================
 	msg, err := w.msgService.RecallMessage(ctx, req.ConvId, req.MsgId, req.OperatorUuid)
 	if err != nil {
-		return nil, fmt.Errorf("RecallMessageWorkflow: recall failed: %w", err)
+		return nil, fmt.Errorf("RecallMessageWorkflow: 撤回失败: %w", err)
 	}
+
+	logger.Info(ctx, "撤回消息：DB 状态已更新",
+		logger.String("conv_id", req.ConvId),
+		logger.String("msg_id", req.MsgId),
+	)
 
 	// ============================================================
 	// Step 2: Kafka → MsgPushEvent{type="MSG_RECALL", data=RecallNotice}
@@ -56,13 +61,10 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 	noticeData, _ := proto.Marshal(notice)
 
 	// 确定 receiver + conv_type
-	// msg.ConvId 以 "p2p-" 开头则为单聊，否则为群聊
 	convType := pb.ConvType_CONV_TYPE_GROUP
 	receiverUuid := msg.ConvId // 群聊：receiver = 群 UUID
 	if len(msg.ConvId) > 4 && msg.ConvId[:4] == "p2p-" {
 		convType = pb.ConvType_CONV_TYPE_P2P
-		// 单聊：receiver = 会话内的另一方（非撤回操作者）
-		// 从 conv_id = "p2p-{uuid1}-{uuid2}" 中解析
 		receiverUuid = extractPeerUuid(msg.ConvId, req.OperatorUuid)
 	}
 
@@ -77,7 +79,16 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 
 	if err := w.producer.Publish(ctx, req.ConvId, pushEvent); err != nil {
 		// DB 已更新，Kafka 失败不阻断。客户端下次 PullMessages 也能看到 status=1
-		log.Printf("RecallMessageWorkflow: publish kafka failed (non-fatal): %v", err)
+		logger.Warn(ctx, "撤回消息：投递 Kafka 失败（不阻断）",
+			logger.String("conv_id", req.ConvId),
+			logger.String("msg_id", req.MsgId),
+			logger.ErrorField("error", err),
+		)
+	} else {
+		logger.Info(ctx, "撤回消息：Kafka 投递成功",
+			logger.String("conv_id", req.ConvId),
+			logger.String("msg_id", req.MsgId),
+		)
 	}
 
 	return &pb.RecallMessageResponse{}, nil

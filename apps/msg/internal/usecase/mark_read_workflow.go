@@ -3,12 +3,12 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -41,8 +41,14 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 	// ============================================================
 	unreadCount, err := w.convService.MarkRead(ctx, req.OwnerUuid, req.ConvId, req.ReadSeq)
 	if err != nil {
-		return nil, fmt.Errorf("MarkReadWorkflow: mark read failed: %w", err)
+		return nil, fmt.Errorf("MarkReadWorkflow: 标记已读失败: %w", err)
 	}
+
+	logger.Info(ctx, "标记已读：DB 已更新",
+		logger.String("conv_id", req.ConvId),
+		logger.Int64("read_seq", req.ReadSeq),
+		logger.Int32("unread_count", unreadCount),
+	)
 
 	// ============================================================
 	// Step 2: Kafka → MsgPushEvent{type="MSG_MARK_READ", data=MarkReadNotice}
@@ -64,7 +70,14 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 
 	if err := w.producer.Publish(ctx, req.ConvId, pushEvent); err != nil {
 		// DB 已更新，其他设备下次打开时会重新拉取最新 read_seq
-		log.Printf("MarkReadWorkflow: publish kafka failed (non-fatal): %v", err)
+		logger.Warn(ctx, "标记已读：投递 Kafka 失败（不阻断）",
+			logger.String("conv_id", req.ConvId),
+			logger.ErrorField("error", err),
+		)
+	} else {
+		logger.Info(ctx, "标记已读：Kafka 投递成功",
+			logger.String("conv_id", req.ConvId),
+		)
 	}
 
 	return &pb.MarkReadResponse{
