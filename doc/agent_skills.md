@@ -68,6 +68,12 @@ in this project. It is intended for AI agents and new contributors.
   - 已知业务错误（如 `ErrMessageNotFound`）使用 `errors.Is` 匹配后返回对应 `codes.NotFound` / `codes.PermissionDenied` 等
   - 未知错误统一返回 `codes.Internal` + `consts.CodeInternalError`，并在返回前 `logger.Error` 记录
   - 参考实现：`apps/msg/internal/handler/msg_handler.go` 的 `mapMsgDomainError` / `mapConvDomainError`
+- **Gateway 服务调用层（Service 层）错误日志处理**：
+  - gRPC 调用返回错误时，统一通过 `utils.ExtractErrorCode(err)` 提取业务状态码。
+  - 通过 `consts.IsNonServerError(bizCode)` 判断是否为客户端业务错误。
+  - 若为客户端业务错误（如无权限发消息、校验失败等），**不要**打印 Error 级别的服务内部日志，避免污染后端错误监控；若非常规业务错误，再打印 Error 日志记录失败原因及关键参数。
+- **gRPC 重试机制**：
+  - gRPC 的 `ServiceConfig` 中配置重试策略时，必须明确针对具体的 ServiceName（如 `user.AuthService`）。通用工具函数在创建 gRPC 连接时，应支持动态注入或生成针对特定 ServiceName 的策略 JSON，避免硬编码导致其他服务重试失效。
 
 #### 3.2 DTO ↔ Protobuf Conversion
 - Gateway request DTOs live in `apps/gateway/internal/dto`.
