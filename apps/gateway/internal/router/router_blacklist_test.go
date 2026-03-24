@@ -105,7 +105,7 @@ func buildBlacklistTestRouter(blacklistSvc service.BlacklistService) *gin.Engine
 	friendHandler := v1.NewFriendHandler(nil)
 	deviceHandler := v1.NewDeviceHandler(nil)
 	blacklistHandler := v1.NewBlacklistHandler(blacklistSvc)
-	return InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler)
+	return InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, nil)
 }
 
 func TestRouterBlacklistUnauthorized(t *testing.T) {

@@ -1,9 +1,42 @@
 package pb
 
 import (
+	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"context"
 )
+
+// MsgServiceClient 消息服务 gRPC 客户端接口
+// 职责：封装对消息服务的 gRPC 调用
+type MsgServiceClient interface {
+	// ==================== 消息发送 ====================
+	// SendMessage 发送消息
+	SendMessage(ctx context.Context, req *msgpb.SendMessageRequest) (*msgpb.SendMessageResponse, error)
+
+	// ==================== 消息拉取 ====================
+	// PullMessages 按会话增量拉取历史消息
+	PullMessages(ctx context.Context, req *msgpb.PullMessagesRequest) (*msgpb.PullMessagesResponse, error)
+
+	// GetMessagesByIds 批量获取指定消息
+	GetMessagesByIds(ctx context.Context, req *msgpb.GetMessagesByIdsRequest) (*msgpb.GetMessagesByIdsResponse, error)
+
+	// ==================== 消息操作 ====================
+	// RecallMessage 撤回消息
+	RecallMessage(ctx context.Context, req *msgpb.RecallMessageRequest) (*msgpb.RecallMessageResponse, error)
+
+	// ==================== 会话管理 ====================
+	// GetConversations 获取会话列表
+	GetConversations(ctx context.Context, req *msgpb.GetConversationsRequest) (*msgpb.GetConversationsResponse, error)
+
+	// MarkRead 标记会话已读
+	MarkRead(ctx context.Context, req *msgpb.MarkReadRequest) (*msgpb.MarkReadResponse, error)
+
+	// DeleteConversation 删除会话
+	DeleteConversation(ctx context.Context, req *msgpb.DeleteConversationRequest) (*msgpb.DeleteConversationResponse, error)
+
+	// UpdateConversationSettings 更新会话设置
+	UpdateConversationSettings(ctx context.Context, req *msgpb.UpdateConvSettingsRequest) (*msgpb.UpdateConvSettingsResponse, error)
+}
 
 // UserServiceClient 用户服务 gRPC 客户端接口
 // 职责：封装对用户服务的 gRPC 调用

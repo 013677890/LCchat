@@ -1,20 +1,6 @@
 package main
 
 import (
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/router"
-	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
-	"github.com/013677890/LCchat-Backend/config"
-	"github.com/013677890/LCchat-Backend/consts/redisKey"
-	"github.com/013677890/LCchat-Backend/pkg/async"
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	pkgminio "github.com/013677890/LCchat-Backend/pkg/minio"
-	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"context"
 	"fmt"
 	"net/http"
@@ -22,6 +8,21 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/router"
+	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/config"
+	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	pkgminio "github.com/013677890/LCchat-Backend/pkg/minio"
+	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 
 	"github.com/gin-gonic/gin"
 )
@@ -196,6 +197,31 @@ func main() {
 	userClient := pb.NewUserServiceClient(userServiceConn, userServiceConn, userServiceConn, userServiceConn, userServiceConn, userServiceBreaker)
 	logger.Info(ctx, "用户服务 gRPC 客户端初始化完成", logger.String("address", userServiceAddr))
 
+	// 5.4 初始化消息服务 gRPC 连接
+	msgServiceAddr := os.Getenv("MSG_SERVICE_ADDR")
+	if msgServiceAddr == "" {
+		msgServiceAddr = "localhost:9092"
+	}
+
+	msgServiceBreaker := pb.CreateCircuitBreaker("msg-service")
+	logger.Info(ctx, "消息服务熔断器创建成功", logger.String("name", "msg-service"))
+
+	msgServiceConn, err := pb.CreateMsgServiceConnection(msgServiceAddr, msgServiceBreaker)
+	if err != nil {
+		logger.Error(ctx, "创建消息服务 gRPC 连接失败", logger.ErrorField("error", err))
+		os.Exit(1)
+	}
+	defer func() {
+		if err := msgServiceConn.Close(); err != nil {
+			logger.Error(ctx, "关闭消息服务 gRPC 连接失败", logger.ErrorField("error", err))
+		}
+	}()
+	logger.Info(ctx, "消息服务 gRPC 连接创建成功", logger.String("address", msgServiceAddr))
+
+	// 5.5 创建消息服务 gRPC 客户端
+	msgClient := pb.NewMsgServiceClient(msgServiceConn, msgServiceBreaker)
+	logger.Info(ctx, "消息服务 gRPC 客户端初始化完成", logger.String("address", msgServiceAddr))
+
 	// 6. 初始化 Service 层（依赖注入）
 	authService := service.NewAuthService(userClient)
 	logger.Info(ctx, "认证服务初始化完成")
@@ -211,6 +237,9 @@ func main() {
 
 	deviceService := service.NewDeviceService(userClient)
 	logger.Info(ctx, "设备服务初始化完成")
+
+	msgService := service.NewMsgService(msgClient)
+	logger.Info(ctx, "消息服务初始化完成")
 
 	// 7. 初始化 Handler 层（依赖注入）
 	authHandler := v1.NewAuthHandler(authService)
@@ -228,6 +257,9 @@ func main() {
 	deviceHandler := v1.NewDeviceHandler(deviceService)
 	logger.Info(ctx, "设备处理器初始化完成")
 
+	msgHandler := v1.NewMsgHandler(msgService)
+	logger.Info(ctx, "消息处理器初始化完成")
+
 	// 8. 初始化路由（依赖注入）
 	// Gin 模式设置: ReleaseMode/DebugMode/TestMode
 	ginMode := os.Getenv("GIN_MODE")
@@ -235,7 +267,7 @@ func main() {
 		ginMode = gin.ReleaseMode
 	}
 	gin.SetMode(ginMode)
-	r := router.InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler)
+	r := router.InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, msgHandler)
 	logger.Info(ctx, "路由初始化完成")
 
 	// 9. 配置服务器

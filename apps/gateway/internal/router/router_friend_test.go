@@ -190,7 +190,7 @@ func buildFriendTestRouter(friendSvc service.FriendService) *gin.Engine {
 	friendHandler := v1.NewFriendHandler(friendSvc)
 	blacklistHandler := v1.NewBlacklistHandler(nil)
 	deviceHandler := v1.NewDeviceHandler(nil)
-	return InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler)
+	return InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, nil)
 }
 
 func TestRouterFriendUnauthorized(t *testing.T) {
