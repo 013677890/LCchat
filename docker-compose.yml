@@ -41,7 +41,8 @@ services:
       - chat-network
 
   kafka:
-    image: ${KAFKA_IMAGE:-apache/kafka:latest}
+    # 固定小版本，避免 latest 漂移导致本地/CI 行为不一致
+    image: ${KAFKA_IMAGE:-apache/kafka:3.9.2}
     restart: unless-stopped
     environment:
       KAFKA_NODE_ID: "1"
@@ -83,6 +84,39 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    networks:
+      - chat-network
+
+  connect:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    working_dir: /app/apps/connect
+    command: ["go", "run", "cmd/main.go"]
+    env_file:
+      - ./deploy/env/chatserver.env
+    environment:
+      TZ: ${TZ:-UTC}
+      GIN_MODE: ${GIN_MODE:-release}
+      # 容器内需访问 user 服务，不可使用默认的 :9090
+      USER_GRPC_ADDR: "user:9090"
+      CONNECT_ADDR: ":8081"
+      CONNECT_GRPC_ADDR: ":9091"
+    depends_on:
+      user:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${CONNECT_HTTP_PORT:-8081}:8081"
+      - "${CONNECT_GRPC_PORT:-9092}:9091"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8081' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     networks:
       - chat-network
 
