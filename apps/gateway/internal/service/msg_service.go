@@ -5,9 +5,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
 // MsgServiceImpl 消息服务实现
@@ -31,14 +29,6 @@ func (s *MsgServiceImpl) SendMessage(ctx context.Context, req *dto.SendMessageRe
 
 	resp, err := s.msgClient.SendMessage(ctx, protoReq)
 	if err != nil {
-		bizCode := utils.ExtractErrorCode(err)
-		if !isNonServerMsgError(bizCode) {
-			logger.Error(ctx, "发送消息 gRPC 调用失败",
-				logger.ErrorField("error", err),
-				logger.String("from_uuid", userUUID),
-				logger.String("target_uuid", req.TargetUUID),
-			)
-		}
 		return nil, err
 	}
 
@@ -51,13 +41,6 @@ func (s *MsgServiceImpl) PullMessages(ctx context.Context, req *dto.PullMessages
 
 	resp, err := s.msgClient.PullMessages(ctx, protoReq)
 	if err != nil {
-		bizCode := utils.ExtractErrorCode(err)
-		if !isNonServerMsgError(bizCode) {
-			logger.Error(ctx, "拉取消息 gRPC 调用失败",
-				logger.ErrorField("error", err),
-				logger.String("conv_id", req.ConvID),
-			)
-		}
 		return nil, err
 	}
 
@@ -70,13 +53,6 @@ func (s *MsgServiceImpl) GetMessagesByIds(ctx context.Context, req *dto.GetMessa
 
 	resp, err := s.msgClient.GetMessagesByIds(ctx, protoReq)
 	if err != nil {
-		bizCode := utils.ExtractErrorCode(err)
-		if !isNonServerMsgError(bizCode) {
-			logger.Error(ctx, "批量获取消息 gRPC 调用失败",
-				logger.ErrorField("error", err),
-				logger.String("conv_id", req.ConvID),
-			)
-		}
 		return nil, err
 	}
 
@@ -90,19 +66,7 @@ func (s *MsgServiceImpl) RecallMessage(ctx context.Context, req *dto.RecallMessa
 	protoReq := dto.ConvertToProtoRecallMessageRequest(req, userUUID)
 
 	_, err := s.msgClient.RecallMessage(ctx, protoReq)
-	if err != nil {
-		bizCode := utils.ExtractErrorCode(err)
-		if !isNonServerMsgError(bizCode) {
-			logger.Error(ctx, "撤回消息 gRPC 调用失败",
-				logger.ErrorField("error", err),
-				logger.String("conv_id", req.ConvID),
-				logger.String("msg_id", req.MsgID),
-			)
-		}
-		return err
-	}
-
-	return nil
+	return err
 }
 
 // GetConversations 获取会话列表
@@ -113,13 +77,6 @@ func (s *MsgServiceImpl) GetConversations(ctx context.Context, req *dto.GetConve
 
 	resp, err := s.msgClient.GetConversations(ctx, protoReq)
 	if err != nil {
-		bizCode := utils.ExtractErrorCode(err)
-		if !isNonServerMsgError(bizCode) {
-			logger.Error(ctx, "获取会话列表 gRPC 调用失败",
-				logger.ErrorField("error", err),
-				logger.String("owner_uuid", userUUID),
-			)
-		}
 		return nil, err
 	}
 
@@ -134,14 +91,6 @@ func (s *MsgServiceImpl) MarkRead(ctx context.Context, req *dto.MarkReadRequest)
 
 	resp, err := s.msgClient.MarkRead(ctx, protoReq)
 	if err != nil {
-		bizCode := utils.ExtractErrorCode(err)
-		if !isNonServerMsgError(bizCode) {
-			logger.Error(ctx, "标记已读 gRPC 调用失败",
-				logger.ErrorField("error", err),
-				logger.String("conv_id", req.ConvID),
-				logger.String("owner_uuid", userUUID),
-			)
-		}
 		return nil, err
 	}
 
@@ -155,19 +104,7 @@ func (s *MsgServiceImpl) DeleteConversation(ctx context.Context, req *dto.Delete
 	protoReq := dto.ConvertToProtoDeleteConversationRequest(req, userUUID)
 
 	_, err := s.msgClient.DeleteConversation(ctx, protoReq)
-	if err != nil {
-		bizCode := utils.ExtractErrorCode(err)
-		if !isNonServerMsgError(bizCode) {
-			logger.Error(ctx, "删除会话 gRPC 调用失败",
-				logger.ErrorField("error", err),
-				logger.String("conv_id", req.ConvID),
-				logger.String("owner_uuid", userUUID),
-			)
-		}
-		return err
-	}
-
-	return nil
+	return err
 }
 
 // UpdateConversationSettings 更新会话设置
@@ -177,22 +114,5 @@ func (s *MsgServiceImpl) UpdateConversationSettings(ctx context.Context, req *dt
 	protoReq := dto.ConvertToProtoUpdateConvSettingsRequest(req, userUUID)
 
 	_, err := s.msgClient.UpdateConversationSettings(ctx, protoReq)
-	if err != nil {
-		bizCode := utils.ExtractErrorCode(err)
-		if !isNonServerMsgError(bizCode) {
-			logger.Error(ctx, "更新会话设置 gRPC 调用失败",
-				logger.ErrorField("error", err),
-				logger.String("conv_id", req.ConvID),
-				logger.String("owner_uuid", userUUID),
-			)
-		}
-		return err
-	}
-
-	return nil
-}
-
-// isNonServerMsgError 判断是否为非服务端错误（业务错误码 10000~29999）
-func isNonServerMsgError(code int) bool {
-	return code >= 10000 && code < 30000
+	return err
 }

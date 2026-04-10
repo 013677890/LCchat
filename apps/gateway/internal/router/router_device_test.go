@@ -14,6 +14,7 @@ import (
 	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
@@ -21,8 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeRouterDeviceService struct {
@@ -258,16 +257,16 @@ func TestRouterDeviceErrorMapping(t *testing.T) {
 	t.Run("business_error_passthrough", func(t *testing.T) {
 		svc := &fakeRouterDeviceService{
 			getDeviceListFn: func(_ context.Context) (*dto.GetDeviceListResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeUnauthorized), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeUnauthorized))
 			},
 			kickDeviceFn: func(_ context.Context, _ *dto.KickDeviceRequest) (*dto.KickDeviceResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeDeviceNotFound), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeDeviceNotFound))
 			},
 			getOnlineStatusFn: func(_ context.Context, _ *dto.GetOnlineStatusRequest) (*dto.GetOnlineStatusResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeDeviceNotFound), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeDeviceNotFound))
 			},
 			batchGetOnlineStatusFn: func(_ context.Context, _ *dto.BatchGetOnlineStatusRequest) (*dto.BatchGetOnlineStatusResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeParamError), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeParamError))
 			},
 		}
 		r := buildDeviceTestRouter(svc)

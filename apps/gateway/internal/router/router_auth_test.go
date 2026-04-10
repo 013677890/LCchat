@@ -14,6 +14,7 @@ import (
 	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
@@ -21,8 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeRouterAuthService struct {
@@ -507,7 +506,7 @@ func TestRouterAuthBusinessErrorMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bizErr := status.Error(codes.Code(tt.bizCode), "biz")
+			bizErr := apperr.ToStatus(apperr.New(tt.bizCode))
 			svc := &fakeRouterAuthService{}
 			tt.setupSvc(svc, bizErr)
 			r := buildAuthTestRouter(svc)

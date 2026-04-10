@@ -81,6 +81,15 @@ func Fail(c *gin.Context, data interface{}, code int) {
 	Result(c, data, "", code)
 }
 
+// FailServer 返回失败响应，并将 upstreamErr 挂入 gin 错误链，供 GinLogger 在请求结束时统一记录（含当前层 apperr 堆栈）。
+// 业务错误（如密码错误）请只用 Fail，不要传入 upstreamErr。
+func FailServer(c *gin.Context, upstreamErr error, code int) {
+	if upstreamErr != nil {
+		_ = c.Error(upstreamErr)
+	}
+	Fail(c, nil, code)
+}
+
 // SuccessWithMessage 返回成功响应并自定义消息
 func SuccessWithMessage(c *gin.Context, data interface{}, message string) {
 	Result(c, data, message, consts.CodeSuccess)

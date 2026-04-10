@@ -44,11 +44,6 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 		return nil, fmt.Errorf("RecallMessageWorkflow: 撤回失败: %w", err)
 	}
 
-	logger.Info(ctx, "撤回消息：DB 状态已更新",
-		logger.String("conv_id", req.ConvId),
-		logger.String("msg_id", req.MsgId),
-	)
-
 	// ============================================================
 	// Step 2: Kafka → MsgPushEvent{type="MSG_RECALL", data=RecallNotice}
 	// ============================================================
@@ -83,11 +78,6 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 			logger.String("conv_id", req.ConvId),
 			logger.String("msg_id", req.MsgId),
 			logger.ErrorField("error", err),
-		)
-	} else {
-		logger.Info(ctx, "撤回消息：Kafka 投递成功",
-			logger.String("conv_id", req.ConvId),
-			logger.String("msg_id", req.MsgId),
 		)
 	}
 

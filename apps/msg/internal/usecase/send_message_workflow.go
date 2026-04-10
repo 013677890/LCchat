@@ -56,10 +56,6 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 
 	// Step 2: 幂等命中 → 直接返回首次创建的结果
 	if result.IsIdempotent {
-		logger.Info(ctx, "发送消息：幂等命中，返回首次结果",
-			logger.String("msg_id", msg.MsgId),
-			logger.String("conv_id", msg.ConvId),
-		)
 		return &pb.SendMessageResponse{
 			MsgId:    msg.MsgId,
 			Seq:      msg.Seq,
@@ -121,11 +117,6 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 			logger.String("conv_id", msg.ConvId),
 			logger.String("msg_id", msg.MsgId),
 			logger.ErrorField("error", err),
-		)
-	} else {
-		logger.Info(ctx, "发送消息：Kafka 投递成功",
-			logger.String("conv_id", msg.ConvId),
-			logger.String("msg_id", msg.MsgId),
 		)
 	}
 

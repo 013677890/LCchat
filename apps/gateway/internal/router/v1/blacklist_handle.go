@@ -6,7 +6,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 
 	"github.com/gin-gonic/gin"
@@ -49,10 +48,7 @@ func (h *BlacklistHandler) AddBlacklist(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "拉黑用户服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -88,10 +84,7 @@ func (h *BlacklistHandler) RemoveBlacklist(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "取消拉黑服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -131,10 +124,7 @@ func (h *BlacklistHandler) GetBlacklistList(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "获取黑名单列表服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -166,10 +156,7 @@ func (h *BlacklistHandler) CheckIsBlacklist(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "判断是否拉黑服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 

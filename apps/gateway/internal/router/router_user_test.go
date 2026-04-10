@@ -14,6 +14,7 @@ import (
 	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
@@ -21,8 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeRouterUserService struct {
@@ -428,7 +427,7 @@ func TestRouterUserErrorMapping(t *testing.T) {
 	t.Run("business_error_passthrough", func(t *testing.T) {
 		r := buildRouterUserTestRouter(&fakeRouterUserService{
 			getProfileFn: func(_ context.Context) (*dto.GetProfileResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeUserNotFound), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeUserNotFound))
 			},
 		})
 

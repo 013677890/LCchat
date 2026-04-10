@@ -1,21 +1,19 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"sort"
+	"time"
+
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
-	"context"
-	"errors"
-	"sort"
-	"strconv"
-	"time"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // deviceServiceImpl 设备会话服务实现
@@ -34,19 +32,14 @@ func NewDeviceService(deviceRepo repository.IDeviceRepository) DeviceService {
 func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *pb.GetDeviceListRequest) (*pb.GetDeviceListResponse, error) {
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Warn(ctx, "获取设备列表失败：user_uuid 为空")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	deviceID := util.GetDeviceIDFromContext(ctx)
 
 	sessionsByUser, err := s.deviceRepo.BatchGetOnlineStatus(ctx, []string{userUUID})
 	if err != nil {
-		logger.Error(ctx, "获取设备列表失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取设备列表失败")
 	}
 	sessions := sessionsByUser[userUUID]
 
@@ -102,43 +95,32 @@ func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *pb.GetDevice
 func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *pb.KickDeviceRequest) error {
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Warn(ctx, "踢出设备失败：user_uuid 为空")
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return apperr.New(consts.CodeUnauthorized)
 	}
 
 	if req == nil || req.DeviceId == "" {
-		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return apperr.New(consts.CodeParamError)
 	}
 
 	currentDeviceID := util.GetDeviceIDFromContext(ctx)
 	if currentDeviceID != "" && currentDeviceID == req.DeviceId {
-		return status.Error(codes.FailedPrecondition, strconv.Itoa(consts.CodeCannotKickCurrent))
+		return apperr.New(consts.CodeCannotKickCurrent)
 	}
 
 	session, err := s.deviceRepo.GetByDeviceID(ctx, userUUID, req.DeviceId)
 	if err != nil {
 		if errors.Is(err, repository.ErrRecordNotFound) {
-			return status.Error(codes.NotFound, strconv.Itoa(consts.CodeDeviceNotFound))
+			return apperr.New(consts.CodeDeviceNotFound)
 		}
-		logger.Error(ctx, "踢出设备失败：查询设备会话失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("device_id", req.DeviceId),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：查询设备会话失败")
 	}
 	if session == nil {
-		return status.Error(codes.NotFound, strconv.Itoa(consts.CodeDeviceNotFound))
+		return apperr.New(consts.CodeDeviceNotFound)
 	}
 
 	// 幂等语义：无论 token 是否已删除，都返回成功；仅 Redis 异常才报错。
 	if err := s.deviceRepo.DeleteTokens(ctx, userUUID, req.DeviceId); err != nil {
-		logger.Error(ctx, "踢出设备失败：删除设备 Token 失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("device_id", req.DeviceId),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：删除设备 Token 失败")
 	}
 
 	// status 语义：0=在线, 1=离线, 2=注销, 3=被踢出。
@@ -146,22 +128,11 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *pb.KickDeviceRe
 	if session.Status == model.DeviceStatusOnline || session.Status == model.DeviceStatusOffline {
 		if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, model.DeviceStatusKicked); err != nil {
 			if errors.Is(err, repository.ErrRecordNotFound) {
-				return status.Error(codes.NotFound, strconv.Itoa(consts.CodeDeviceNotFound))
+				return apperr.New(consts.CodeDeviceNotFound)
 			}
-			logger.Error(ctx, "踢出设备失败：更新设备状态失败",
-				logger.String("user_uuid", userUUID),
-				logger.String("device_id", req.DeviceId),
-				logger.ErrorField("error", err),
-			)
-			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+			return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：更新设备状态失败")
 		}
 	}
-
-	logger.Info(ctx, "踢出设备成功",
-		logger.String("user_uuid", userUUID),
-		logger.String("device_id", req.DeviceId),
-		logger.Int("before_status", int(session.Status)),
-	)
 
 	return nil
 }
@@ -169,16 +140,12 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *pb.KickDeviceRe
 // GetOnlineStatus 获取用户在线状态
 func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *pb.GetOnlineStatusRequest) (*pb.GetOnlineStatusResponse, error) {
 	if req == nil || req.UserUuid == "" {
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return nil, apperr.New(consts.CodeParamError)
 	}
 
 	sessionsByUser, err := s.deviceRepo.BatchGetOnlineStatus(ctx, []string{req.UserUuid})
 	if err != nil {
-		logger.Error(ctx, "获取在线状态失败：查询设备会话失败",
-			logger.String("user_uuid", req.UserUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取在线状态失败：查询设备会话失败")
 	}
 	sessions := sessionsByUser[req.UserUuid]
 
@@ -265,7 +232,7 @@ func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *pb.GetOnli
 // BatchGetOnlineStatus 批量获取在线状态
 func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *pb.BatchGetOnlineStatusRequest) (*pb.BatchGetOnlineStatusResponse, error) {
 	if req == nil || len(req.UserUuids) == 0 || len(req.UserUuids) > 100 {
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return nil, apperr.New(consts.CodeParamError)
 	}
 
 	// 去重后查询，返回结果按请求顺序组装。
@@ -273,7 +240,7 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *pb.Ba
 	seen := make(map[string]struct{}, len(req.UserUuids))
 	for _, userUUID := range req.UserUuids {
 		if userUUID == "" {
-			return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+			return nil, apperr.New(consts.CodeParamError)
 		}
 		if _, ok := seen[userUUID]; ok {
 			continue
@@ -284,11 +251,7 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *pb.Ba
 
 	sessionsByUser, err := s.deviceRepo.BatchGetOnlineStatus(ctx, unique)
 	if err != nil {
-		logger.Error(ctx, "批量获取在线状态失败：查询设备会话失败",
-			logger.Int("user_count", len(unique)),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "批量获取在线状态失败")
 	}
 
 	nowSec := time.Now().Unix()
@@ -378,14 +341,14 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *pb.Ba
 // 由 gateway/connect 在本地节流命中后调用，仅更新 Redis 活跃时间。
 func (s *deviceServiceImpl) UpdateDeviceActive(ctx context.Context, req *pb.UpdateDeviceActiveRequest) error {
 	if req == nil || len(req.Items) == 0 {
-		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return apperr.New(consts.CodeParamError)
 	}
 
 	nowSec := time.Now().Unix()
 	repoItems := make([]repository.DeviceActiveItem, 0, len(req.Items))
 	for _, item := range req.Items {
 		if item == nil || item.UserUuid == "" || item.DeviceId == "" {
-			return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+			return apperr.New(consts.CodeParamError)
 		}
 		repoItems = append(repoItems, repository.DeviceActiveItem{
 			UserUUID: item.UserUuid,
@@ -394,11 +357,7 @@ func (s *deviceServiceImpl) UpdateDeviceActive(ctx context.Context, req *pb.Upda
 	}
 
 	if err := s.deviceRepo.BatchSetActiveTimestamps(ctx, repoItems, nowSec); err != nil {
-		logger.Error(ctx, "UpdateDeviceActive: 批量更新设备活跃时间失败",
-			logger.Int("item_count", len(repoItems)),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "批量更新设备活跃时间失败")
 	}
 
 	return nil
@@ -409,40 +368,23 @@ func (s *deviceServiceImpl) UpdateDeviceActive(ctx context.Context, req *pb.Upda
 // 幂等语义：设备不存在时视为成功（可能设备已被踢出或注销）。
 func (s *deviceServiceImpl) UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) error {
 	if req == nil || req.UserUuid == "" || req.DeviceId == "" {
-		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return apperr.New(consts.CodeParamError)
 	}
 
 	// 仅允许 0(在线) 和 1(离线) 两种状态。
 	targetStatus := int8(req.Status)
 	if targetStatus != model.DeviceStatusOnline && targetStatus != model.DeviceStatusOffline {
-		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return apperr.New(consts.CodeParamError)
 	}
 
 	if err := s.deviceRepo.UpdateOnlineStatus(ctx, req.UserUuid, req.DeviceId, targetStatus); err != nil {
 		// 幂等语义：设备不存在时不视为错误。
 		// 场景：设备已被踢出/注销后 connect 的延迟断连通知。
 		if errors.Is(err, repository.ErrRecordNotFound) {
-			logger.Info(ctx, "UpdateDeviceStatus: 设备不存在，跳过",
-				logger.String("user_uuid", req.UserUuid),
-				logger.String("device_id", req.DeviceId),
-				logger.Int("status", int(targetStatus)),
-			)
 			return nil
 		}
-		logger.Error(ctx, "UpdateDeviceStatus: 更新设备状态失败",
-			logger.String("user_uuid", req.UserUuid),
-			logger.String("device_id", req.DeviceId),
-			logger.Int("status", int(targetStatus)),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "更新设备状态失败")
 	}
-
-	logger.Info(ctx, "UpdateDeviceStatus: 设备状态已更新",
-		logger.String("user_uuid", req.UserUuid),
-		logger.String("device_id", req.DeviceId),
-		logger.Int("status", int(targetStatus)),
-	)
 
 	return nil
 }

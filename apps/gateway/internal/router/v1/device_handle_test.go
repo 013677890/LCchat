@@ -13,14 +13,11 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeDeviceHTTPService struct {
@@ -68,7 +65,6 @@ var gatewayDeviceHandlerLoggerOnce sync.Once
 
 func initGatewayDeviceHandlerLogger() {
 	gatewayDeviceHandlerLoggerOnce.Do(func() {
-		logger.ReplaceGlobal(zap.NewNop())
 		gin.SetMode(gin.TestMode)
 	})
 }
@@ -115,7 +111,7 @@ func TestDeviceHandlerGetDeviceList(t *testing.T) {
 			setupSvc: func(s *fakeDeviceHTTPService, called *bool) {
 				s.getDeviceListFn = func(_ context.Context) (*dto.GetDeviceListResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeUnauthorized), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeUnauthorized))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -202,7 +198,7 @@ func TestDeviceHandlerKickDevice(t *testing.T) {
 				name: "business_error",
 				setupFn: func(s *fakeDeviceHTTPService) {
 					s.kickDeviceFn = func(_ context.Context, _ *dto.KickDeviceRequest) (*dto.KickDeviceResponse, error) {
-						return nil, status.Error(codes.Code(consts.CodeDeviceNotFound), "biz")
+						return nil, apperr.ToStatus(apperr.New(consts.CodeDeviceNotFound))
 					}
 				},
 				wantStatus: http.StatusOK,
@@ -286,7 +282,7 @@ func TestDeviceHandlerGetOnlineStatus(t *testing.T) {
 				name: "business_error",
 				setupFn: func(s *fakeDeviceHTTPService) {
 					s.getOnlineStatusFn = func(_ context.Context, _ *dto.GetOnlineStatusRequest) (*dto.GetOnlineStatusResponse, error) {
-						return nil, status.Error(codes.Code(consts.CodeDeviceNotFound), "biz")
+						return nil, apperr.ToStatus(apperr.New(consts.CodeDeviceNotFound))
 					}
 				},
 				wantStatus: http.StatusOK,
@@ -395,7 +391,7 @@ func TestDeviceHandlerBatchGetOnlineStatus(t *testing.T) {
 				name: "business_error",
 				setupFn: func(s *fakeDeviceHTTPService) {
 					s.batchGetOnlineStatusFn = func(_ context.Context, _ *dto.BatchGetOnlineStatusRequest) (*dto.BatchGetOnlineStatusResponse, error) {
-						return nil, status.Error(codes.Code(consts.CodeParamError), "biz")
+						return nil, apperr.ToStatus(apperr.New(consts.CodeParamError))
 					}
 				},
 				wantStatus: http.StatusOK,

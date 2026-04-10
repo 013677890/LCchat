@@ -86,16 +86,6 @@ func (s *Service) UpsertForMessage(
 
 	// isSender 透传给 repository，控制 ON DUPLICATE KEY UPDATE 中的 unread 逻辑
 	if err := s.repo.Upsert(ctx, conv, isSender); err != nil {
-		role := "接收方"
-		if isSender {
-			role = "发送方"
-		}
-		logger.Error(ctx, "Upsert 个人会话失败",
-			logger.String("owner", ownerUuid),
-			logger.String("conv_id", msg.ConvId),
-			logger.String("role", role),
-			logger.ErrorField("error", err),
-		)
 		return err
 	}
 	return nil
@@ -117,11 +107,6 @@ func (s *Service) UpsertGroupConv(ctx context.Context, msg *model.Message) error
 	}
 
 	if err := s.repo.UpsertGroupConv(ctx, gc); err != nil {
-		logger.Error(ctx, "Upsert 群会话热数据失败",
-			logger.String("group_uuid", msg.ConvId),
-			logger.Int64("max_seq", msg.Seq),
-			logger.ErrorField("error", err),
-		)
 		return err
 	}
 	return nil
@@ -281,21 +266,11 @@ func (s *Service) GetConversations(ctx context.Context, ownerUuid string, update
 func (s *Service) MarkRead(ctx context.Context, ownerUuid, convId string, readSeq int64) (int32, error) {
 	err := s.repo.UpdateReadSeq(ctx, ownerUuid, convId, readSeq)
 	if err != nil {
-		logger.Error(ctx, "标记已读：更新 read_seq 失败",
-			logger.String("owner", ownerUuid),
-			logger.String("conv_id", convId),
-			logger.ErrorField("error", err),
-		)
 		return 0, err
 	}
 	// 查询最新的会话状态获取 unread_count
 	conv, err := s.repo.GetByOwnerAndConvId(ctx, ownerUuid, convId)
 	if err != nil {
-		logger.Error(ctx, "标记已读：查询会话状态失败",
-			logger.String("owner", ownerUuid),
-			logger.String("conv_id", convId),
-			logger.ErrorField("error", err),
-		)
 		return 0, err
 	}
 	return int32(conv.UnreadCount), nil
@@ -309,11 +284,6 @@ func (s *Service) MarkRead(ctx context.Context, ownerUuid, convId string, readSe
 // 收到新消息时 Upsert 自动 status=0 重新激活
 func (s *Service) DeleteConversation(ctx context.Context, ownerUuid, convId string) error {
 	if err := s.repo.Delete(ctx, ownerUuid, convId); err != nil {
-		logger.Error(ctx, "逻辑删除会话失败",
-			logger.String("owner", ownerUuid),
-			logger.String("conv_id", convId),
-			logger.ErrorField("error", err),
-		)
 		return err
 	}
 	return nil
@@ -324,11 +294,6 @@ func (s *Service) DeleteConversation(ctx context.Context, ownerUuid, convId stri
 // UpdateSettings 更新会话设置（免打扰/置顶）
 func (s *Service) UpdateSettings(ctx context.Context, ownerUuid, convId string, mute *bool, pin *bool) error {
 	if err := s.repo.UpdateSettings(ctx, ownerUuid, convId, mute, pin); err != nil {
-		logger.Error(ctx, "更新会话设置失败",
-			logger.String("owner", ownerUuid),
-			logger.String("conv_id", convId),
-			logger.ErrorField("error", err),
-		)
 		return err
 	}
 	return nil

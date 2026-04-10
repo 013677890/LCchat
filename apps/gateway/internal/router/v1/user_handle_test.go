@@ -15,15 +15,12 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	pkgminio "github.com/013677890/LCchat-Backend/pkg/minio"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeUserHTTPService struct {
@@ -127,7 +124,6 @@ var userHandlerLoggerOnce sync.Once
 
 func initUserHandlerLogger() {
 	userHandlerLoggerOnce.Do(func() {
-		logger.ReplaceGlobal(zap.NewNop())
 		gin.SetMode(gin.TestMode)
 	})
 }
@@ -201,7 +197,7 @@ func TestUserHandlerGetProfile(t *testing.T) {
 			setup: func(s *fakeUserHTTPService, called *bool) {
 				s.getProfileFn = func(_ context.Context) (*dto.GetProfileResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeUserNotFound), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeUserNotFound))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -391,7 +387,7 @@ func TestUserHandlerChangePasswordAndUpdateProfile(t *testing.T) {
 	t.Run("change_password_business_error", func(t *testing.T) {
 		h := NewUserHandler(&fakeUserHTTPService{
 			changePasswordFn: func(_ context.Context, _ *dto.ChangePasswordRequest) error {
-				return status.Error(codes.Code(consts.CodePasswordError), "biz")
+				return apperr.ToStatus(apperr.New(consts.CodePasswordError))
 			},
 		})
 		w := httptest.NewRecorder()
@@ -485,7 +481,7 @@ func TestUserHandlerChangeEmailBatchGetProfileAndQRCode(t *testing.T) {
 	t.Run("get_qrcode_business_error", func(t *testing.T) {
 		h := NewUserHandler(&fakeUserHTTPService{
 			getQRCodeFn: func(_ context.Context) (*dto.GetQRCodeResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeQRCodeExpired), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeQRCodeExpired))
 			},
 		})
 		w := httptest.NewRecorder()

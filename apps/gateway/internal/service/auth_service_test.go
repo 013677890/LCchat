@@ -3,28 +3,17 @@ package service
 import (
 	"context"
 	"errors"
-	"strconv"
-	"sync"
 	"testing"
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
-
-var gatewayAuthLoggerOnce sync.Once
-
-func initGatewayAuthServiceTestLogger() {
-	gatewayAuthLoggerOnce.Do(func() {
-		logger.ReplaceGlobal(zap.NewNop())
-	})
-}
 
 type fakeGatewayAuthUserClient struct {
 	gatewaypb.UserServiceClient
@@ -96,8 +85,6 @@ func (f *fakeGatewayAuthUserClient) VerifyCode(ctx context.Context, req *userpb.
 }
 
 func TestGatewayAuthServiceLogin(t *testing.T) {
-	initGatewayAuthServiceTestLogger()
-
 	t.Run("success_with_mapping", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
 			loginFn: func(_ context.Context, req *userpb.LoginRequest) (*userpb.LoginResponse, error) {
@@ -166,13 +153,11 @@ func TestGatewayAuthServiceLogin(t *testing.T) {
 			Password: "pass123",
 		}, "d1")
 		require.Nil(t, resp)
-		require.EqualError(t, err, strconv.Itoa(consts.CodeInternalError))
+		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 }
 
 func TestGatewayAuthServiceRegister(t *testing.T) {
-	initGatewayAuthServiceTestLogger()
-
 	t.Run("success_with_mapping", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
 			registerFn: func(_ context.Context, req *userpb.RegisterRequest) (*userpb.RegisterResponse, error) {
@@ -236,13 +221,11 @@ func TestGatewayAuthServiceRegister(t *testing.T) {
 			VerifyCode: "123456",
 		})
 		require.Nil(t, resp)
-		require.EqualError(t, err, strconv.Itoa(consts.CodeInternalError))
+		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 }
 
 func TestGatewayAuthServiceSendVerifyCode(t *testing.T) {
-	initGatewayAuthServiceTestLogger()
-
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
 			sendVerifyCodeFn: func(_ context.Context, req *userpb.SendVerifyCodeRequest) (*userpb.SendVerifyCodeResponse, error) {
@@ -281,8 +264,6 @@ func TestGatewayAuthServiceSendVerifyCode(t *testing.T) {
 }
 
 func TestGatewayAuthServiceLoginByCode(t *testing.T) {
-	initGatewayAuthServiceTestLogger()
-
 	t.Run("success_with_mapping", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
 			loginByCodeFn: func(_ context.Context, req *userpb.LoginByCodeRequest) (*userpb.LoginByCodeResponse, error) {
@@ -349,13 +330,11 @@ func TestGatewayAuthServiceLoginByCode(t *testing.T) {
 			VerifyCode: "123456",
 		}, "d2")
 		require.Nil(t, resp)
-		require.EqualError(t, err, strconv.Itoa(consts.CodeInternalError))
+		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 }
 
 func TestGatewayAuthServiceLogout(t *testing.T) {
-	initGatewayAuthServiceTestLogger()
-
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
 			logoutFn: func(_ context.Context, req *userpb.LogoutRequest) (*userpb.LogoutResponse, error) {
@@ -386,8 +365,6 @@ func TestGatewayAuthServiceLogout(t *testing.T) {
 }
 
 func TestGatewayAuthServiceResetPassword(t *testing.T) {
-	initGatewayAuthServiceTestLogger()
-
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
 			resetPasswordFn: func(_ context.Context, req *userpb.ResetPasswordRequest) (*userpb.ResetPasswordResponse, error) {
@@ -428,8 +405,6 @@ func TestGatewayAuthServiceResetPassword(t *testing.T) {
 }
 
 func TestGatewayAuthServiceRefreshToken(t *testing.T) {
-	initGatewayAuthServiceTestLogger()
-
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
 			refreshTokenFn: func(_ context.Context, req *userpb.RefreshTokenRequest) (*userpb.RefreshTokenResponse, error) {
@@ -473,8 +448,6 @@ func TestGatewayAuthServiceRefreshToken(t *testing.T) {
 }
 
 func TestGatewayAuthServiceVerifyCode(t *testing.T) {
-	initGatewayAuthServiceTestLogger()
-
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
 			verifyCodeFn: func(_ context.Context, req *userpb.VerifyCodeRequest) (*userpb.VerifyCodeResponse, error) {

@@ -1,24 +1,21 @@
 package service
 
 import (
-	"github.com/013677890/LCchat-Backend/apps/user/internal/converter"
-	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
-	"github.com/013677890/LCchat-Backend/apps/user/internal/utils"
-	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
-	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/util"
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/user/internal/converter"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"golang.org/x/crypto/bcrypt"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // buildDeviceUserAgent 生成精简版 UserAgent（保留必要信息）
@@ -54,8 +51,7 @@ func buildDeviceUserAgent(deviceInfo *pb.DeviceInfo) string {
 func getRequiredDeviceID(ctx context.Context) (string, error) {
 	deviceID := strings.TrimSpace(util.GetDeviceIDFromContext(ctx))
 	if deviceID == "" {
-		logger.Warn(ctx, "DeviceID not found in context")
-		return "", status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return "", apperr.New(consts.CodeParamError)
 	}
 	return deviceID, nil
 }
@@ -88,37 +84,27 @@ func NewAuthService(
 //   - codes.Internal: 系统内部错误
 //   - codes.AlreadyExists: 用户已存在
 func (s *authServiceImpl) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	// 记录注册请求
-	logger.Info(ctx, "用户注册请求",
-		logger.String("email", utils.MaskEmail(req.Email)),
-		logger.String("nickname", req.Nickname),
-		logger.String("telephone", req.Telephone),
-	)
+	// 访问日志已经由 gRPC 拦截器统一记录，这里不再重复记录“请求开始”日志。
+	// 仅在明确的错误处理点、降级点和必要的成功里程碑处记录业务语义日志。
 
 	// 1. 校验验证码（type=1: 注册）
 	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, 1)
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
-			return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
+			return nil, apperr.New(consts.CodeVerifyCodeError)
 		}
-		logger.Error(ctx, "校验验证码失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
 	}
 	if !isValid {
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
+		return nil, apperr.New(consts.CodeVerifyCodeError)
 	}
 
 	// 2. 创建用户
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		logger.Error(ctx, "生成密码哈希失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成密码哈希失败")
 	}
 	// 将密码哈希化
 	user := &model.UserInfo{
@@ -135,19 +121,11 @@ func (s *authServiceImpl) Register(ctx context.Context, req *pb.RegisterRequest)
 	if return_user, err = s.authRepo.Create(ctx, user); err != nil {
 		// 使用 errors.Is 判断是否是唯一键冲突
 		if errors.Is(err, repository.ErrDuplicateKey) {
-			logger.Warn(ctx, "用户已存在",
-				logger.String("email", req.Email),
-				logger.ErrorField("error", err), // 这里会包含原始的 GORM 错误信息
-			)
-			return nil, status.Error(codes.AlreadyExists, strconv.Itoa(consts.CodeUserAlreadyExist))
+			return nil, apperr.New(consts.CodeUserAlreadyExist)
 		}
 
 		// 其他数据库错误
-		logger.Error(ctx, "创建用户失败",
-			logger.String("email", req.Email),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建用户失败")
 	}
 	return &pb.RegisterResponse{
 		UserUuid:  return_user.Uuid,
@@ -178,31 +156,24 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 		}
 	}
 
-	// 记录登录请求（账号脱敏）
-	logger.Info(ctx, "用户登录请求",
-		logger.String("account", utils.MaskEmail(req.Account)),
-		logger.String("device_name", req.DeviceInfo.GetDeviceName()),
-		logger.String("platform", req.DeviceInfo.GetPlatform()),
-	)
+	// 访问日志由统一拦截器记录，这里不重复记录登录入口日志。
+	// 保留下面的异常日志和成功里程碑日志，用于定位业务关键节点。
 
 	// 1. 根据账号查询用户（邮箱）
 	user, err := s.authRepo.GetByEmail(ctx, req.Account)
 	if err != nil {
 		// 使用 errors.Is 判断错误类型
 		if errors.Is(err, repository.ErrRecordNotFound) {
-			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+			return nil, apperr.New(consts.CodeUserNotFound)
 		}
 
 		// 其他数据库错误
-		logger.Error(ctx, "查询用户失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户失败")
 	}
 
 	// 2. 校验用户状态
 	if user.Status == 1 {
-		return nil, status.Error(codes.PermissionDenied, strconv.Itoa(consts.CodeUserDisabled))
+		return nil, apperr.New(consts.CodeUserDisabled)
 	}
 
 	// 3. 将用户uuid写入context
@@ -211,7 +182,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	// 4. 校验密码
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
 	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodePasswordError))
+		return nil, apperr.New(consts.CodePasswordError)
 	}
 
 	// 5. 从 context 中获取设备 ID 和客户端 IP
@@ -224,10 +195,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	// 6. 生成访问令牌
 	accessToken, err := util.GenerateToken(user.Uuid, deviceID)
 	if err != nil {
-		logger.Error(ctx, "生成访问令牌失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成访问令牌失败")
 	}
 
 	// 7. 生成刷新令牌（使用 UUID）
@@ -235,17 +203,11 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 
 	// 8. 写入 Redis（AccessToken 和 RefreshToken）
 	if err := s.deviceRepo.StoreAccessToken(ctx, user.Uuid, deviceID, accessToken, util.AccessExpire); err != nil {
-		logger.Error(ctx, "AccessToken 写入 Redis 失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 AccessToken 失败")
 	}
 
 	if err := s.deviceRepo.StoreRefreshToken(ctx, user.Uuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
-		logger.Error(ctx, "RefreshToken 写入 Redis 失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 RefreshToken 失败")
 	}
 
 	// 9. 设备会话落库（Upsert：存在则更新，不存在则插入）
@@ -261,7 +223,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	}
 
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
-		logger.Error(ctx, "设备会话落库失败",
+		logger.Warn(ctx, "设备会话落库失败，按降级处理继续登录",
 			logger.ErrorField("error", err),
 		)
 		// 注意：设备会话落库失败不应该阻止登录成功，因为 Token 已经生成
@@ -280,11 +242,6 @@ func (s *authServiceImpl) Login(ctx context.Context, req *pb.LoginRequest) (*pb.
 	}
 
 	// 11. 登录成功
-	logger.Info(ctx, "用户登录成功",
-		logger.String("account", utils.MaskEmail(req.Account)),
-		logger.String("platform", req.DeviceInfo.GetPlatform()),
-	)
-
 	return &pb.LoginResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
@@ -315,31 +272,24 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 		}
 	}
 
-	// 记录验证码登录请求（邮箱脱敏）
-	logger.Info(ctx, "验证码登录请求",
-		logger.String("email", utils.MaskEmail(req.Email)),
-		logger.String("device_name", req.DeviceInfo.GetDeviceName()),
-		logger.String("platform", req.DeviceInfo.GetPlatform()),
-	)
+	// 访问日志由统一拦截器记录，这里不重复记录验证码登录入口日志。
+	// 保留下面的异常日志和成功里程碑日志，用于排查鉴权链路问题。
 
 	// 1. 根据邮箱查询用户
 	user, err := s.authRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
 		// 使用 errors.Is 判断错误类型
 		if errors.Is(err, repository.ErrRecordNotFound) {
-			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+			return nil, apperr.New(consts.CodeUserNotFound)
 		}
 
 		// 其他数据库错误
-		logger.Error(ctx, "查询用户失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户失败")
 	}
 
 	// 2. 校验用户状态
 	if user.Status == 1 {
-		return nil, status.Error(codes.PermissionDenied, strconv.Itoa(consts.CodeUserDisabled))
+		return nil, apperr.New(consts.CodeUserDisabled)
 	}
 
 	// 3. 获取并校验设备 ID（必须是统一设备标识）
@@ -353,15 +303,12 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
-			return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeExpire))
+			return nil, apperr.New(consts.CodeVerifyCodeExpire)
 		}
-		logger.Error(ctx, "校验验证码失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
 	}
 	if !isValid {
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
+		return nil, apperr.New(consts.CodeVerifyCodeError)
 	}
 
 	// 验证成功后立即删除验证码（消耗验证码，防止重复使用）
@@ -381,10 +328,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 	// 7. 生成访问令牌
 	accessToken, err := util.GenerateToken(user.Uuid, deviceID)
 	if err != nil {
-		logger.Error(ctx, "生成访问令牌失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成访问令牌失败")
 	}
 
 	// 8. 生成刷新令牌（使用 UUID）
@@ -392,17 +336,11 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 
 	// 9. 写入 Redis（AccessToken 和 RefreshToken）
 	if err := s.deviceRepo.StoreAccessToken(ctx, user.Uuid, deviceID, accessToken, util.AccessExpire); err != nil {
-		logger.Error(ctx, "AccessToken 写入 Redis 失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 AccessToken 失败")
 	}
 
 	if err := s.deviceRepo.StoreRefreshToken(ctx, user.Uuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
-		logger.Error(ctx, "RefreshToken 写入 Redis 失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 RefreshToken 失败")
 	}
 
 	// 10. 设备会话落库（Upsert：存在则更新，不存在则插入）
@@ -418,7 +356,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 	}
 
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
-		logger.Error(ctx, "设备会话落库失败",
+		logger.Warn(ctx, "设备会话落库失败，按降级处理继续登录",
 			logger.ErrorField("error", err),
 		)
 		// 注意：设备会话落库失败不应该阻止登录成功，因为 Token 已经生成
@@ -437,11 +375,6 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 	}
 
 	// 12. 登录成功，记录日志
-	logger.Info(ctx, "验证码登录成功",
-		logger.String("email", utils.MaskEmail(req.Email)),
-		logger.String("platform", req.DeviceInfo.GetPlatform()),
-	)
-
 	return &pb.LoginByCodeResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
@@ -453,48 +386,37 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *pb.LoginByCodeRe
 
 // SendVerifyCode 发送验证码
 func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *pb.SendVerifyCodeRequest) (*pb.SendVerifyCodeResponse, error) {
-	// 记录发送验证码请求
-	logger.Info(ctx, "发送验证码请求",
-		logger.String("email", req.Email),
-	)
+	// 发送验证码属于高频入口，请求级访问日志已经由统一拦截器记录。
+	// 这里仅保留后续错误处理和发送成功的业务结果日志。
 
 	// 1. 校验邮箱格式
 	if !util.ValidateEmail(req.Email) {
 		logger.Warn(ctx, "邮箱格式无效",
 			logger.String("email", req.Email),
 		)
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeInvalidEmail))
+		return nil, apperr.New(consts.CodeInvalidEmail)
 	}
 
 	// 2. 限流检查（防止频繁发送）
 	ip := util.GetClientIPFromContext(ctx)
 	isLimited, err := s.authRepo.VerifyVerifyCodeRateLimit(ctx, req.Email, ip)
 	if err != nil {
-		logger.Error(ctx, "验证码限流检查失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "验证码限流检查失败")
 	}
 	if isLimited {
-		return nil, status.Error(codes.ResourceExhausted, strconv.Itoa(consts.CodeSendTooFrequent))
+		return nil, apperr.New(consts.CodeSendTooFrequent)
 	}
 
 	// 3. 生成6位验证码
 	code, err := util.GenerateVerifyCode(6)
 	if err != nil {
-		logger.Error(ctx, "生成验证码失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成验证码失败")
 	}
 
 	// 4. 存储验证码到Redis（2分钟过期）
 	err = s.authRepo.StoreVerifyCode(ctx, req.Email, code, req.Type, 2*time.Minute)
 	if err != nil {
-		logger.Error(ctx, "存储验证码失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "存储验证码失败")
 	}
 
 	// 5. 递增限流计数
@@ -509,15 +431,8 @@ func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *pb.SendVerify
 	// 6. 发送验证码邮件
 	err = util.SendVerifyCodeEmail(req.Email, code, 2) // 2分钟有效期
 	if err != nil {
-		logger.Error(ctx, "发送验证码邮件失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "发送验证码邮件失败")
 	}
-
-	logger.Info(ctx, "验证码发送成功",
-		logger.String("email", req.Email),
-	)
 
 	return &pb.SendVerifyCodeResponse{
 		ExpireSeconds: 120, // 2分钟=120秒
@@ -533,31 +448,20 @@ func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *pb.SendVerify
 //   - codes.Unauthenticated: 验证码错误或已过期
 //   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) VerifyCode(ctx context.Context, req *pb.VerifyCodeRequest) (*pb.VerifyCodeResponse, error) {
-	// 记录校验验证码请求（邮箱脱敏）
-	logger.Info(ctx, "校验验证码请求",
-		logger.String("email", utils.MaskEmail(req.Email)),
-		logger.Int("type", int(req.Type)),
-	)
+	// 访问日志由统一拦截器记录，这里不重复记录校验验证码入口日志。
+	// 保留下方业务判断日志即可满足问题排查需要。
 
 	// 1. 校验验证码（type参数：1:注册 2:登录 3:重置密码 4:换绑邮箱）
 	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, req.Type)
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
-			return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeExpire))
+			return nil, apperr.New(consts.CodeVerifyCodeExpire)
 		}
-		logger.Error(ctx, "校验验证码失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
 	}
 
 	// 2. 返回验证结果
-	logger.Info(ctx, "验证码校验结果",
-		logger.String("email", utils.MaskEmail(req.Email)),
-		logger.Bool("valid", isValid),
-	)
-
 	return &pb.VerifyCodeResponse{
 		Valid: isValid,
 	}, nil
@@ -576,20 +480,17 @@ func (s *authServiceImpl) VerifyCode(ctx context.Context, req *pb.VerifyCodeRequ
 //   - codes.NotFound: 设备会话不存在
 //   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) (*pb.RefreshTokenResponse, error) {
-	// 记录刷新Token请求
-	logger.Info(ctx, "刷新Token请求")
+	// 刷新 Token 的访问日志已经由统一拦截器记录，这里只保留后续错误与成功结果日志。
 
 	// 1. 从 context 中获取 user_uuid 和 device_id
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Warn(ctx, "从 context 中获取 user_uuid 失败")
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeInvalidToken))
+		return nil, apperr.New(consts.CodeInvalidToken)
 	}
 
 	deviceID := util.GetDeviceIDFromContext(ctx)
 	if deviceID == "" {
-		logger.Warn(ctx, "从 context 中获取 device_id 失败")
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeInvalidToken))
+		return nil, apperr.New(consts.CodeInvalidToken)
 	}
 
 	// 2. 验证 Refresh Token 是否在 Redis 中存在
@@ -597,42 +498,25 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshToken
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
-			logger.Warn(ctx, "Refresh Token 不存在",
-				logger.String("user_uuid", userUUID),
-				logger.String("device_id", deviceID),
-			)
-			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeDeviceNotFound))
+			return nil, apperr.New(consts.CodeDeviceNotFound)
 		}
-		logger.Error(ctx, "获取 Refresh Token 失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取 Refresh Token 失败")
 	}
 
 	// 3. 校验 Refresh Token 是否匹配
 	if storedRefreshToken != req.RefreshToken {
-		logger.Warn(ctx, "Refresh Token 不匹配",
-			logger.String("user_uuid", userUUID),
-			logger.String("device_id", deviceID),
-		)
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeInvalidToken))
+		return nil, apperr.New(consts.CodeInvalidToken)
 	}
 
 	// 4. 生成新的 Access Token
 	newAccessToken, err := util.GenerateToken(userUUID, deviceID)
 	if err != nil {
-		logger.Error(ctx, "生成 Access Token 失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成 Access Token 失败")
 	}
 
 	// 5. 更新 Redis 中的 Access Token
 	if err := s.deviceRepo.StoreAccessToken(ctx, userUUID, deviceID, newAccessToken, util.AccessExpire); err != nil {
-		logger.Error(ctx, "更新 Access Token 失败",
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新 Access Token 失败")
 	}
 
 	// 6. 续期设备信息缓存 TTL
@@ -644,11 +528,6 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshToken
 	}
 
 	// 6. 刷新成功
-	logger.Info(ctx, "Token 刷新成功",
-		logger.String("user_uuid", userUUID),
-		logger.String("device_id", deviceID),
-	)
-
 	return &pb.RefreshTokenResponse{
 		AccessToken: newAccessToken,
 		TokenType:   "Bearer",
@@ -666,40 +545,27 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *pb.RefreshToken
 //   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) error {
 	if req == nil || req.DeviceId == "" {
-		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return apperr.New(consts.CodeParamError)
 	}
 
-	// 记录登出请求
-	logger.Info(ctx, "用户登出请求",
-		logger.String("device_id", req.DeviceId),
-	)
+	// 访问日志由统一拦截器记录，这里不重复记录登出入口日志。
+	// 保留下面的异常日志和登出成功日志用于审计关键动作。
 
 	// 1. 从 context 中获取 user_uuid
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Error(ctx, "从 context 中获取 user_uuid 失败")
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.New(consts.CodeInternalError)
 	}
 
 	// 2. 删除 Redis 中的 Token
 	if err := s.deviceRepo.DeleteTokens(ctx, userUUID, req.DeviceId); err != nil {
-		logger.Error(ctx, "删除 Token 失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("device_id", req.DeviceId),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "删除 Token 失败")
 	}
 
 	// 3. 登出语义为注销设备会话（status=2），设备不存在视为幂等成功。
 	if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, model.DeviceStatusLoggedOut); err != nil {
 		if !errors.Is(err, repository.ErrRecordNotFound) {
-			logger.Error(ctx, "更新设备注销状态失败",
-				logger.String("user_uuid", userUUID),
-				logger.String("device_id", req.DeviceId),
-				logger.ErrorField("error", err),
-			)
-			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+			return apperr.Wrap(err, consts.CodeInternalError, "更新设备注销状态失败")
 		}
 		logger.Warn(ctx, "登出时设备会话不存在，按幂等成功处理",
 			logger.String("user_uuid", userUUID),
@@ -717,11 +583,6 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) err
 	}
 
 	// 5. 登出成功
-	logger.Info(ctx, "用户登出成功",
-		logger.String("user_uuid", userUUID),
-		logger.String("device_id", req.DeviceId),
-	)
-
 	return nil
 }
 
@@ -740,24 +601,19 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *pb.LogoutRequest) err
 //   - codes.FailedPrecondition: 新密码不能与旧密码相同
 //   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) ResetPassword(ctx context.Context, req *pb.ResetPasswordRequest) error {
-	// 记录重置密码请求（邮箱脱敏）
-	logger.Info(ctx, "用户重置密码请求",
-		logger.String("email", utils.MaskEmail(req.Email)),
-	)
+	// 访问日志由统一拦截器记录，这里不重复记录重置密码入口日志。
+	// 保留下方错误处理和最终成功日志，用于审计敏感操作。
 
 	// 1. 根据邮箱查询用户
 	user, err := s.authRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
 		// 使用 errors.Is 判断错误类型
 		if errors.Is(err, repository.ErrRecordNotFound) {
-			return status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+			return apperr.New(consts.CodeUserNotFound)
 		}
 
 		// 其他数据库错误
-		logger.Error(ctx, "查询用户失败",
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "查询用户失败")
 	}
 
 	// 2. 校验验证码（type=3: 重置密码）
@@ -765,41 +621,31 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *pb.ResetPasswo
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
-			return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeExpire))
+			return apperr.New(consts.CodeVerifyCodeExpire)
 		}
-		logger.Error(ctx, "校验验证码失败",
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
 	}
 	if !isValid {
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
+		return apperr.New(consts.CodeVerifyCodeError)
 	}
 
 	// 3. 校验新密码是否与旧密码相同
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.NewPassword))
 	if err == nil {
 		// 密码相同
-		return status.Error(codes.FailedPrecondition, strconv.Itoa(consts.CodePasswordSameAsOld))
+		return apperr.New(consts.CodePasswordSameAsOld)
 	}
 
 	// 4. 生成新密码哈希
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
-		logger.Error(ctx, "生成密码哈希失败",
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "生成密码哈希失败")
 	}
 
 	// 5. 更新密码
 	err = s.authRepo.UpdatePassword(ctx, user.Uuid, string(hashedPassword))
 	if err != nil {
-		logger.Error(ctx, "更新密码失败",
-			logger.String("user_uuid", user.Uuid),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "更新密码失败")
 	}
 
 	// 6. 删除验证码（消耗验证码，防止重复使用）
@@ -811,9 +657,5 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *pb.ResetPasswo
 	}
 
 	// 7. 重置成功
-	logger.Info(ctx, "用户密码重置成功",
-		logger.String("email", utils.MaskEmail(req.Email)),
-	)
-
 	return nil
 }

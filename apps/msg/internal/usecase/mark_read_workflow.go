@@ -44,12 +44,6 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 		return nil, fmt.Errorf("MarkReadWorkflow: 标记已读失败: %w", err)
 	}
 
-	logger.Info(ctx, "标记已读：DB 已更新",
-		logger.String("conv_id", req.ConvId),
-		logger.Int64("read_seq", req.ReadSeq),
-		logger.Int32("unread_count", unreadCount),
-	)
-
 	// ============================================================
 	// Step 2: Kafka → MsgPushEvent{type="MSG_MARK_READ", data=MarkReadNotice}
 	// ============================================================
@@ -73,10 +67,6 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 		logger.Warn(ctx, "标记已读：投递 Kafka 失败（不阻断）",
 			logger.String("conv_id", req.ConvId),
 			logger.ErrorField("error", err),
-		)
-	} else {
-		logger.Info(ctx, "标记已读：Kafka 投递成功",
-			logger.String("conv_id", req.ConvId),
 		)
 	}
 

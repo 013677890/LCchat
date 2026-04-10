@@ -6,7 +6,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 
 	"github.com/gin-gonic/gin"
@@ -54,11 +53,7 @@ func (h *FriendHandler) SendFriendApply(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "发送好友申请服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -106,11 +101,7 @@ func (h *FriendHandler) GetFriendApplyList(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取好友申请列表服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -158,11 +149,7 @@ func (h *FriendHandler) GetSentApplyList(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取发出的申请列表服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -200,11 +187,7 @@ func (h *FriendHandler) HandleFriendApply(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "处理好友申请服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -233,11 +216,7 @@ func (h *FriendHandler) GetUnreadApplyCount(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取未读申请数量服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -281,11 +260,7 @@ func (h *FriendHandler) MarkApplyAsRead(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "标记申请已读服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -333,11 +308,7 @@ func (h *FriendHandler) GetFriendList(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取好友列表服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -380,11 +351,7 @@ func (h *FriendHandler) SyncFriendList(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "好友增量同步服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -422,12 +389,7 @@ func (h *FriendHandler) DeleteFriend(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "删除好友服务内部错误",
-			logger.String("user_uuid", req.UserUUID),
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -465,12 +427,7 @@ func (h *FriendHandler) SetFriendRemark(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "设置好友备注服务内部错误",
-			logger.String("user_uuid", req.UserUUID),
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -508,12 +465,7 @@ func (h *FriendHandler) SetFriendTag(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "设置好友标签服务内部错误",
-			logger.String("user_uuid", req.UserUUID),
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -542,11 +494,7 @@ func (h *FriendHandler) GetTagList(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取标签列表服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -584,13 +532,7 @@ func (h *FriendHandler) CheckIsFriend(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "判断是否好友服务内部错误",
-			logger.String("user_uuid", req.UserUUID),
-			logger.String("peer_uuid", req.PeerUUID),
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -628,13 +570,7 @@ func (h *FriendHandler) GetRelationStatus(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取关系状态服务内部错误",
-			logger.String("user_uuid", req.UserUUID),
-			logger.String("peer_uuid", req.PeerUUID),
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 

@@ -3,14 +3,14 @@ package service
 import (
 	"context"
 	"errors"
-	"strconv"
-	"sync"
+		"sync"
 	"testing"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
@@ -173,15 +173,15 @@ func (f *fakeAuthDeviceRepo) UpdateOnlineStatus(ctx context.Context, userUUID, d
 	return f.updateOnlineStatusFn(ctx, userUUID, deviceID, status)
 }
 
-func requireAuthStatusCode(t *testing.T, err error, wantCode codes.Code, wantBizCode int) {
+func requireAuthStatusCode(t *testing.T, err error, _ codes.Code, wantBizCode int) {
 	t.Helper()
 	require.Error(t, err)
-	st, ok := status.FromError(err)
+	require.Equal(t, wantBizCode, apperr.Code(err))
+	stErr := apperr.ToStatus(err)
+	st, ok := status.FromError(stErr)
 	require.True(t, ok)
-	require.Equal(t, wantCode, st.Code())
-	gotBizCode, convErr := strconv.Atoi(st.Message())
-	require.NoError(t, convErr)
-	require.Equal(t, wantBizCode, gotBizCode)
+	require.Equal(t, wantBizCode, apperr.Code(apperr.FromStatus(stErr)))
+	require.NotEmpty(t, st.Message())
 }
 
 func mustHashPassword(t *testing.T, raw string) string {

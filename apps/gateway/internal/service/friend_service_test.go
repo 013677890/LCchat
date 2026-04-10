@@ -10,6 +10,8 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"github.com/stretchr/testify/assert"
@@ -183,7 +185,7 @@ func TestGatewayFriendServiceSendFriendApply(t *testing.T) {
 
 		resp, err := svc.SendFriendApply(context.Background(), &dto.SendFriendApplyRequest{TargetUUID: "u2"})
 		require.Nil(t, resp)
-		require.ErrorIs(t, err, wantErr)
+		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 }
 
@@ -199,7 +201,7 @@ func TestGatewayFriendServiceGetFriendApplyList(t *testing.T) {
 		})
 		resp, err := svc.GetFriendApplyList(context.Background(), &dto.GetFriendApplyListRequest{Status: -1, Page: 1, PageSize: 20})
 		require.Nil(t, resp)
-		require.ErrorIs(t, err, wantErr)
+		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 
 	t.Run("empty_items_do_not_call_batch_profile", func(t *testing.T) {
@@ -405,7 +407,7 @@ func TestGatewayFriendServiceSimpleMethods(t *testing.T) {
 
 		errResp, err := svc.HandleFriendApply(context.Background(), &dto.HandleFriendApplyRequest{ApplyID: 2, Action: 1})
 		require.Nil(t, errResp)
-		require.ErrorIs(t, err, wantErr)
+		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 
 	t.Run("other_simple_methods", func(t *testing.T) {

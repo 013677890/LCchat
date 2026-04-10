@@ -60,18 +60,37 @@ in this project. It is intended for AI agents and new contributors.
 ### 3. Conventions & Patterns
 
 #### 3.1 Error Handling
-- Business errors are encoded as `grpc/status` with numeric error codes in
-  the message, then extracted in gateway via `utils.ExtractErrorCode`.
-- Use `consts.IsNonServerError(code)` to decide if it is a user-facing error.
-- Log internal errors with context and return `CodeInternalError`.
-- **gRPC 错误码映射公式**：`status.Error(codes.Xxx, strconv.Itoa(consts.CodeXxx))`
-  - 已知业务错误（如 `ErrMessageNotFound`）使用 `errors.Is` 匹配后返回对应 `codes.NotFound` / `codes.PermissionDenied` 等
-  - 未知错误统一返回 `codes.Internal` + `consts.CodeInternalError`，并在返回前 `logger.Error` 记录
-  - 参考实现：`apps/msg/internal/handler/msg_handler.go` 的 `mapMsgDomainError` / `mapConvDomainError`
-- **Gateway 服务调用层（Service 层）错误日志处理**：
-  - gRPC 调用返回错误时，统一通过 `utils.ExtractErrorCode(err)` 提取业务状态码。
-  - 通过 `consts.IsNonServerError(bizCode)` 判断是否为客户端业务错误。
-  - 若为客户端业务错误（如无权限发消息、校验失败等），**不要**打印 Error 级别的服务内部日志，避免污染后端错误监控；若非常规业务错误，再打印 Error 日志记录失败原因及关键参数。
+- 统一使用 `pkg/apperr` 表达业务错误：
+  - 业务错误：`apperr.New(code)`
+  - 不可处理的底层错误：`apperr.Wrap(err, code, "中文上下文")`
+- 禁止继续使用旧式 `status.Error(codes.Xxx, strconv.Itoa(...))` 作为业务错误标准写法；跨服务传输统一走：
+  - 服务内：`apperr`
+  - 出站 gRPC：`apperr.ToStatus(apperr.Sanitize(err))`
+  - 入站解析：`apperr.FromStatus(err)` / `utils.ExtractErrorCode(err)`
+- 业务层规则：
+  - 能降级处理：当场 `logger.Warn(...)`，继续流程
+  - 不能处理：只 `Wrap` 上抛，不在中间层打 Error
+  - 普通业务失败（如密码错误、验证码错误）：直接返回 `apperr.New(code)`
+- 最终日志只允许出现在边界拦截点：
+  - gRPC 服务：`pkg/grpcx/LoggingUnaryInterceptor`
+  - Gateway HTTP：`apps/gateway/internal/middleware/gin_logger.go`
+  - Gateway 出站 gRPC：`apps/gateway/internal/middleware/grpc_logger.go`
+  - panic：Recovery 中间件/拦截器
+- 日志级别规则：
+  - `10000-29999` 业务错误 → `Info`
+  - `>=30000` 服务器错误 → `Error`
+  - 降级处理 → `Warn`
+  - 慢请求 → `Warn`
+- 堆栈规则：
+  - 堆栈只允许在“本层最终拦截点”记录
+  - 下游服务的 stack 不允许透传到上游日志
+  - gRPC 跨层传输前必须 `Sanitize`，只保留业务码与标准文案
+- Gateway 处理规则：
+  - `result.Fail(...)`：业务错误
+  - `result.FailServer(c, err, code)`：系统/上游错误，交给聚合日志输出
+- 测试规则：
+  - 新测试禁止再用旧式 `status.Error(..., "biz")` 构造业务错误
+  - 统一使用 `apperr.New(code)` 或 `apperr.ToStatus(apperr.New(code))`
 - **gRPC 重试机制**：
   - gRPC 的 `ServiceConfig` 中配置重试策略时，必须明确针对具体的 ServiceName（如 `user.AuthService`）。通用工具函数在创建 gRPC 连接时，应支持动态注入或生成针对特定 ServiceName 的策略 JSON，避免硬编码导致其他服务重试失效。
 
@@ -87,20 +106,33 @@ in this project. It is intended for AI agents and new contributors.
 - gRPC metadata 透传：gateway 侧写入 `trace_id/user_uuid/device_id/client_ip`，user-service 侧通过 interceptor 读取并注入 context。
 
 #### 3.4 Logging
-- Use `logger.Info/Warn/Error` and include key fields (email, device, ip).
-- **日志用中文**：日志消息统一使用中文，字段 key 保持英文不变。
-- **Handler 层日志策略**：
-  - `grpcx.LoggingUnaryInterceptor` 已统一记录每次请求的 `method / cost / code / error`
-  - handler 层**禁止**重复记录入口/出口日志（冗余且噪声大）
-  - handler 仅在业务语义特殊时记录（如幂等缓存命中、降级处理）
-  - 详细的业务日志由 usecase / domain service 层负责
+- 统一使用 `logger.Info/Warn/Error`，日志消息使用中文，字段 key 保持英文。
+- 只允许以下位置输出最终请求日志：
+  - `grpcx.LoggingUnaryInterceptor`
+  - Gateway `GinLogger`
+  - Gateway `GRPCLoggerInterceptor`
+  - Recovery（仅 panic/断连等异常路径）
+- 中间层（handler/service/usecase/domain/repository）默认不打成功日志、不打可上抛错误的 Error 日志。
+- 中间层允许保留的日志只有两类：
+  - 降级日志：如缓存失败但主流程继续、异步补偿失败但请求成功
+  - 长连接生命周期日志：如 Connect 的连接建立/断开/推送失败
+- 成功日志策略：
+  - 普通 request-response 成功日志由最终拦截点统一输出
+  - 不再在 service 内打印“登录成功/修改成功/发送成功”等重复 Info
+- 错误日志策略：
+  - 业务错误不在中间层打日志，由最终拦截点统一按 `Info` 输出
+  - 服务器错误不在中间层打日志，由最终拦截点统一按 `Error + stack` 输出
+- 堆栈策略：
+  - 只记录本层 stack
+  - 上层禁止记录下层 stack
+  - HTTP/Gateway 层若记录 `c.Errors`，只能记录本层错误摘要，不能依赖下游 stack 透传
 - **禁止记录的敏感字段**:
   - ❌ `password` / `new_password` / `old_password`
   - ❌ `verify_code` / `verifyCode`
   - ❌ 完整的 `access_token` / `refresh_token`
 - **允许脱敏后记录**:
-  - ✅ `email` → `utils.MaskEmail(email)` (显示前3位和域名)
-  - ✅ `telephone` → `utils.MaskTelephone(phone)` (显示前3后4)
+  - ✅ `email` → `utils.MaskEmail(email)`
+  - ✅ `telephone` → `utils.MaskTelephone(phone)`
 
 #### 3.5 Redis Usage
 - Verification codes stored in Redis with TTL (e.g., 2 minutes).

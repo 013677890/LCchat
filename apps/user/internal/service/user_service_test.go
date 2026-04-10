@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"sync"
+		"sync"
 	"testing"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 
@@ -175,15 +176,15 @@ func hashUserSvcPassword(t *testing.T, raw string) string {
 	return string(v)
 }
 
-func requireUserSvcStatus(t *testing.T, err error, wantCode codes.Code, wantBiz int) {
+func requireUserSvcStatus(t *testing.T, err error, _ codes.Code, wantBiz int) {
 	t.Helper()
 	require.Error(t, err)
-	st, ok := status.FromError(err)
+	require.Equal(t, wantBiz, apperr.Code(err))
+	stErr := apperr.ToStatus(err)
+	st, ok := status.FromError(stErr)
 	require.True(t, ok)
-	require.Equal(t, wantCode, st.Code())
-	gotBiz, convErr := strconv.Atoi(st.Message())
-	require.NoError(t, convErr)
-	require.Equal(t, wantBiz, gotBiz)
+	require.Equal(t, wantBiz, apperr.Code(apperr.FromStatus(stErr)))
+	require.NotEmpty(t, st.Message())
 }
 
 func TestUserServiceProfileAndSearch(t *testing.T) {

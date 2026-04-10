@@ -1,13 +1,14 @@
 package middleware
 
 import (
-	//"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"context"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // NewContextWithGin 从 gin.Context 创建包含 trace_id、user_uuid、device_id 的 context.Context
@@ -16,7 +17,7 @@ func NewContextWithGin(c *gin.Context) context.Context {
 	return ctxmeta.BuildContextFromGin(c)
 }
 
-// GinLogger 接收 gin 框架默认的日志
+// GinLogger 在请求结束后输出单条聚合访问日志。
 func GinLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -26,32 +27,55 @@ func GinLogger() gin.HandlerFunc {
 		if clientIP == "" {
 			clientIP = c.ClientIP()
 		}
-		ctx := NewContextWithGin(c)
 
-		logger.Info(ctx, "请求开始",
+		c.Next()
+		if path == "/health" && c.Writer.Status() < 500 {
+			return
+		}
+
+		ctx := NewContextWithGin(c)
+		cost := time.Since(start)
+		statusCode := c.Writer.Status()
+		fields := []zap.Field{
 			logger.String("method", c.Request.Method),
 			logger.String("path", path),
 			logger.String("query", query),
 			logger.String("ip", clientIP),
-		)
+			logger.Int("status", statusCode),
+			logger.Duration("cost", cost),
+		}
 
-		c.Next()
+		businessCode := 0
+		if code, exists := c.Get("business_code"); exists {
+			if bc, ok := code.(int); ok && bc > 0 {
+				businessCode = bc
+				fields = append(fields, logger.Int("business_code", bc))
+			}
+		}
 
-		cost := time.Since(start)
-		status := c.Writer.Status()
+		if len(c.Errors) > 0 {
+			for _, ge := range c.Errors {
+				if ge.Err == nil {
+					continue
+				}
+				fields = append(fields, logger.ErrorField("error", ge.Err))
+				if top := apperr.TopFrame(ge.Err); top != "" {
+					fields = append(fields, logger.String("top_frame", top))
+					fields = append(fields, logger.StackFrames("stack", apperr.Frames(ge.Err)))
+				}
+				break
+			}
+		}
 
-		// 只记录服务端错误(5xx)和慢请求(>2s),正常请求不记录
-		if status >= 500 || cost > 2*time.Second {
-			logger.Warn(ctx, "慢请求或服务端错误",
-				logger.Int("status", status),
-				logger.String("method", c.Request.Method),
-				logger.String("path", path),
-				logger.String("query", query),
-				logger.String("ip", c.ClientIP()),
-				logger.String("user-agent", c.Request.UserAgent()),
-				logger.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
-				logger.Duration("cost", cost),
-			)
+		switch {
+		case businessCode >= 30000:
+			logger.Error(ctx, "Gateway HTTP 请求错误", fields...)
+		case statusCode >= 500:
+			logger.Error(ctx, "Gateway HTTP 请求错误", fields...)
+		case cost > 2*time.Second:
+			logger.Warn(ctx, "Gateway HTTP 慢请求", fields...)
+		default:
+			logger.Info(ctx, "Gateway HTTP 请求成功", fields...)
 		}
 	}
 }

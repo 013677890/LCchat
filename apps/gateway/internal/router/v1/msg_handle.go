@@ -6,7 +6,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 
 	"github.com/gin-gonic/gin"
@@ -49,10 +48,7 @@ func (h *MsgHandler) SendMessage(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "发送消息服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -91,10 +87,7 @@ func (h *MsgHandler) PullMessages(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "拉取消息服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -126,10 +119,7 @@ func (h *MsgHandler) GetMessagesByIds(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "批量获取消息服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -161,10 +151,7 @@ func (h *MsgHandler) RecallMessage(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "撤回消息服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -202,10 +189,7 @@ func (h *MsgHandler) GetConversations(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "获取会话列表服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -237,10 +221,7 @@ func (h *MsgHandler) MarkRead(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "标记已读服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -276,10 +257,7 @@ func (h *MsgHandler) DeleteConversation(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "删除会话服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -311,10 +289,7 @@ func (h *MsgHandler) UpdateConversationSettings(c *gin.Context) {
 			return
 		}
 
-		logger.Error(ctx, "更新会话设置服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 

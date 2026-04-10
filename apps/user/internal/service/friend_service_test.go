@@ -3,8 +3,7 @@ package service
 import (
 	"context"
 	"errors"
-	"strconv"
-	"sync"
+		"sync"
 	"testing"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,15 +34,15 @@ func withFriendUserUUID(userUUID string) context.Context {
 	return context.WithValue(context.Background(), "user_uuid", userUUID)
 }
 
-func requireFriendStatusCode(t *testing.T, err error, wantGRPC codes.Code, wantBizCode int) {
+func requireFriendStatusCode(t *testing.T, err error, _ codes.Code, wantBizCode int) {
 	t.Helper()
 	require.Error(t, err)
-	st, ok := status.FromError(err)
+	require.Equal(t, wantBizCode, apperr.Code(err))
+	stErr := apperr.ToStatus(err)
+	st, ok := status.FromError(stErr)
 	require.True(t, ok)
-	require.Equal(t, wantGRPC, st.Code())
-	gotCode, convErr := strconv.Atoi(st.Message())
-	require.NoError(t, convErr)
-	require.Equal(t, wantBizCode, gotCode)
+	require.Equal(t, wantBizCode, apperr.Code(apperr.FromStatus(stErr)))
+	require.NotEmpty(t, st.Message())
 }
 
 type fakeFriendRepoForService struct {

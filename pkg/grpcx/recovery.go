@@ -3,11 +3,9 @@ package grpcx
 import (
 	"context"
 
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // RecoveryUnaryInterceptor 捕获 handler 内的 panic，避免单个请求的异常崩溃整个进程。
@@ -16,11 +14,16 @@ func RecoveryUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error(ctx, "panic recovered in grpc handler",
+				panicErr := apperr.NewFromPanic(r)
+				logger.Error(ctx, "gRPC 处理发生 panic",
 					logger.Any("panic", r),
 					logger.String("method", info.FullMethod),
+					logger.String("top_frame", apperr.TopFrame(panicErr)),
+					logger.StackFrames("stack", apperr.Frames(panicErr)),
+					logger.ErrorField("error", panicErr),
 				)
-				err = status.Error(codes.Internal, "internal server error")
+				apperr.MarkLogged(panicErr)
+				err = apperr.ToStatus(apperr.Sanitize(panicErr))
 			}
 		}()
 		return handler(ctx, req)

@@ -108,10 +108,6 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		// Redis 异常 → 降级：不拦截，靠 DB 唯一索引兜底
 	}
 	if cachedMsg != nil {
-		logger.Info(ctx, "创建消息：幂等缓存命中，直接返回首次结果",
-			logger.String("msg_id", cachedMsg.MsgId),
-			logger.String("from_uuid", req.FromUuid),
-		)
 		return &CreateResult{Msg: cachedMsg, IsIdempotent: true}, nil
 	}
 
@@ -178,13 +174,6 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 			logger.ErrorField("error", err),
 		)
 	}
-
-	logger.Info(ctx, "创建消息成功",
-		logger.String("msg_id", msg.MsgId),
-		logger.Int64("seq", msg.Seq),
-		logger.String("conv_id", msg.ConvId),
-		logger.String("from_uuid", req.FromUuid),
-	)
 
 	return &CreateResult{Msg: msg, IsIdempotent: false}, nil
 }
@@ -283,11 +272,6 @@ func (s *Service) RecallMessage(ctx context.Context, convId, msgId, operatorUuid
 	})
 
 	if err := s.repo.UpdateStatus(ctx, convId, msgId, 1, string(recallContent)); err != nil {
-		logger.Error(ctx, "撤回消息：更新 DB 状态失败",
-			logger.String("conv_id", convId),
-			logger.String("msg_id", msgId),
-			logger.ErrorField("error", err),
-		)
 		return nil, fmt.Errorf("撤回消息更新状态失败: %w", err)
 	}
 

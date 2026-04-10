@@ -3,44 +3,28 @@ package handler
 import (
 	"context"
 	"errors"
-	"strconv"
-
-	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
-	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/usecase"
+	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 )
 
 // MsgHandler 消息服务 gRPC Handler（薄层）
 //
-// 职责：接收 gRPC 请求 → 委托给 domain service 或 usecase workflow
-//
-// 日志策略：
-//   - 入口/出口/耗时/错误码 → 由 grpcx.LoggingUnaryInterceptor 统一记录
-//   - handler 层仅记录业务语义日志（幂等命中、降级处理等特殊场景）
-//
-// 路由规则：
-//   - 跨领域操作 → usecase workflow（SendMessage, RecallMessage, MarkRead）
-//   - 单领域操作 → 直接调用 domain service
+// 职责：接收 gRPC 请求，委托给 domain service 或 usecase workflow。
+// 日志策略：入口/出口/耗时由拦截器统一记录，handler 仅记录真正的业务处理点错误。
 type MsgHandler struct {
 	pb.UnimplementedMsgServiceServer
-
-	// domain services
-	msgService  *msgsvc.Service
-	convService *convsvc.Service
-
-	// usecase workflows
+	msgService            *msgsvc.Service
+	convService           *convsvc.Service
 	sendMessageWorkflow   *usecase.SendMessageWorkflow
 	recallMessageWorkflow *usecase.RecallMessageWorkflow
 	markReadWorkflow      *usecase.MarkReadWorkflow
 }
 
-// NewMsgHandler 创建 MsgHandler
 func NewMsgHandler(
 	msgService *msgsvc.Service,
 	convService *convsvc.Service,
@@ -57,21 +41,22 @@ func NewMsgHandler(
 	}
 }
 
-// ==================== 跨领域操作（走 usecase workflow） ====================
-
-// SendMessage 发送消息（单聊/群聊统一入口）
+// SendMessage 发送消息。(单聊/群聊统一入口)
 func (h *MsgHandler) SendMessage(ctx context.Context, req *pb.SendMessageRequest) (*pb.SendMessageResponse, error) {
+	// 1. 调用发送消息工作流执行发送消息
 	resp, err := h.sendMessageWorkflow.Execute(ctx, req)
+	// 2. 检查发送消息工作流执行结果是否为空
 	if err != nil {
+		// 3. 检查是否为幂等处理错误
 		if errors.Is(err, msgsvc.ErrIdempotentProcessing) {
-			return nil, status.Error(codes.Aborted, strconv.Itoa(consts.CodeMessageDuplicate))
+			return nil, apperr.New(consts.CodeMessageDuplicate)
 		}
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeMessageSendFail))
+		return nil, apperr.Wrap(err, consts.CodeMessageSendFail, consts.GetMessage(consts.CodeMessageSendFail))
 	}
 	return resp, nil
 }
 
-// RecallMessage 撤回消息
+// RecallMessage 撤回消息。
 func (h *MsgHandler) RecallMessage(ctx context.Context, req *pb.RecallMessageRequest) (*pb.RecallMessageResponse, error) {
 	resp, err := h.recallMessageWorkflow.Execute(ctx, req)
 	if err != nil {
@@ -80,7 +65,7 @@ func (h *MsgHandler) RecallMessage(ctx context.Context, req *pb.RecallMessageReq
 	return resp, nil
 }
 
-// MarkRead 标记会话已读
+// MarkRead 标记会话已读。
 func (h *MsgHandler) MarkRead(ctx context.Context, req *pb.MarkReadRequest) (*pb.MarkReadResponse, error) {
 	resp, err := h.markReadWorkflow.Execute(ctx, req)
 	if err != nil {
@@ -89,66 +74,50 @@ func (h *MsgHandler) MarkRead(ctx context.Context, req *pb.MarkReadRequest) (*pb
 	return resp, nil
 }
 
-// ==================== 单领域操作（直调 domain service） ====================
-
-// PullMessages 按会话增量拉取历史消息
+// PullMessages 按会话增量拉取历史消息。
 func (h *MsgHandler) PullMessages(ctx context.Context, req *pb.PullMessagesRequest) (*pb.PullMessagesResponse, error) {
-	// clear_seq 默认为 0（不过滤）
-	// TODO: 待 gateway 集成时通过 context 拿 owner_uuid 查 clear_seq
+	// 1. 设置清除序列号
 	clearSeq := int64(0)
-
+	// 2. 设置拉取方向
 	direction := msgsvc.DirectionForward
 	if req.Direction == pb.PullDirection_PULL_DIRECTION_BACKWARD {
 		direction = msgsvc.DirectionBackward
 	}
-
+	// 3. 设置拉取限制
 	limit := int(req.Limit)
 	if limit <= 0 {
 		limit = 50
 	}
-
 	msgs, hasMore, err := h.msgService.PullMessages(ctx, req.ConvId, req.AnchorSeq, direction, limit, clearSeq)
 	if err != nil {
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
 	}
-
 	var maxSeq int64
 	if len(msgs) > 0 {
 		maxSeq = msgs[len(msgs)-1].Seq
 	}
-
-	return &pb.PullMessagesResponse{
-		Messages: msgs,
-		HasMore:  hasMore,
-		MaxSeq:   maxSeq,
-	}, nil
+	return &pb.PullMessagesResponse{Messages: msgs, HasMore: hasMore, MaxSeq: maxSeq}, nil
 }
 
-// GetMessagesByIds 批量按 ID 查询消息
+// GetMessagesByIds 批量按 ID 查询消息。
 func (h *MsgHandler) GetMessagesByIds(ctx context.Context, req *pb.GetMessagesByIdsRequest) (*pb.GetMessagesByIdsResponse, error) {
 	msgs, err := h.msgService.GetMessagesByIds(ctx, req.ConvId, req.MsgIds)
 	if err != nil {
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
 	}
 	return &pb.GetMessagesByIdsResponse{Messages: msgs}, nil
 }
 
-// GetConversations 获取用户会话列表（全量/增量）
+// GetConversations 获取用户会话列表。
 func (h *MsgHandler) GetConversations(ctx context.Context, req *pb.GetConversationsRequest) (*pb.GetConversationsResponse, error) {
-	items, hasMore, nextCursor, err := h.convService.GetConversations(
-		ctx, req.OwnerUuid, req.UpdatedSince, req.Cursor, int(req.PageSize),
-	)
+	items, hasMore, nextCursor, err := h.convService.GetConversations(ctx, req.OwnerUuid, req.UpdatedSince, req.Cursor, int(req.PageSize))
 	if err != nil {
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
 	}
-	return &pb.GetConversationsResponse{
-		Conversations: items,
-		HasMore:       hasMore,
-		NextCursor:    nextCursor,
-	}, nil
+	return &pb.GetConversationsResponse{Conversations: items, HasMore: hasMore, NextCursor: nextCursor}, nil
 }
 
-// DeleteConversation 逻辑删除会话
+// DeleteConversation 逻辑删除会话。
 func (h *MsgHandler) DeleteConversation(ctx context.Context, req *pb.DeleteConversationRequest) (*pb.DeleteConversationResponse, error) {
 	err := h.convService.DeleteConversation(ctx, req.OwnerUuid, req.ConvId)
 	if err != nil {
@@ -156,51 +125,45 @@ func (h *MsgHandler) DeleteConversation(ctx context.Context, req *pb.DeleteConve
 			// 幂等：会话不存在视为删除成功
 			return &pb.DeleteConversationResponse{}, nil
 		}
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
 	}
 	return &pb.DeleteConversationResponse{}, nil
 }
 
-// UpdateConversationSettings 更新会话设置（免打扰/置顶）
+// UpdateConversationSettings 更新会话设置。
 func (h *MsgHandler) UpdateConversationSettings(ctx context.Context, req *pb.UpdateConvSettingsRequest) (*pb.UpdateConvSettingsResponse, error) {
 	err := h.convService.UpdateSettings(ctx, req.OwnerUuid, req.ConvId, req.Mute, req.Pin)
 	if err != nil {
 		if errors.Is(err, convsvc.ErrConversationNotFound) {
-			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeConversationNotFound))
+			return nil, apperr.New(consts.CodeConversationNotFound)
 		}
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
 	}
 	return &pb.UpdateConvSettingsResponse{}, nil
 }
 
-// ==================== 错误映射辅助函数 ====================
-
-// mapMsgDomainError 将消息领域错误映射为 gRPC status
-func mapMsgDomainError(ctx context.Context, err error) error {
+func mapMsgDomainError(_ context.Context, err error) error {
 	switch {
 	case errors.Is(err, msgsvc.ErrMessageNotFound):
-		return status.Error(codes.NotFound, strconv.Itoa(consts.CodeMessageNotFound))
+		return apperr.New(consts.CodeMessageNotFound)
 	case errors.Is(err, msgsvc.ErrMessageAlreadyRecalled):
-		return status.Error(codes.AlreadyExists, strconv.Itoa(consts.CodeMessageRevoked))
+		return apperr.New(consts.CodeMessageRevoked)
 	case errors.Is(err, msgsvc.ErrRecallTimeout):
-		return status.Error(codes.FailedPrecondition, strconv.Itoa(consts.CodeRecallTimeout))
+		return apperr.New(consts.CodeRecallTimeout)
 	case errors.Is(err, msgsvc.ErrRecallNoPermission):
-		return status.Error(codes.PermissionDenied, strconv.Itoa(consts.CodeRecallNoPermission))
+		return apperr.New(consts.CodeRecallNoPermission)
 	case errors.Is(err, msgsvc.ErrIdempotentProcessing):
-		return status.Error(codes.Aborted, strconv.Itoa(consts.CodeMessageDuplicate))
+		return apperr.New(consts.CodeMessageDuplicate)
 	default:
-		logger.Error(ctx, "消息操作失败", logger.ErrorField("error", err))
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "消息处理失败")
 	}
 }
 
-// mapConvDomainError 将会话领域错误映射为 gRPC status
-func mapConvDomainError(ctx context.Context, err error) error {
+func mapConvDomainError(_ context.Context, err error) error {
 	switch {
 	case errors.Is(err, convsvc.ErrConversationNotFound):
-		return status.Error(codes.NotFound, strconv.Itoa(consts.CodeConversationNotFound))
+		return apperr.New(consts.CodeConversationNotFound)
 	default:
-		logger.Error(ctx, "会话操作失败", logger.ErrorField("error", err))
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "会话处理失败")
 	}
 }

@@ -7,20 +7,16 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"sync"
 	"testing"
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeAuthHTTPService struct {
@@ -98,7 +94,6 @@ var gatewayAuthHandlerLoggerOnce sync.Once
 
 func initGatewayAuthHandlerLogger() {
 	gatewayAuthHandlerLoggerOnce.Do(func() {
-		logger.ReplaceGlobal(zap.NewNop())
 		gin.SetMode(gin.TestMode)
 	})
 }
@@ -209,7 +204,7 @@ func TestAuthHandlerLogin(t *testing.T) {
 			setupSvc: func(s *fakeAuthHTTPService, called *bool) {
 				s.loginFn = func(_ context.Context, _ *dto.LoginRequest, _ string) (*dto.LoginResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodePasswordError))
+					return nil, apperr.ToStatus(apperr.New(consts.CodePasswordError))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -349,7 +344,7 @@ func TestAuthHandlerLoginByCode(t *testing.T) {
 			setupSvc: func(s *fakeAuthHTTPService, called *bool) {
 				s.loginByCodeFn = func(_ context.Context, _ *dto.LoginByCodeRequest, _ string) (*dto.LoginByCodeResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeVerifyCodeError))
+					return nil, apperr.ToStatus(apperr.New(consts.CodeVerifyCodeError))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -435,7 +430,7 @@ func TestAuthHandlerRegister(t *testing.T) {
 			setupSvc: func(s *fakeAuthHTTPService, called *bool) {
 				s.registerFn = func(_ context.Context, _ *dto.RegisterRequest) (*dto.RegisterResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeUserAlreadyExist), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeUserAlreadyExist))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -518,7 +513,7 @@ func TestAuthHandlerSendVerifyCode(t *testing.T) {
 			setupSvc: func(s *fakeAuthHTTPService, called *bool) {
 				s.sendVerifyCodeFn = func(_ context.Context, _ *dto.SendVerifyCodeRequest) (*dto.SendVerifyCodeResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeSendTooFrequent), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeSendTooFrequent))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -601,7 +596,7 @@ func TestAuthHandlerVerifyCode(t *testing.T) {
 			setupSvc: func(s *fakeAuthHTTPService, called *bool) {
 				s.verifyCodeFn = func(_ context.Context, _ *dto.VerifyCodeRequest) (*dto.VerifyCodeResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeVerifyCodeError), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeVerifyCodeError))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -684,7 +679,7 @@ func TestAuthHandlerResetPassword(t *testing.T) {
 			setupSvc: func(s *fakeAuthHTTPService, called *bool) {
 				s.resetPasswordFn = func(_ context.Context, _ *dto.ResetPasswordRequest) (*dto.ResetPasswordResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeVerifyCodeError), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeVerifyCodeError))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -769,7 +764,7 @@ func TestAuthHandlerRefreshToken(t *testing.T) {
 			setupSvc: func(s *fakeAuthHTTPService, called *bool) {
 				s.refreshTokenFn = func(_ context.Context, _ *dto.RefreshTokenRequest) (*dto.RefreshTokenResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeInvalidToken), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeInvalidToken))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -851,7 +846,7 @@ func TestAuthHandlerLogout(t *testing.T) {
 			setupSvc: func(s *fakeAuthHTTPService, called *bool) {
 				s.logoutFn = func(_ context.Context, _ *dto.LogoutRequest) (*dto.LogoutResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeInvalidToken), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeInvalidToken))
 				}
 			},
 			wantStatus: http.StatusOK,

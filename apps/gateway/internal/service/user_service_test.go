@@ -3,8 +3,7 @@ package service
 import (
 	"context"
 	"errors"
-	"strconv"
-	"sync"
+		"sync"
 	"testing"
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
@@ -15,6 +14,7 @@ import (
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -184,7 +184,7 @@ func TestGatewayUserServiceGetProfile(t *testing.T) {
 
 		resp, err := svc.GetProfile(context.Background())
 		require.Nil(t, resp)
-		require.EqualError(t, err, strconv.Itoa(consts.CodeInternalError))
+		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 }
 
@@ -196,7 +196,7 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 
 		resp, err := svc.GetOtherProfile(context.Background(), &dto.GetOtherProfileRequest{UserUUID: "u2"})
 		require.Nil(t, resp)
-		require.EqualError(t, err, strconv.Itoa(consts.CodeUnauthorized))
+		require.Equal(t, consts.CodeUnauthorized, apperr.Code(err))
 	})
 
 	t.Run("user_service_error_passthrough", func(t *testing.T) {
@@ -232,7 +232,7 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 		ctx := context.WithValue(context.Background(), "user_uuid", "u1")
 		resp, err := svc.GetOtherProfile(ctx, &dto.GetOtherProfileRequest{UserUUID: "u2"})
 		require.Nil(t, resp)
-		require.EqualError(t, err, strconv.Itoa(consts.CodeInternalError))
+		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 
 	t.Run("friend_service_error_downgrade_and_mask", func(t *testing.T) {

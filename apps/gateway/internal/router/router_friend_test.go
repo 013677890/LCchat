@@ -14,6 +14,7 @@ import (
 	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
@@ -21,8 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeRouterFriendService struct {
@@ -485,10 +484,10 @@ func TestRouterFriendErrorMapping(t *testing.T) {
 	t.Run("business_error_passthrough", func(t *testing.T) {
 		svc := &fakeRouterFriendService{
 			sendApplyFn: func(_ context.Context, _ *dto.SendFriendApplyRequest) (*dto.SendFriendApplyResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeFriendRequestSent), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeFriendRequestSent))
 			},
 			getRelationFn: func(_ context.Context, _ *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeNoPermission), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeNoPermission))
 			},
 		}
 		r := buildFriendTestRouter(svc)

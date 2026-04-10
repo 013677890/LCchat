@@ -1,15 +1,12 @@
 package service
 
 import (
+	"context"
+
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"context"
-	"errors"
-	"strconv"
-	"time"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 )
 
 // AuthServiceImpl 认证服务实现
@@ -31,7 +28,6 @@ func NewAuthService(userClient pb.UserServiceClient) AuthService {
 // deviceId: 设备ID
 // 返回: 完整的登录响应（包含Token和用户信息）
 func (s *AuthServiceImpl) Login(ctx context.Context, req *dto.LoginRequest, deviceId string) (*dto.LoginResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoLoginRequest(req)
@@ -40,17 +36,6 @@ func (s *AuthServiceImpl) Login(ctx context.Context, req *dto.LoginRequest, devi
 	grpcResp, err := s.userClient.Login(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -58,8 +43,7 @@ func (s *AuthServiceImpl) Login(ctx context.Context, req *dto.LoginRequest, devi
 	// 3. gRPC 调用成功，检查响应数据
 	if grpcResp.UserInfo == nil {
 		// 成功返回但 UserInfo 为空，属于非预期的异常情况
-		logger.Error(ctx, "gRPC 成功响应但用户信息为空")
-		return nil, errors.New(strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.New(consts.CodeInternalError)
 	}
 
 	return dto.ConvertLoginResponseFromProto(grpcResp), nil
@@ -70,7 +54,6 @@ func (s *AuthServiceImpl) Login(ctx context.Context, req *dto.LoginRequest, devi
 // req: 注册请求
 // 返回: 完整的注册响应（包含Token和用户信息）
 func (s *AuthServiceImpl) Register(ctx context.Context, req *dto.RegisterRequest) (*dto.RegisterResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoRegisterRequest(req)
@@ -79,16 +62,6 @@ func (s *AuthServiceImpl) Register(ctx context.Context, req *dto.RegisterRequest
 	grpcResp, err := s.userClient.Register(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -96,8 +69,7 @@ func (s *AuthServiceImpl) Register(ctx context.Context, req *dto.RegisterRequest
 	// 3. gRPC 调用成功，检查响应数据
 	if grpcResp.UserUuid == "" {
 		// 成功返回但 UserUuid 为空，属于非预期的异常情况
-		logger.Error(ctx, "gRPC 成功响应但用户信息为空")
-		return nil, errors.New(strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.New(consts.CodeInternalError)
 	}
 
 	return dto.ConvertRegisterResponseFromProto(grpcResp), nil
@@ -108,7 +80,6 @@ func (s *AuthServiceImpl) Register(ctx context.Context, req *dto.RegisterRequest
 // req: 发送验证码请求
 // 返回: 发送验证码响应
 func (s *AuthServiceImpl) SendVerifyCode(ctx context.Context, req *dto.SendVerifyCodeRequest) (*dto.SendVerifyCodeResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoSendVerifyCodeRequest(req)
@@ -117,16 +88,6 @@ func (s *AuthServiceImpl) SendVerifyCode(ctx context.Context, req *dto.SendVerif
 	grpcResp, err := s.userClient.SendVerifyCode(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -140,7 +101,6 @@ func (s *AuthServiceImpl) SendVerifyCode(ctx context.Context, req *dto.SendVerif
 // deviceId: 设备ID
 // 返回: 完整的登录响应（包含Token和用户信息）
 func (s *AuthServiceImpl) LoginByCode(ctx context.Context, req *dto.LoginByCodeRequest, deviceId string) (*dto.LoginByCodeResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoLoginByCodeRequest(req)
@@ -149,17 +109,6 @@ func (s *AuthServiceImpl) LoginByCode(ctx context.Context, req *dto.LoginByCodeR
 	grpcResp, err := s.userClient.LoginByCode(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -167,8 +116,7 @@ func (s *AuthServiceImpl) LoginByCode(ctx context.Context, req *dto.LoginByCodeR
 	// 3. gRPC 调用成功，检查响应数据
 	if grpcResp.UserInfo == nil {
 		// 成功返回但 UserInfo 为空，属于非预期的异常情况
-		logger.Error(ctx, "gRPC 成功响应但用户信息为空")
-		return nil, errors.New(strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.New(consts.CodeInternalError)
 	}
 
 	return dto.ConvertLoginByCodeResponseFromProto(grpcResp), nil
@@ -179,7 +127,6 @@ func (s *AuthServiceImpl) LoginByCode(ctx context.Context, req *dto.LoginByCodeR
 // req: 登出请求
 // 返回: 登出响应
 func (s *AuthServiceImpl) Logout(ctx context.Context, req *dto.LogoutRequest) (*dto.LogoutResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoLogoutRequest(req)
@@ -188,17 +135,6 @@ func (s *AuthServiceImpl) Logout(ctx context.Context, req *dto.LogoutRequest) (*
 	_, err := s.userClient.Logout(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -211,7 +147,6 @@ func (s *AuthServiceImpl) Logout(ctx context.Context, req *dto.LogoutRequest) (*
 // req: 重置密码请求
 // 返回: 重置密码响应
 func (s *AuthServiceImpl) ResetPassword(ctx context.Context, req *dto.ResetPasswordRequest) (*dto.ResetPasswordResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoResetPasswordRequest(req)
@@ -220,17 +155,6 @@ func (s *AuthServiceImpl) ResetPassword(ctx context.Context, req *dto.ResetPassw
 	_, err := s.userClient.ResetPassword(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -243,7 +167,6 @@ func (s *AuthServiceImpl) ResetPassword(ctx context.Context, req *dto.ResetPassw
 // req: 刷新Token请求
 // 返回: 刷新Token响应
 func (s *AuthServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.RefreshTokenResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoRefreshTokenRequest(req)
@@ -252,17 +175,6 @@ func (s *AuthServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshToke
 	grpcResp, err := s.userClient.RefreshToken(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -275,7 +187,6 @@ func (s *AuthServiceImpl) RefreshToken(ctx context.Context, req *dto.RefreshToke
 // req: 校验验证码请求
 // 返回: 校验验证码响应
 func (s *AuthServiceImpl) VerifyCode(ctx context.Context, req *dto.VerifyCodeRequest) (*dto.VerifyCodeResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoVerifyCodeRequest(req)
@@ -284,17 +195,6 @@ func (s *AuthServiceImpl) VerifyCode(ctx context.Context, req *dto.VerifyCodeReq
 	grpcResp, err := s.userClient.VerifyCode(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}

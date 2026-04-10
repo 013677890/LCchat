@@ -3,28 +3,17 @@ package service
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
-
-var gatewayDeviceLoggerOnce sync.Once
-
-func initGatewayDeviceServiceTestLogger() {
-	gatewayDeviceLoggerOnce.Do(func() {
-		logger.ReplaceGlobal(zap.NewNop())
-	})
-}
 
 type fakeGatewayDeviceClient struct {
 	gatewaypb.UserServiceClient
@@ -64,8 +53,6 @@ func (f *fakeGatewayDeviceClient) BatchGetOnlineStatus(ctx context.Context, req 
 }
 
 func TestGatewayDeviceServiceGetDeviceList(t *testing.T) {
-	initGatewayDeviceServiceTestLogger()
-
 	t.Run("success_mapping", func(t *testing.T) {
 		ts := time.Date(2026, 2, 6, 12, 0, 0, 0, time.UTC)
 		tsMilli := ts.UnixMilli()
@@ -110,8 +97,6 @@ func TestGatewayDeviceServiceGetDeviceList(t *testing.T) {
 }
 
 func TestGatewayDeviceServiceKickDevice(t *testing.T) {
-	initGatewayDeviceServiceTestLogger()
-
 	t.Run("success_mapping", func(t *testing.T) {
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
 			kickDeviceFn: func(_ context.Context, req *userpb.KickDeviceRequest) (*userpb.KickDeviceResponse, error) {
@@ -138,8 +123,6 @@ func TestGatewayDeviceServiceKickDevice(t *testing.T) {
 }
 
 func TestGatewayDeviceServiceGetOnlineStatus(t *testing.T) {
-	initGatewayDeviceServiceTestLogger()
-
 	t.Run("success_mapping", func(t *testing.T) {
 		ts := time.Date(2026, 2, 6, 12, 30, 0, 0, time.UTC).UnixMilli()
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
@@ -194,8 +177,6 @@ func TestGatewayDeviceServiceGetOnlineStatus(t *testing.T) {
 }
 
 func TestGatewayDeviceServiceBatchGetOnlineStatus(t *testing.T) {
-	initGatewayDeviceServiceTestLogger()
-
 	t.Run("success_mapping", func(t *testing.T) {
 		ts := time.Date(2026, 2, 6, 13, 0, 0, 0, time.UTC).UnixMilli()
 		svc := NewDeviceService(&fakeGatewayDeviceClient{

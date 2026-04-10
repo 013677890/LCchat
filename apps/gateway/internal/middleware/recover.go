@@ -1,16 +1,16 @@
 package middleware
 
 import (
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/result"
-	"github.com/013677890/LCchat-Backend/consts"
 	"errors"
 	"net"
 	"net/http/httputil"
 	"os"
-	"runtime/debug"
 	"strings"
 
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,68 +19,60 @@ import (
 func GinRecovery(stack bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
-			if err := recover(); err != nil {
-				// 1. 获取带 trace_id 的 context
+			if recovered := recover(); recovered != nil {
+				// 1. 构建上下文
 				ctx := NewContextWithGin(c)
-
-				// 2. 判断是否是客户端断开连接（Broken Pipe）
+				// 2. 检查是否是管道错误
 				var brokenPipe bool
-				if ne, ok := err.(*net.OpError); ok {
+				// 3. 检查是否是管道错误
+				if ne, ok := recovered.(*net.OpError); ok {
+					// 4. 检查是否是系统调用错误
 					var se *os.SyscallError
 					if errors.As(ne.Err, &se) {
+						// 5. 检查是否是管道错误
 						errStr := strings.ToLower(se.Error())
 						if strings.Contains(errStr, "broken pipe") || strings.Contains(errStr, "connection reset by peer") {
 							brokenPipe = true
 						}
 					}
 				}
-
-				// 3. 客户端断开连接的情况（非服务端错误）
+				// 6. 检查是否是管道错误
 				if brokenPipe {
+					// 7. 记录日志
 					logger.Warn(ctx, "客户端断开连接",
-						logger.Any("error", err),
+						logger.Any("error", recovered),
 						logger.String("method", c.Request.Method),
 						logger.String("path", c.Request.URL.Path),
 						logger.String("ip", c.ClientIP()),
 					)
-					// 连接已断开，无法写入响应，直接中止
-					_ = c.Error(err.(error))
+					// 8. 中止请求
 					c.Abort()
 					return
 				}
 
-				// 4. 真正的 Panic（代码 Bug）
-				// 获取 HTTP 请求详情
+				// 9. 记录日志
 				httpRequest, _ := httputil.DumpRequest(c.Request, false)
-
-				// 记录错误日志（带堆栈信息）
-				if stack {
-					logger.Error(ctx, "panic recovered",
-						logger.Any("error", err),
-						logger.String("method", c.Request.Method),
-						logger.String("path", c.Request.URL.Path),
-						logger.String("query", c.Request.URL.RawQuery),
-						logger.String("ip", c.ClientIP()),
-						logger.String("user-agent", c.Request.UserAgent()),
-						logger.String("request", string(httpRequest)),
-						logger.String("stack", string(debug.Stack())),
-					)
-				} else {
-					logger.Error(ctx, "panic recovered",
-						logger.Any("error", err),
-						logger.String("method", c.Request.Method),
-						logger.String("path", c.Request.URL.Path),
-						logger.String("query", c.Request.URL.RawQuery),
-						logger.String("ip", c.ClientIP()),
-						logger.String("user-agent", c.Request.UserAgent()),
-						logger.String("request", string(httpRequest)),
-					)
-				}
-
-				// 返回 500 错误响应
+				// 10. 创建错误
+				panicErr := apperr.NewFromPanic(recovered)
+				// 11. 记录日志
+				logger.Error(ctx, "Gateway 捕获到 panic",
+					logger.Any("error", recovered),
+					logger.String("method", c.Request.Method),
+					logger.String("path", c.Request.URL.Path),
+					logger.String("query", c.Request.URL.RawQuery),
+					logger.String("ip", c.ClientIP()),
+					logger.String("user-agent", c.Request.UserAgent()),
+					logger.String("request", string(httpRequest)),
+					logger.String("top_frame", apperr.TopFrame(panicErr)),
+					logger.StackFrames("stack", apperr.Frames(panicErr)),
+				)
+				// 12. 标记错误已记录
+				apperr.MarkLogged(panicErr)
+				// 13. 返回错误
 				result.Fail(c, nil, consts.CodeInternalError)
 			}
 		}()
+		// 14. 继续执行请求
 		c.Next()
 	}
 }
