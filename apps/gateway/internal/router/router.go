@@ -138,7 +138,8 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				blacklist.POST("", blacklistHandler.AddBlacklist)
 				blacklist.GET("", blacklistHandler.GetBlacklistList)
 				blacklist.DELETE("/:userUuid", blacklistHandler.RemoveBlacklist)
-				blacklist.POST("/check", blacklistHandler.CheckIsBlacklist)
+				// /check 接口存在越权查询风险（GATEWAY-001），暂不对外暴露。
+				// 如需判断黑名单关系，调用方应通过内部 gRPC 接口。
 			}
 			messages := auth.Group("/messages")
 			{

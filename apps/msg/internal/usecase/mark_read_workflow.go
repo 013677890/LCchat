@@ -52,22 +52,45 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 		ConvId:  req.ConvId,
 		ReadSeq: req.ReadSeq,
 	}
-	noticeData, _ := proto.Marshal(notice)
 
-	pushEvent := &pb.MsgPushEvent{
-		ReceiverUuid: req.OwnerUuid, // 推给自己的其他设备
-		Type:         "MSG_MARK_READ",
-		Data:         noticeData,
-		FromUuid:     req.OwnerUuid,
-		ServerTs:     time.Now().UnixMilli(),
+	// 序列化失败时有限重试（最多 3 次），重试均失败则跳过投递（MSG-003）。
+	// DB 写入已完成，其他设备下次打开时会重新拉取最新 read_seq 补偿。
+	const maxMarshalRetry = 3
+	var noticeData []byte
+	var marshalErr error
+	for i := 0; i < maxMarshalRetry; i++ {
+		noticeData, marshalErr = proto.Marshal(notice)
+		if marshalErr == nil {
+			break
+		}
+		logger.Warn(ctx, "标记已读：MarkReadNotice 序列化失败，重试",
+			logger.String("conv_id", req.ConvId),
+			logger.Int("attempt", i+1),
+			logger.ErrorField("error", marshalErr),
+		)
 	}
 
-	if err := w.producer.Publish(ctx, req.ConvId, pushEvent); err != nil {
-		// DB 已更新，其他设备下次打开时会重新拉取最新 read_seq
-		logger.Warn(ctx, "标记已读：投递 Kafka 失败（不阻断）",
+	if marshalErr != nil {
+		logger.Warn(ctx, "标记已读：MarkReadNotice 序列化重试耗尽，跳过 Kafka 投递，多端红点将在下次同步时修正",
 			logger.String("conv_id", req.ConvId),
-			logger.ErrorField("error", err),
+			logger.ErrorField("error", marshalErr),
 		)
+	} else {
+		pushEvent := &pb.MsgPushEvent{
+			ReceiverUuid: req.OwnerUuid, // 推给自己的其他设备
+			Type:         "MSG_MARK_READ",
+			Data:         noticeData,
+			FromUuid:     req.OwnerUuid,
+			ServerTs:     time.Now().UnixMilli(),
+		}
+
+		if err := w.producer.Publish(ctx, req.ConvId, pushEvent); err != nil {
+			// DB 已更新，其他设备下次打开时会重新拉取最新 read_seq
+			logger.Warn(ctx, "标记已读：投递 Kafka 失败（不阻断）",
+				logger.String("conv_id", req.ConvId),
+				logger.ErrorField("error", err),
+			)
+		}
 	}
 
 	return &pb.MarkReadResponse{

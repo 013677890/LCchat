@@ -1,10 +1,11 @@
 package middleware
 
 import (
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	"github.com/013677890/LCchat-Backend/pkg/util"
 	"net/http"
 	"strings"
+
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/gin-gonic/gin"
 )

@@ -100,24 +100,33 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	// Step 5: Kafka → 构造 MsgPushEvent 投递
 	// ============================================================
 	msgItem := msgsvc.ModelToMsgItem(msg)
-	msgItemData, _ := proto.Marshal(msgItem)
-
-	pushEvent := &pb.MsgPushEvent{
-		ReceiverUuid: req.TargetUuid, // 单聊=对端 UUID, 群聊=群 UUID
-		DeviceId:     req.DeviceId,   // 发送方设备 ID（多端同步时排除）
-		Type:         "MSG_PUSH",     // 新消息推送
-		ConvType:     req.ConvType,   // Push-Job 据此判断扩散策略
-		Data:         msgItemData,    // MsgItem 序列化 bytes
-		FromUuid:     req.FromUuid,   // 多端同步用
-		ServerTs:     time.Now().UnixMilli(),
-	}
-
-	if err := w.producer.Publish(ctx, msg.ConvId, pushEvent); err != nil {
-		logger.Warn(ctx, "发送消息：投递 Kafka 失败（不阻断）",
+	msgItemData, marshalErr := proto.Marshal(msgItem)
+	if marshalErr != nil {
+		// 序列化失败：阻断投递，避免下游收到损坏载荷（MSG-002）。
+		// 消息已落库，客户端可通过拉取补偿，不影响数据一致性。
+		logger.Warn(ctx, "发送消息：MsgItem 序列化失败，跳过 Kafka 投递",
 			logger.String("conv_id", msg.ConvId),
 			logger.String("msg_id", msg.MsgId),
-			logger.ErrorField("error", err),
+			logger.ErrorField("error", marshalErr),
 		)
+	} else {
+		pushEvent := &pb.MsgPushEvent{
+			ReceiverUuid: req.TargetUuid, // 单聊=对端 UUID, 群聊=群 UUID
+			DeviceId:     req.DeviceId,   // 发送方设备 ID（多端同步时排除）
+			Type:         "MSG_PUSH",     // 新消息推送
+			ConvType:     req.ConvType,   // Push-Job 据此判断扩散策略
+			Data:         msgItemData,    // MsgItem 序列化 bytes
+			FromUuid:     req.FromUuid,   // 多端同步用
+			ServerTs:     time.Now().UnixMilli(),
+		}
+
+		if err := w.producer.Publish(ctx, msg.ConvId, pushEvent); err != nil {
+			logger.Warn(ctx, "发送消息：投递 Kafka 失败（不阻断）",
+				logger.String("conv_id", msg.ConvId),
+				logger.String("msg_id", msg.MsgId),
+				logger.ErrorField("error", err),
+			)
+		}
 	}
 
 	// ============================================================
