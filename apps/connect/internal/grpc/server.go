@@ -79,6 +79,14 @@ func (s *Server) Stop() {
 	s.grpcServer.GracefulStop()
 }
 
+// Addr 返回 gRPC 监听地址，便于启动日志复用。
+func (s *Server) Addr() string {
+	if s == nil {
+		return ""
+	}
+	return s.addr
+}
+
 // PushToDevice 向指定设备投递消息。
 func (s *Server) PushToDevice(ctx context.Context, req *pb.PushToDeviceRequest) (*pb.PushToDeviceResponse, error) {
 	data, err := proto.Marshal(req.Message)

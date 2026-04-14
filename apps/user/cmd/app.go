@@ -6,12 +6,21 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/mq"
+	"github.com/013677890/LCchat-Backend/config"
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/mysql"
+	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -40,11 +49,11 @@ func NewUserApp(
 	metricsServer *http.Server,
 	built *grpcx.BuiltServer,
 	grpcListener net.Listener,
-	grpcShutdownTimeout time.Duration,
+	grpcShutdownTimeout userGRPCShutdownTimeout,
 	redisConsumer *mq.RedisRetryConsumer,
 	kafkaProducer *kafka.Producer,
 	asyncPool *ants.Pool,
-	asyncReleaseTimeout time.Duration,
+	asyncReleaseTimeout userAsyncReleaseTimeout,
 	db *gorm.DB,
 	redisClient *goredis.Client,
 ) (*UserApp, error) {
@@ -59,11 +68,11 @@ func NewUserApp(
 		metricsServer:       metricsServer,
 		grpcServer:          built.Server,
 		grpcListener:        grpcListener,
-		grpcShutdownTimeout: grpcShutdownTimeout,
+		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
 		redisConsumer:       redisConsumer,
 		kafkaProducer:       kafkaProducer,
 		asyncPool:           asyncPool,
-		asyncReleaseTimeout: asyncReleaseTimeout,
+		asyncReleaseTimeout: time.Duration(asyncReleaseTimeout),
 		db:                  db,
 		redisClient:         redisClient,
 	}, nil
@@ -73,6 +82,8 @@ func NewUserApp(
 // 约束：后台 worker 先启动，最后由 gRPC Serve 阻塞当前 goroutine，
 // 这样 main 只需要感知一个运行入口。
 func (a *UserApp) Run(ctx context.Context) error {
+	a.installProcessGlobals(ctx)
+
 	if a.metricsServer != nil {
 		go func() {
 			logger.Info(ctx, "Metrics HTTP Server 启动中", logger.String("address", a.metricsServer.Addr))
@@ -156,4 +167,55 @@ func (a *UserApp) Shutdown(ctx context.Context) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// installProcessGlobals 在对外提供服务前注册全局 logger / DB / Redis / 异步池等，
+// 与 Snowflake、邮件、设备在线窗口、Kafka 全局 Producer 等进程级副作用。
+// 放在 Run 而非 Wire Provider，避免在依赖装配阶段产生隐式全局状态。
+func (a *UserApp) installProcessGlobals(ctx context.Context) {
+	logger.ReplaceGlobal(a.logger)
+	if a.db != nil {
+		mysql.ReplaceGlobal(a.db)
+	}
+	if a.redisClient != nil {
+		pkgredis.ReplaceGlobal(a.redisClient)
+	}
+	async.SetContextPropagator(func(parent context.Context) context.Context {
+		return ctxmeta.CopyKnownFromParent(parent)
+	})
+	async.ReplaceGlobal(a.asyncPool)
+	_ = util.InitSnowflake(1)
+	util.SetEmailConfig(util.EmailConfig{
+		SMTPHost:     userGetEnv("EMAIL_SMTP_HOST", "smtp.qq.com"),
+		SMTPPort:     userGetEnvInt("EMAIL_SMTP_PORT", 465),
+		SenderEmail:  userGetEnv("EMAIL_SENDER", "2315635418@qq.com"),
+		SenderName:   userGetEnv("EMAIL_SENDER_NAME", "LCChat"),
+		AuthPassword: os.Getenv("EMAIL_AUTH_CODE"),
+	})
+	daCfg := config.DefaultDeviceActiveConfig()
+	pkgdeviceactive.SetOnlineWindow(daCfg.OnlineWindow)
+	if a.kafkaProducer != nil {
+		mq.SetGlobalProducer(a.kafkaProducer)
+	}
+	_ = ctx
+}
+
+func userGetEnv(key, defaultValue string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	return v
+}
+
+func userGetEnvInt(key string, defaultValue int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultValue
+	}
+	return n
 }

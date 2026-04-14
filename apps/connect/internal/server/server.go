@@ -107,3 +107,11 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }
+
+// Addr 返回 HTTP 监听地址，便于启动日志复用。
+func (s *Server) Addr() string {
+	if s == nil || s.httpServer == nil {
+		return ""
+	}
+	return s.httpServer.Addr
+}

@@ -5,22 +5,21 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/handler"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/service"
 	"github.com/013677890/LCchat-Backend/apps/user/mq"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
-	"github.com/013677890/LCchat-Backend/pkg/util"
+	"github.com/google/wire"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -33,6 +32,10 @@ import (
 type userGRPCAddress string
 
 type userMetricsAddress string
+
+type userAsyncReleaseTimeout time.Duration
+
+type userGRPCShutdownTimeout time.Duration
 
 func provideUserLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideUserAsyncConfig() config.AsyncConfig { return config.DefaultAsyncConfig() }
@@ -47,35 +50,19 @@ func provideUserRedisConfig() config.RedisConfig {
 }
 
 func provideUserLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
-	zl, err := logger.Build(cfg)
-	if err != nil {
-		return nil, err
-	}
-	logger.ReplaceGlobal(zl)
-	return zl, nil
+	return logger.Build(cfg)
 }
 
 func provideUserAsyncPool(_ *zap.Logger, cfg config.AsyncConfig) (*ants.Pool, error) {
-	async.SetContextPropagator(func(parent context.Context) context.Context {
-		return ctxmeta.CopyKnownFromParent(parent)
-	})
-	pool, err := async.Build(cfg)
-	if err != nil {
-		return nil, err
-	}
-	async.ReplaceGlobal(pool)
-	return pool, nil
+	return async.Build(cfg)
 }
 
-func provideUserAsyncReleaseTimeout(cfg config.AsyncConfig) time.Duration { return cfg.ReleaseTimeout }
+func provideUserAsyncReleaseTimeout(cfg config.AsyncConfig) userAsyncReleaseTimeout {
+	return userAsyncReleaseTimeout(cfg.ReleaseTimeout)
+}
 
 func provideUserMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
-	db, err := mysql.Build(cfg)
-	if err != nil {
-		return nil, err
-	}
-	mysql.ReplaceGlobal(db)
-	return db, nil
+	return mysql.Build(cfg)
 }
 
 // user-service 允许 Redis 缺失后降级运行，因此这里返回 nil 而不是中断整个依赖图。
@@ -86,7 +73,6 @@ func provideUserRedisClient(log *zap.Logger, cfg config.RedisConfig) (*goredis.C
 		_ = log
 		return nil, nil
 	}
-	pkgredis.ReplaceGlobal(client)
 	return client, nil
 }
 
@@ -95,9 +81,7 @@ func provideUserKafkaProducer(redisClient *goredis.Client, cfg config.KafkaConfi
 	if redisClient == nil {
 		return nil
 	}
-	producer := kafka.NewProducer(cfg.Brokers, cfg.RedisRetryTopic)
-	mq.SetGlobalProducer(producer)
-	return producer
+	return kafka.NewProducer(cfg.Brokers, cfg.RedisRetryTopic)
 }
 
 // Consumer 只在这里构造，真正启动放到 UserApp.Run，避免 provider 隐式拉起后台 goroutine。
@@ -132,31 +116,12 @@ func provideUserMetricsAddress() userMetricsAddress {
 	return userMetricsAddress(addr)
 }
 
-func provideUserGRPCShutdownTimeout() time.Duration { return 10 * time.Second }
+func provideUserGRPCShutdownTimeout() userGRPCShutdownTimeout { return userGRPCShutdownTimeout(10 * time.Second) }
 
 func provideUserMetricsServer(addr userMetricsAddress, built *grpcx.BuiltServer) *http.Server {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", built.Metrics.Handler())
 	return &http.Server{Addr: string(addr), Handler: metricsMux}
-}
-
-func provideUserSnowflakeNode() error { return util.InitSnowflake(1) }
-
-func provideVerifyEmailConfig() error {
-	util.SetEmailConfig(util.EmailConfig{
-		SMTPHost:     getEnv("EMAIL_SMTP_HOST", "smtp.qq.com"),
-		SMTPPort:     getEnvInt("EMAIL_SMTP_PORT", 465),
-		SenderEmail:  getEnv("EMAIL_SENDER", "2315635418@qq.com"),
-		SenderName:   getEnv("EMAIL_SENDER_NAME", "LCChat"),
-		AuthPassword: os.Getenv("EMAIL_AUTH_CODE"),
-	})
-	return nil
-}
-
-func provideDeviceActiveConfig() config.DeviceActiveConfig {
-	cfg := config.DefaultDeviceActiveConfig()
-	pkgdeviceactive.SetOnlineWindow(cfg.OnlineWindow)
-	return cfg
 }
 
 // RegistrationFunc 把“注册哪些 gRPC 服务”从“如何创建 gRPC Server”中拆出来，
@@ -195,22 +160,57 @@ func provideUserGRPCListener(addr userGRPCAddress) (net.Listener, error) {
 	return grpcx.NewListener(string(addr))
 }
 
-func getEnv(key, defaultValue string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultValue
-	}
-	return v
-}
+var userInfraProviderSet = wire.NewSet(
+	provideUserLoggerConfig,
+	provideUserAsyncConfig,
+	provideUserMySQLConfig,
+	provideUserRedisConfig,
+	provideUserKafkaConfig,
+	provideUserLogger,
+	provideUserAsyncPool,
+	provideUserAsyncReleaseTimeout,
+	provideUserMySQLDB,
+	provideUserRedisClient,
+	provideUserKafkaProducer,
+	provideUserRedisRetryConsumer,
+	provideUserGRPCAddress,
+	provideUserMetricsAddress,
+	provideUserGRPCShutdownTimeout,
+	provideUserMetricsServer,
+	provideUserRegistration,
+	provideUserGRPCServer,
+	provideUserGRPCListener,
+)
 
-func getEnvInt(key string, defaultValue int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultValue
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return defaultValue
-	}
-	return n
-}
+var userRepositoryProviderSet = wire.NewSet(
+	repository.NewAuthRepository,
+	repository.NewUserRepository,
+	repository.NewFriendRepository,
+	repository.NewApplyRepository,
+	repository.NewBlacklistRepository,
+	repository.NewDeviceRepository,
+)
+
+var userServiceProviderSet = wire.NewSet(
+	service.NewAuthService,
+	service.NewUserService,
+	service.NewFriendService,
+	service.NewBlacklistService,
+	service.NewDeviceService,
+)
+
+var userHandlerProviderSet = wire.NewSet(
+	handler.NewAuthHandler,
+	handler.NewUserHandler,
+	handler.NewFriendHandler,
+	handler.NewBlacklistHandler,
+	handler.NewDeviceHandler,
+)
+
+var userAppProviderSet = wire.NewSet(
+	userInfraProviderSet,
+	userRepositoryProviderSet,
+	userServiceProviderSet,
+	userHandlerProviderSet,
+	NewUserApp,
+)

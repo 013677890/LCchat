@@ -8,9 +8,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/mysql"
+	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -38,9 +43,9 @@ func NewMsgApp(
 	metricsServer *http.Server,
 	built *grpcx.BuiltServer,
 	grpcListener net.Listener,
-	grpcShutdownTimeout time.Duration,
+	grpcShutdownTimeout msgGRPCShutdownTimeout,
 	asyncPool *ants.Pool,
-	asyncReleaseTimeout time.Duration,
+	asyncReleaseTimeout msgAsyncReleaseTimeout,
 	db *gorm.DB,
 	redisClient *goredis.Client,
 	kafkaProducer *kafka.Producer,
@@ -56,9 +61,9 @@ func NewMsgApp(
 		metricsServer:       metricsServer,
 		grpcServer:          built.Server,
 		grpcListener:        grpcListener,
-		grpcShutdownTimeout: grpcShutdownTimeout,
+		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
 		asyncPool:           asyncPool,
-		asyncReleaseTimeout: asyncReleaseTimeout,
+		asyncReleaseTimeout: time.Duration(asyncReleaseTimeout),
 		db:                  db,
 		redisClient:         redisClient,
 		kafkaProducer:       kafkaProducer,
@@ -67,6 +72,8 @@ func NewMsgApp(
 
 // Run 启动 msg 服务。
 func (a *MsgApp) Run(ctx context.Context) error {
+	a.installProcessGlobals(ctx)
+
 	if a.metricsServer != nil {
 		go func() {
 			logger.Info(ctx, "Metrics HTTP Server 启动中", logger.String("address", a.metricsServer.Addr))
@@ -136,4 +143,21 @@ func (a *MsgApp) Shutdown(ctx context.Context) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// installProcessGlobals 在对外提供服务前注册全局 logger / DB / Redis / 异步池，并初始化 Snowflake。
+func (a *MsgApp) installProcessGlobals(ctx context.Context) {
+	logger.ReplaceGlobal(a.logger)
+	if a.db != nil {
+		mysql.ReplaceGlobal(a.db)
+	}
+	if a.redisClient != nil {
+		pkgredis.ReplaceGlobal(a.redisClient)
+	}
+	async.SetContextPropagator(func(parent context.Context) context.Context {
+		return ctxmeta.CopyKnownFromParent(parent)
+	})
+	async.ReplaceGlobal(a.asyncPool)
+	_ = util.InitSnowflake(2)
+	_ = ctx
 }

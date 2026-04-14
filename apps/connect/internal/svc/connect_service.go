@@ -1,13 +1,16 @@
 package svc
 
 import (
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
-	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
 
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/config"
+	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -45,11 +48,11 @@ type ConnectService struct {
 
 // NewConnectService 创建业务服务实例。
 // userDeviceClient 可为 nil：此时设备状态 RPC 会被跳过（降级运行）。
-func NewConnectService(redisClient *redis.Client, userDeviceClient userpb.DeviceServiceClient, activeSyncer *deviceactive.Syncer) *ConnectService {
+// activeSyncer 由 InitActiveSyncer 在进程启动阶段注入，避免在 Wire 装配时启动同步器 goroutine。
+func NewConnectService(redisClient *redis.Client, userDeviceClient userpb.DeviceServiceClient) *ConnectService {
 	s := &ConnectService{
 		redisClient:      redisClient,
 		userDeviceClient: userDeviceClient,
-		activeSyncer:     activeSyncer,
 	}
 
 	// 仅在 userDeviceClient 可用时启动工作协程。
@@ -62,6 +65,59 @@ func NewConnectService(redisClient *redis.Client, userDeviceClient userpb.Device
 	}
 
 	return s
+}
+
+// RedisClient 返回构造期注入的 Redis 客户端（可为 nil）。
+func (s *ConnectService) RedisClient() *redis.Client {
+	return s.redisClient
+}
+
+// InitActiveSyncer 在进程启动阶段初始化设备活跃同步器。
+// 必须在对外提供服务前调用，避免在 Wire 装配阶段启动后台 goroutine。
+func (s *ConnectService) InitActiveSyncer(cfg config.DeviceActiveConfig) error {
+	if s.userDeviceClient == nil || s.activeSyncer != nil {
+		return nil
+	}
+	syncer, err := deviceactive.NewSyncer(deviceactive.Config{
+		ShardCount:     cfg.ShardCount,
+		UpdateInterval: cfg.UpdateInterval,
+		FlushInterval:  cfg.FlushInterval,
+		WorkerCount:    cfg.WorkerCount,
+		QueueSize:      cfg.QueueSize,
+		BatchHandler: func(_ context.Context, items []deviceactive.BatchItem) error {
+			const batchSize = 1000
+			var firstErr error
+			for start := 0; start < len(items); start += batchSize {
+				end := start + batchSize
+				if end > len(items) {
+					end = len(items)
+				}
+				activeItems := make([]*userpb.UpdateDeviceActiveItem, 0, end-start)
+				for i := start; i < end; i++ {
+					activeItems = append(activeItems, &userpb.UpdateDeviceActiveItem{
+						UserUuid: items[i].UserUUID,
+						DeviceId: items[i].DeviceID,
+					})
+				}
+				rpcCtx, cancel := context.WithTimeout(context.Background(), cfg.RPCTimeout)
+				_, callErr := s.userDeviceClient.UpdateDeviceActive(rpcCtx, &userpb.UpdateDeviceActiveRequest{Items: activeItems})
+				cancel()
+				if callErr != nil && firstErr == nil {
+					logger.Error(context.Background(), "Connect 批量更新设备活跃时间失败",
+						logger.ErrorField("error", callErr),
+						logger.Int("item_count", len(activeItems)),
+					)
+					firstErr = callErr
+				}
+			}
+			return firstErr
+		},
+	})
+	if err != nil {
+		return err
+	}
+	s.activeSyncer = syncer
+	return nil
 }
 
 // ShutdownStatusWorkers 优雅关闭后台协程。

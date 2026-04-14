@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"os"
@@ -15,13 +14,12 @@ import (
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
-	"github.com/013677890/LCchat-Backend/pkg/util"
+	"github.com/google/wire"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -33,6 +31,10 @@ import (
 type grpcAddress string
 
 type metricsAddress string
+
+type msgAsyncReleaseTimeout time.Duration
+
+type msgGRPCShutdownTimeout time.Duration
 
 func provideLoggerConfig() config.LoggerConfig {
 	return config.DefaultLoggerConfig()
@@ -58,46 +60,23 @@ func provideKafkaConfig() config.KafkaConfig {
 }
 
 func provideLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
-	zl, err := logger.Build(cfg)
-	if err != nil {
-		return nil, err
-	}
-	logger.ReplaceGlobal(zl)
-	return zl, nil
+	return logger.Build(cfg)
 }
 
 func provideAsyncPool(_ *zap.Logger, cfg config.AsyncConfig) (*ants.Pool, error) {
-	async.SetContextPropagator(func(parent context.Context) context.Context {
-		return ctxmeta.CopyKnownFromParent(parent)
-	})
-	pool, err := async.Build(cfg)
-	if err != nil {
-		return nil, err
-	}
-	async.ReplaceGlobal(pool)
-	return pool, nil
+	return async.Build(cfg)
 }
 
-func provideAsyncReleaseTimeout(cfg config.AsyncConfig) time.Duration {
-	return cfg.ReleaseTimeout
+func provideAsyncReleaseTimeout(cfg config.AsyncConfig) msgAsyncReleaseTimeout {
+	return msgAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
 
 func provideMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
-	db, err := mysql.Build(cfg)
-	if err != nil {
-		return nil, err
-	}
-	mysql.ReplaceGlobal(db)
-	return db, nil
+	return mysql.Build(cfg)
 }
 
 func provideRedisClient(_ *zap.Logger, cfg config.RedisConfig) (*goredis.Client, error) {
-	client, err := pkgredis.Build(cfg)
-	if err != nil {
-		return nil, err
-	}
-	pkgredis.ReplaceGlobal(client)
-	return client, nil
+	return pkgredis.Build(cfg)
 }
 
 func provideKafkaProducer(cfg config.KafkaConfig) *kafka.Producer {
@@ -132,12 +111,8 @@ func provideMetricsAddress() metricsAddress {
 	return metricsAddress(addr)
 }
 
-func provideGRPCShutdownTimeout() time.Duration {
-	return 10 * time.Second
-}
-
-func provideSnowflakeNode() error {
-	return util.InitSnowflake(2)
+func provideGRPCShutdownTimeout() msgGRPCShutdownTimeout {
+	return msgGRPCShutdownTimeout(10 * time.Second)
 }
 
 func provideMsgRegistration(msgHandler *handler.MsgHandler) grpcx.RegistrationFunc {
@@ -176,6 +151,49 @@ func provideMetricsServer(addr metricsAddress, built *grpcx.BuiltServer) *http.S
 	}
 }
 
-var _ = provideSnowflakeNode
 var _ = conversation.NewRepository
 var _ = usecase.NewSendMessageWorkflow
+
+var msgInfraProviderSet = wire.NewSet(
+	provideLoggerConfig,
+	provideAsyncConfig,
+	provideMySQLConfig,
+	provideRedisConfig,
+	provideKafkaConfig,
+	provideLogger,
+	provideAsyncPool,
+	provideAsyncReleaseTimeout,
+	provideMySQLDB,
+	provideRedisClient,
+	provideKafkaProducer,
+	provideMsgProducer,
+	provideMsgConfig,
+	provideMsgService,
+	provideGRPCAddress,
+	provideMetricsAddress,
+	provideGRPCShutdownTimeout,
+	provideMsgRegistration,
+	provideMsgGRPCServer,
+	provideMsgGRPCListener,
+	provideMetricsServer,
+)
+
+var msgDomainProviderSet = wire.NewSet(
+	message.NewRepository,
+	conversation.NewRepository,
+	conversation.NewService,
+	usecase.NewSendMessageWorkflow,
+	usecase.NewRecallMessageWorkflow,
+	usecase.NewMarkReadWorkflow,
+)
+
+var msgHandlerProviderSet = wire.NewSet(
+	handler.NewMsgHandler,
+)
+
+var msgAppProviderSet = wire.NewSet(
+	msgInfraProviderSet,
+	msgDomainProviderSet,
+	msgHandlerProviderSet,
+	NewMsgApp,
+)
