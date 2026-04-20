@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 
 	connectgrpc "github.com/013677890/LCchat-Backend/apps/connect/internal/grpc"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
@@ -70,6 +71,9 @@ func NewConnectApp(
 // Run 负责启动 connect 服务的长生命周期组件。
 func (a *ConnectApp) Run(ctx context.Context) error {
 	initConnectGlobals(a.logger, a.connectService.RedisClient(), a.deviceActiveConfig)
+	if os.Getenv("CONNECT_SELF_GRPC_ADDR") == "" {
+		return errors.New("CONNECT_SELF_GRPC_ADDR 未配置")
+	}
 	if err := a.connectService.InitActiveSyncer(a.deviceActiveConfig); err != nil {
 		return fmt.Errorf("初始化设备活跃同步器失败: %w", err)
 	}
@@ -115,6 +119,7 @@ func (a *ConnectApp) Shutdown(ctx context.Context) error {
 	}
 	if a.connectService != nil {
 		a.connectService.ShutdownStatusWorkers()
+		a.connectService.RemoveRoutesByConnectAddr(ctx, os.Getenv("CONNECT_SELF_GRPC_ADDR"))
 	}
 	if a.userGRPCConn != nil {
 		if err := a.userGRPCConn.Close(); err != nil {

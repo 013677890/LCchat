@@ -118,6 +118,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 			Data:         msgItemData,    // MsgItem 序列化 bytes
 			FromUuid:     req.FromUuid,   // 多端同步用
 			ServerTs:     time.Now().UnixMilli(),
+			Seq:          msg.Seq,
 		}
 
 		if err := w.producer.Publish(ctx, msg.ConvId, pushEvent); err != nil {

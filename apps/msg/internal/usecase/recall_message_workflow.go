@@ -70,6 +70,7 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 		Data:         noticeData,
 		FromUuid:     req.OperatorUuid,
 		ServerTs:     time.Now().UnixMilli(),
+		Seq:          0,
 	}
 
 	if err := w.producer.Publish(ctx, req.ConvId, pushEvent); err != nil {

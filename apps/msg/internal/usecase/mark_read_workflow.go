@@ -82,6 +82,7 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 			Data:         noticeData,
 			FromUuid:     req.OwnerUuid,
 			ServerTs:     time.Now().UnixMilli(),
+			Seq:          0,
 		}
 
 		if err := w.producer.Publish(ctx, req.ConvId, pushEvent); err != nil {

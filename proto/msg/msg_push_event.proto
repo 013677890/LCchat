@@ -49,6 +49,9 @@ message MsgPushEvent {
   // Push-Job 消费后用于多端同步：向 from_uuid 下除 device_id 以外的在线设备也投递一份，
   // 实现发送方其他终端实时看到自己发出的消息。
   string from_uuid = 8;
+  // seq: 透传到 MessageEnvelope.seq 的事件顺序键。
+  // MSG_PUSH 填 MsgItem.seq；MSG_RECALL / MSG_MARK_READ 填 0。
+  int64 seq = 9;
 }
 
 // RecallNotice 撤回通知。

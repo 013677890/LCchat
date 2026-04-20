@@ -88,6 +88,11 @@ func DeviceActiveKey(userUUID string) string {
 	return fmt.Sprintf("user:devices:active:%s", userUUID)
 }
 
+// UserRoutingKey 生成用户设备路由 Key: user:routing:{user_uuid}
+func UserRoutingKey(userUUID string) string {
+	return fmt.Sprintf("user:routing:%s", userUUID)
+}
+
 // UserInfoKey 生成用户信息缓存 Key: user:info:{uuid}
 func UserInfoKey(uuid string) string {
 	return fmt.Sprintf("user:info:%s", uuid)
