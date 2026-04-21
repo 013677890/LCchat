@@ -6,27 +6,33 @@
 
 package main
 
+// Injectors from wire.go:
+
+// initializeMessagePushApp 定义 Wire 注入入口。
+// 实际初始化代码由 `wire` 命令生成到 `wire_gen.go`。
 func initializeMessagePushApp() (*MessagePushApp, error) {
 	loggerConfig := provideMessagePushLoggerConfig()
 	logger, err := provideMessagePushLogger(loggerConfig)
 	if err != nil {
 		return nil, err
 	}
+	kafkaConfig := provideMessagePushKafkaConfig()
+	string2 := provideMessagePushGroupID()
 	redisConfig := provideMessagePushRedisConfig()
 	client, err := provideMessagePushRedisClient(logger, redisConfig)
 	if err != nil {
 		return nil, err
 	}
-	messagePushRouteTTL := provideMessagePushRouteTTL()
-	redisRepository := provideRouteRepository(client, messagePushRouteTTL)
+	mainMessagePushRouteTTL := provideMessagePushRouteTTL()
+	redisRepository := provideRouteRepository(client, mainMessagePushRouteTTL)
 	clientManager := provideConnectClientManager()
-	messagePushConnectUserTimeout := provideMessagePushConnectUserTimeout()
-	sender := provideConnectSender(clientManager, messagePushConnectUserTimeout)
+	mainMessagePushConnectUserTimeout := provideMessagePushConnectUserTimeout()
+	sender := provideConnectSender(clientManager, mainMessagePushConnectUserTimeout)
 	eventHandler := provideEventHandler(redisRepository, sender)
-	kafkaConfig := provideMessagePushKafkaConfig()
-	groupID := provideMessagePushGroupID()
-	consumerConsumer := providePushConsumer(kafkaConfig, groupID, eventHandler)
-	messagePushApp, err := NewMessagePushApp(logger, consumerConsumer, client, clientManager)
+	consumer := providePushConsumer(kafkaConfig, string2, eventHandler)
+	config := provideMessagePushHTTPConfig()
+	server := provideMessagePushHTTPServer(config)
+	messagePushApp, err := NewMessagePushApp(logger, consumer, client, clientManager, server)
 	if err != nil {
 		return nil, err
 	}

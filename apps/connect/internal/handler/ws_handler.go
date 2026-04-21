@@ -10,6 +10,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,11 +21,45 @@ import (
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	// 当前阶段默认放开来源校验，方便本地多端调试（Web/Electron/移动端模拟器）。
-	// 生产环境建议按域名白名单收紧校验策略。
-	CheckOrigin: func(_ *http.Request) bool {
-		return true
-	},
+	// CheckOrigin 按环境变量 CONNECT_ALLOWED_ORIGINS 白名单校验来源。
+	// 格式：逗号分隔的域名列表，如 "https://app.example.com,https://admin.example.com"。
+	// 本地开发时可设为 "*" 放开所有来源；生产环境必须显式配置白名单。
+	CheckOrigin: buildCheckOrigin(),
+}
+
+// buildCheckOrigin 构建 WebSocket Origin 校验函数。
+func buildCheckOrigin() func(*http.Request) bool {
+	raw := strings.TrimSpace(os.Getenv("CONNECT_ALLOWED_ORIGINS"))
+	if raw == "" {
+		// 未配置时默认拒绝跨域，仅允许同源（Origin 为空或与 Host 一致）。
+		return func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true
+			}
+			return origin == "http://"+r.Host || origin == "https://"+r.Host
+		}
+	}
+	if raw == "*" {
+		// 显式配置 "*" 时放开所有来源（仅用于本地开发）。
+		return func(_ *http.Request) bool { return true }
+	}
+	// 解析白名单并构建快速查找表。
+	allowed := make(map[string]struct{})
+	for _, origin := range strings.Split(raw, ",") {
+		origin = strings.TrimSpace(origin)
+		if origin != "" {
+			allowed[origin] = struct{}{}
+		}
+	}
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		_, ok := allowed[origin]
+		return ok
+	}
 }
 
 // WSHandler 负责处理 /ws 接入请求。

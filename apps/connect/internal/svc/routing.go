@@ -59,47 +59,71 @@ func (s *ConnectService) RemoveUserRoute(ctx context.Context, userUUID, deviceID
 }
 
 // RemoveRoutesByConnectAddr 清理当前节点留下的全部路由。
+// 使用 SCAN 替代 KEYS 避免阻塞生产 Redis。
 func (s *ConnectService) RemoveRoutesByConnectAddr(ctx context.Context, connectGRPCAddr string) {
 	if s == nil || s.redisClient == nil || strings.TrimSpace(connectGRPCAddr) == "" {
 		return
 	}
-	keys, err := s.redisClient.Keys(ctx, "user:routing:*").Result()
-	if err != nil {
-		logger.Warn(ctx, "扫描用户路由失败",
-			logger.String("connect_addr", connectGRPCAddr),
-			logger.ErrorField("error", err),
-		)
-		return
-	}
-	for _, key := range keys {
-		values, err := s.redisClient.HGetAll(ctx, key).Result()
+	
+	var cursor uint64
+	pattern := "user:routing:*"
+	cleanedCount := 0
+	
+	for {
+		keys, nextCursor, err := s.redisClient.Scan(ctx, cursor, pattern, 100).Result()
 		if err != nil {
-			logger.Warn(ctx, "读取用户路由失败，跳过清理",
-				logger.String("key", key),
+			logger.Warn(ctx, "SCAN 用户路由失败",
+				logger.String("connect_addr", connectGRPCAddr),
+				logger.Int64("cursor", int64(cursor)),
 				logger.ErrorField("error", err),
 			)
-			continue
+			return
 		}
-		fields := make([]string, 0)
-		for field, raw := range values {
-			if strings.HasPrefix(raw, connectGRPCAddr+"|") || raw == connectGRPCAddr {
-				fields = append(fields, field)
+		
+		for _, key := range keys {
+			values, err := s.redisClient.HGetAll(ctx, key).Result()
+			if err != nil {
+				logger.Warn(ctx, "读取用户路由失败，跳过清理",
+					logger.String("key", key),
+					logger.ErrorField("error", err),
+				)
+				continue
+			}
+			fields := make([]string, 0)
+			for field, raw := range values {
+				if strings.HasPrefix(raw, connectGRPCAddr+"|") || raw == connectGRPCAddr {
+					fields = append(fields, field)
+				}
+			}
+			if len(fields) == 0 {
+				continue
+			}
+			args := make([]any, 0, len(fields)+1)
+			args = append(args, key)
+			for _, field := range fields {
+				args = append(args, field)
+			}
+			if err := s.redisClient.Do(ctx, append([]any{"HDEL"}, args...)...).Err(); err != nil {
+				logger.Warn(ctx, "按 connect 地址清理用户路由失败",
+					logger.String("key", key),
+					logger.String("connect_addr", connectGRPCAddr),
+					logger.ErrorField("error", err),
+				)
+			} else {
+				cleanedCount += len(fields)
 			}
 		}
-		if len(fields) == 0 {
-			continue
+		
+		cursor = nextCursor
+		if cursor == 0 {
+			break
 		}
-		args := make([]any, 0, len(fields)+1)
-		args = append(args, key)
-		for _, field := range fields {
-			args = append(args, field)
-		}
-		if err := s.redisClient.Do(ctx, append([]any{"HDEL"}, args...)...).Err(); err != nil {
-			logger.Warn(ctx, "按 connect 地址清理用户路由失败",
-				logger.String("key", key),
-				logger.String("connect_addr", connectGRPCAddr),
-				logger.ErrorField("error", err),
-			)
-		}
+	}
+	
+	if cleanedCount > 0 {
+		logger.Info(ctx, "按 connect 地址清理路由完成",
+			logger.String("connect_addr", connectGRPCAddr),
+			logger.Int("cleaned_count", cleanedCount),
+		)
 	}
 }

@@ -103,3 +103,30 @@ func (s *Sender) PushToUser(ctx context.Context, connectAddr, userUUID string, e
 	}
 	return resp.DeliveredCount, nil
 }
+
+// PushToDevice 向指定 connect 节点上的指定设备推送。
+func (s *Sender) PushToDevice(ctx context.Context, connectAddr, userUUID, deviceID string, envelope *connectpb.MessageEnvelope) error {
+	client, err := s.manager.Get(connectAddr)
+	if err != nil {
+		return err
+	}
+	callCtx := ctx
+	cancel := func() {}
+	if s.userTimeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, s.userTimeout)
+	}
+	defer cancel()
+
+	resp, err := client.PushToDevice(callCtx, &connectpb.PushToDeviceRequest{
+		UserUuid: userUUID,
+		DeviceId: deviceID,
+		Message:  envelope,
+	})
+	if err != nil {
+		return fmt.Errorf("调用 connect PushToDevice 失败: %w", err)
+	}
+	if resp == nil || !resp.Delivered {
+		return fmt.Errorf("设备不在线或推送失败")
+	}
+	return nil
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/connectcli"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
+	mpserver "github.com/013677890/LCchat-Backend/apps/message-push/internal/server"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -128,6 +129,16 @@ func providePushConsumer(cfg config.KafkaConfig, groupID string, handler *consum
 	return consumer.NewConsumer(cfg.Brokers, cfg.MsgPushTopic, groupID, handler)
 }
 
+// provideMessagePushHTTPConfig 提供 message-push 指标 HTTP 服务配置。
+func provideMessagePushHTTPConfig() mpserver.Config {
+	return mpserver.DefaultConfig()
+}
+
+// provideMessagePushHTTPServer 创建 message-push 指标 HTTP 服务。
+func provideMessagePushHTTPServer(cfg mpserver.Config) *mpserver.Server {
+	return mpserver.New(cfg)
+}
+
 // messagePushProviderSet 汇总 message-push 所需的全部依赖注入 provider。
 var messagePushProviderSet = wire.NewSet(
 	provideMessagePushLoggerConfig,
@@ -138,6 +149,8 @@ var messagePushProviderSet = wire.NewSet(
 	provideMessagePushGroupID,
 	provideMessagePushRouteTTL,
 	provideMessagePushConnectUserTimeout,
+	provideMessagePushHTTPConfig,
+	provideMessagePushHTTPServer,
 	provideRouteRepository,
 	provideConnectClientManager,
 	provideConnectSender,

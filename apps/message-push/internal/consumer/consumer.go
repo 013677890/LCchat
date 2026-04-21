@@ -8,6 +8,7 @@ import (
 
 	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/connectcli"
+	"github.com/013677890/LCchat-Backend/apps/message-push/internal/metrics"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
@@ -45,8 +46,16 @@ func NewEventHandler(routes *route.RedisRepository, sender *connectcli.Sender) *
 // Handle 处理单条 Kafka 事件。
 // 返回 errRetriable 包装的错误表示调用方应重试；其它错误或 nil 表示无需重试。
 func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
+	start := time.Now()
+	result := "success"
+	defer func() {
+		metrics.ObserveHandleDuration(start, result)
+	}()
+
 	var event msgpb.MsgPushEvent
 	if err := proto.Unmarshal(value, &event); err != nil {
+		result = "permanent_error"
+		metrics.EventTypeSkipped.WithLabelValues("unknown", "decode_error").Inc()
 		// proto 结构异常属于永久错误，重试无意义。直接记录并放行。
 		logger.Warn(ctx, "message-push 反序列化 MsgPushEvent 失败，跳过该消息",
 			logger.ErrorField("error", err),
@@ -58,6 +67,8 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 	// 第一阶段只接收真实消息下行事件。
 	// 召回、已读等其他事件类型暂时由上游写入，但在本服务中先跳过。
 	if event.Type != "MSG_PUSH" {
+		result = "permanent_error"
+		metrics.EventTypeSkipped.WithLabelValues(event.Type, "unsupported_type").Inc()
 		logger.Warn(ctx, "message-push 暂未处理该事件类型，先跳过",
 			logger.String("event_type", event.Type),
 		)
@@ -66,6 +77,8 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 	// 当前实现仅支持单聊扩散。
 	// 群聊需要先做成员展开，再对每个成员查路由并逐个推送。
 	if event.ConvType != msgpb.ConvType_CONV_TYPE_P2P {
+		result = "permanent_error"
+		metrics.EventTypeSkipped.WithLabelValues(event.Type, "unsupported_conv_type").Inc()
 		logger.Warn(ctx, "message-push 第一阶段仅支持 P2P，先跳过",
 			logger.String("event_type", event.Type),
 			logger.Int("conv_type", int(event.ConvType)),
@@ -73,6 +86,8 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		return nil
 	}
 	if event.ReceiverUuid == "" {
+		result = "permanent_error"
+		metrics.EventTypeSkipped.WithLabelValues(event.Type, "validation_error").Inc()
 		// 字段校验失败属于永久错误，避免回推重试。
 		logger.Warn(ctx, "message-push receiver_uuid 为空，跳过该消息",
 			logger.String("trace_id", event.TraceId),
@@ -84,20 +99,19 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 	// 查不到路由时按离线处理，不视为消费失败。
 	routes, err := h.routes.ListUserRoutes(ctx, event.ReceiverUuid)
 	if err != nil {
+		result = "retriable_error"
+		metrics.RouteHitRate.WithLabelValues("error").Inc()
 		// Redis 读失败通常是瞬时问题，交由上层短重试。
 		return fmt.Errorf("%w: 读取用户路由失败: %v", errRetriable, err)
 	}
 	if len(routes) == 0 {
+		metrics.RouteHitRate.WithLabelValues("miss").Inc()
 		logger.Warn(ctx, "message-push 未找到接收方在线路由，按离线处理",
 			logger.String("receiver_uuid", event.ReceiverUuid),
 		)
 		return nil
 	}
-
-	// 按 connect 节点地址去重。
-	// connect 侧 PushToUser 已经会把消息广播给该节点上该 user 的所有在线设备；
-	// 若按 device 逐条调用，同节点多设备会导致每台设备收到 N 份重复消息。
-	uniqueAddrs := dedupRouteAddrs(routes)
+	metrics.RouteHitRate.WithLabelValues("hit").Inc()
 
 	// 优先使用事件顶层 seq。
 	// 这是下游 MessageEnvelope.seq 的直接来源；若历史事件未带该字段，则退回到 MsgItem.seq。
@@ -120,65 +134,51 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		AckRequired: false,
 	}
 
-	// 对每个唯一 connect 节点推送一次；单节点失败不影响其它节点。
-	// 只要存在"至少一个节点投递失败"，且没有任何节点成功，就判定整条消息需要重试，
-	// 避免下游全挂时静默丢消息。
+	// 按设备逐个推送，使用 PushToDevice 确保协议层幂等。
+	// 单设备失败不影响其它设备，尽量提升整体投递成功率。
 	var (
-		delivered     int32
-		succeededNode int
-		failedNode    int
+		delivered      int32
+		succeededCount int
+		failedCount    int
 	)
-	for _, addr := range uniqueAddrs {
-		count, pushErr := h.sender.PushToUser(ctx, addr, event.ReceiverUuid, envelope)
+	for _, deviceRoute := range routes {
+		pushStart := time.Now()
+		pushErr := h.sender.PushToDevice(ctx, deviceRoute.ConnectGRPCAddr, event.ReceiverUuid, deviceRoute.DeviceID, envelope)
 		if pushErr != nil {
-			failedNode++
-			logger.Warn(ctx, "message-push 调用 connect 失败",
+			failedCount++
+			metrics.PushToDeviceTotal.WithLabelValues("error").Inc()
+			metrics.ObservePushToDeviceDuration(pushStart, "error")
+			logger.Warn(ctx, "message-push 调用 connect PushToDevice 失败",
 				logger.String("receiver_uuid", event.ReceiverUuid),
-				logger.String("connect_addr", addr),
+				logger.String("device_id", deviceRoute.DeviceID),
+				logger.String("connect_addr", deviceRoute.ConnectGRPCAddr),
 				logger.ErrorField("error", pushErr),
 			)
 			continue
 		}
-		succeededNode++
-		delivered += count
+		succeededCount++
+		delivered++
+		metrics.PushToDeviceTotal.WithLabelValues("success").Inc()
+		metrics.ObservePushToDeviceDuration(pushStart, "success")
 	}
+	metrics.DeliveredDevices.Observe(float64(delivered))
 
 	logger.Info(ctx, "message-push 处理完成",
 		logger.String("receiver_uuid", event.ReceiverUuid),
 		logger.Int64("seq", seq),
 		logger.Int64("server_ts", event.ServerTs),
 		logger.Int("route_count", len(routes)),
-		logger.Int("unique_node_count", len(uniqueAddrs)),
-		logger.Int("succeeded_node", succeededNode),
-		logger.Int("failed_node", failedNode),
+		logger.Int("succeeded_count", succeededCount),
+		logger.Int("failed_count", failedCount),
 		logger.Int32("delivered_count", delivered),
 	)
 
-	// 全部节点都失败才触发重试；部分成功视为整体成功，避免重试导致已送达设备收到重复消息。
-	if succeededNode == 0 && failedNode > 0 {
-		return fmt.Errorf("%w: 所有 connect 节点推送均失败 (%d)", errRetriable, failedNode)
+	// 全部设备都失败才触发重试；部分成功视为整体成功，避免重试导致已送达设备收到重复消息。
+	if succeededCount == 0 && failedCount > 0 {
+		result = "retriable_error"
+		return fmt.Errorf("%w: 所有设备推送均失败 (%d)", errRetriable, failedCount)
 	}
 	return nil
-}
-
-// dedupRouteAddrs 按 connect 节点地址去重，保留首次出现的顺序。
-func dedupRouteAddrs(routes []route.DeviceRoute) []string {
-	if len(routes) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(routes))
-	addrs := make([]string, 0, len(routes))
-	for _, item := range routes {
-		if item.ConnectGRPCAddr == "" {
-			continue
-		}
-		if _, ok := seen[item.ConnectGRPCAddr]; ok {
-			continue
-		}
-		seen[item.ConnectGRPCAddr] = struct{}{}
-		addrs = append(addrs, item.ConnectGRPCAddr)
-	}
-	return addrs
 }
 
 // Consumer 自研 msg.push 消费循环。
@@ -209,7 +209,9 @@ func (c *Consumer) Start(ctx context.Context) error {
 		default:
 		}
 
+		fetchStart := time.Now()
 		msg, err := reader.FetchMessage(ctx)
+		metrics.KafkaFetchDuration.Observe(time.Since(fetchStart).Seconds())
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -233,6 +235,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 			)
 		}
 		if err := reader.CommitMessages(ctx, msg); err != nil {
+			metrics.KafkaCommitErrors.Inc()
 			logger.Warn(ctx, "message-push 提交 Kafka offset 失败",
 				logger.ErrorField("error", err),
 			)
@@ -246,14 +249,17 @@ func (c *Consumer) runHandleWithRetry(ctx context.Context, payload []byte) error
 	var lastErr error
 	for attempt := 0; attempt < handleMaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
+			metrics.HandleRetries.WithLabelValues("failed").Observe(float64(attempt))
 			return err
 		}
 		err := c.handler.Handle(ctx, payload)
 		if err == nil {
+			metrics.HandleRetries.WithLabelValues("success").Observe(float64(attempt))
 			return nil
 		}
 		if !errors.Is(err, errRetriable) {
 			// 永久错误：交由 Handle 内的 Warn 已记录，不再重试。
+			metrics.HandleRetries.WithLabelValues("success").Observe(float64(attempt))
 			return nil
 		}
 		lastErr = err
@@ -269,9 +275,11 @@ func (c *Consumer) runHandleWithRetry(ctx context.Context, payload []byte) error
 		)
 		select {
 		case <-ctx.Done():
+			metrics.HandleRetries.WithLabelValues("failed").Observe(float64(attempt + 1))
 			return ctx.Err()
 		case <-time.After(backoff):
 		}
 	}
+	metrics.HandleRetries.WithLabelValues("failed").Observe(float64(handleMaxAttempts))
 	return lastErr
 }

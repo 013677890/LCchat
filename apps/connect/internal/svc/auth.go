@@ -30,9 +30,9 @@ var (
 // 3. 强校验 claims.DeviceID 与 query.device_id 一致；
 // 4. 若 Redis 可用，校验 auth:at:{user_uuid}:{device_id} 中存储的 token md5。
 //
-// 降级策略（Fail-Open）：
-// - 当 Redis 异常不可用时，不直接拒绝连接，而是退化为仅 JWT 校验；
-// - 这样可提升可用性，但会降低"被踢立即失效"的严格性。
+// 降级策略（Fail-Close）：
+// - Redis 异常时拒绝连接，避免被踢用户仍能接入的安全风险；
+// - JWT 过期时间通常较长（如 7 天），仅 JWT 校验无法保证"踢线立即失效"。
 func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clientIP string) (*Session, error) {
 	token = strings.TrimSpace(token)
 	deviceID = strings.TrimSpace(deviceID)
@@ -62,12 +62,13 @@ func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clie
 		case getErr == redis.Nil:
 			return nil, ErrTokenInvalid
 		case getErr != nil:
-			// Redis 短暂故障时采用 fail-open，优先保证连接服务可用性。
-			logger.Warn(ctx, "连接鉴权读取 Redis 失败，降级为仅 JWT 校验",
+			// Redis 异常时拒绝连接（fail-close），保证踢线等安全操作的严格性。
+			logger.Warn(ctx, "连接鉴权读取 Redis 失败，拒绝连接",
 				logger.String("user_uuid", claims.UserUUID),
 				logger.String("device_id", claims.DeviceID),
 				logger.ErrorField("error", getErr),
 			)
+			return nil, ErrTokenInvalid
 		default:
 			if storedHash != md5Hex(token) {
 				return nil, ErrTokenInvalid
