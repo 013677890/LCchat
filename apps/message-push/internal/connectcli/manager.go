@@ -34,6 +34,8 @@ func (m *ClientManager) Get(addr string) (connectpb.ConnectServiceClient, error)
 		return connectpb.NewConnectServiceClient(conn), nil
 	}
 
+	// 首次访问某个 connect 地址时才建立连接。
+	// 建好后放入缓存，后续相同地址的推送请求直接复用。
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("创建 connect gRPC 连接失败: %w", err)
@@ -43,6 +45,8 @@ func (m *ClientManager) Get(addr string) (connectpb.ConnectServiceClient, error)
 }
 
 // Close 关闭所有连接。
+// 保留 ctx 参数以兼容上层统一的生命周期签名；当前 grpc.ClientConn.Close 是本地快速操作，
+// 不需要也不接收 ctx 控制，若未来引入需要超时的收敛逻辑（如等待 in-flight RPC 结束）再启用。
 func (m *ClientManager) Close(ctx context.Context) error {
 	_ = ctx
 	m.mu.Lock()
@@ -81,6 +85,8 @@ func (s *Sender) PushToUser(ctx context.Context, connectAddr, userUUID string, e
 	callCtx := ctx
 	cancel := func() {}
 	if s.userTimeout > 0 {
+		// 每次下行投递都套一层短超时。
+		// 某个 connect 节点卡住时，不应拖慢整个 Kafka 消费循环。
 		callCtx, cancel = context.WithTimeout(ctx, s.userTimeout)
 	}
 	defer cancel()

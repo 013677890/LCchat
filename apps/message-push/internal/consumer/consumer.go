@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,23 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/protobuf/proto"
 )
+
+// errRetriable 表示当前消息处理失败属于可重试范畴（Redis 抖动、connect 瞬时不可达等）。
+// 永久性错误（proto 反序列化失败、字段校验失败）应返回 nil 并在日志里告警，避免阻塞消费进度。
+var errRetriable = errors.New("message-push: retriable handle error")
+
+// 单条消息的本地重试上限与退避梯度。
+// 这里只做"就地短重试"，不投递 DLQ；超出后记录告警并按阶段一策略让出 offset，
+// 避免一条长期失败的消息阻塞整条消费链路。
+const (
+	handleMaxAttempts = 3
+)
+
+var handleBackoffs = []time.Duration{
+	100 * time.Millisecond,
+	300 * time.Millisecond,
+	800 * time.Millisecond,
+}
 
 // EventHandler 处理 Kafka 中的 MsgPushEvent。
 type EventHandler struct {
@@ -25,18 +43,28 @@ func NewEventHandler(routes *route.RedisRepository, sender *connectcli.Sender) *
 }
 
 // Handle 处理单条 Kafka 事件。
+// 返回 errRetriable 包装的错误表示调用方应重试；其它错误或 nil 表示无需重试。
 func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 	var event msgpb.MsgPushEvent
 	if err := proto.Unmarshal(value, &event); err != nil {
-		return fmt.Errorf("反序列化 MsgPushEvent 失败: %w", err)
+		// proto 结构异常属于永久错误，重试无意义。直接记录并放行。
+		logger.Warn(ctx, "message-push 反序列化 MsgPushEvent 失败，跳过该消息",
+			logger.ErrorField("error", err),
+			logger.Int("payload_bytes", len(value)),
+		)
+		return nil
 	}
 
+	// 第一阶段只接收真实消息下行事件。
+	// 召回、已读等其他事件类型暂时由上游写入，但在本服务中先跳过。
 	if event.Type != "MSG_PUSH" {
 		logger.Warn(ctx, "message-push 暂未处理该事件类型，先跳过",
 			logger.String("event_type", event.Type),
 		)
 		return nil
 	}
+	// 当前实现仅支持单聊扩散。
+	// 群聊需要先做成员展开，再对每个成员查路由并逐个推送。
 	if event.ConvType != msgpb.ConvType_CONV_TYPE_P2P {
 		logger.Warn(ctx, "message-push 第一阶段仅支持 P2P，先跳过",
 			logger.String("event_type", event.Type),
@@ -45,12 +73,19 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		return nil
 	}
 	if event.ReceiverUuid == "" {
-		return fmt.Errorf("receiver_uuid 不能为空")
+		// 字段校验失败属于永久错误，避免回推重试。
+		logger.Warn(ctx, "message-push receiver_uuid 为空，跳过该消息",
+			logger.String("trace_id", event.TraceId),
+		)
+		return nil
 	}
 
+	// 先从 Redis 读取接收方在线设备路由。
+	// 查不到路由时按离线处理，不视为消费失败。
 	routes, err := h.routes.ListUserRoutes(ctx, event.ReceiverUuid)
 	if err != nil {
-		return err
+		// Redis 读失败通常是瞬时问题，交由上层短重试。
+		return fmt.Errorf("%w: 读取用户路由失败: %v", errRetriable, err)
 	}
 	if len(routes) == 0 {
 		logger.Warn(ctx, "message-push 未找到接收方在线路由，按离线处理",
@@ -59,14 +94,23 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		return nil
 	}
 
+	// 按 connect 节点地址去重。
+	// connect 侧 PushToUser 已经会把消息广播给该节点上该 user 的所有在线设备；
+	// 若按 device 逐条调用，同节点多设备会导致每台设备收到 N 份重复消息。
+	uniqueAddrs := dedupRouteAddrs(routes)
+
+	// 优先使用事件顶层 seq。
+	// 这是下游 MessageEnvelope.seq 的直接来源；若历史事件未带该字段，则退回到 MsgItem.seq。
 	seq := event.Seq
 	if seq == 0 {
 		var item msgpb.MsgItem
-		if err := proto.Unmarshal(event.Data, &item); err == nil {
+		if unmarshalErr := proto.Unmarshal(event.Data, &item); unmarshalErr == nil {
 			seq = item.Seq
 		}
 	}
 
+	// 组装发往 connect 的统一信封。
+	// connect 只关心投递协议，不关心上游 MsgPushEvent 的完整结构。
 	envelope := &connectpb.MessageEnvelope{
 		Type:        event.Type,
 		Data:        event.Data,
@@ -76,17 +120,26 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		AckRequired: false,
 	}
 
-	delivered := int32(0)
-	for _, item := range routes {
-		count, pushErr := h.sender.PushToUser(ctx, item.ConnectGRPCAddr, event.ReceiverUuid, envelope)
+	// 对每个唯一 connect 节点推送一次；单节点失败不影响其它节点。
+	// 只要存在"至少一个节点投递失败"，且没有任何节点成功，就判定整条消息需要重试，
+	// 避免下游全挂时静默丢消息。
+	var (
+		delivered     int32
+		succeededNode int
+		failedNode    int
+	)
+	for _, addr := range uniqueAddrs {
+		count, pushErr := h.sender.PushToUser(ctx, addr, event.ReceiverUuid, envelope)
 		if pushErr != nil {
+			failedNode++
 			logger.Warn(ctx, "message-push 调用 connect 失败",
 				logger.String("receiver_uuid", event.ReceiverUuid),
-				logger.String("connect_addr", item.ConnectGRPCAddr),
+				logger.String("connect_addr", addr),
 				logger.ErrorField("error", pushErr),
 			)
 			continue
 		}
+		succeededNode++
 		delivered += count
 	}
 
@@ -95,9 +148,37 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		logger.Int64("seq", seq),
 		logger.Int64("server_ts", event.ServerTs),
 		logger.Int("route_count", len(routes)),
+		logger.Int("unique_node_count", len(uniqueAddrs)),
+		logger.Int("succeeded_node", succeededNode),
+		logger.Int("failed_node", failedNode),
 		logger.Int32("delivered_count", delivered),
 	)
+
+	// 全部节点都失败才触发重试；部分成功视为整体成功，避免重试导致已送达设备收到重复消息。
+	if succeededNode == 0 && failedNode > 0 {
+		return fmt.Errorf("%w: 所有 connect 节点推送均失败 (%d)", errRetriable, failedNode)
+	}
 	return nil
+}
+
+// dedupRouteAddrs 按 connect 节点地址去重，保留首次出现的顺序。
+func dedupRouteAddrs(routes []route.DeviceRoute) []string {
+	if len(routes) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(routes))
+	addrs := make([]string, 0, len(routes))
+	for _, item := range routes {
+		if item.ConnectGRPCAddr == "" {
+			continue
+		}
+		if _, ok := seen[item.ConnectGRPCAddr]; ok {
+			continue
+		}
+		seen[item.ConnectGRPCAddr] = struct{}{}
+		addrs = append(addrs, item.ConnectGRPCAddr)
+	}
+	return addrs
 }
 
 // Consumer 自研 msg.push 消费循环。
@@ -136,13 +217,19 @@ func (c *Consumer) Start(ctx context.Context) error {
 			logger.Warn(ctx, "message-push 拉取 Kafka 消息失败",
 				logger.ErrorField("error", err),
 			)
+			// 拉取失败大多是短暂网络抖动或 broker 瞬时不可用。
+			// 这里做一个很短的退避，避免空转打满 CPU。
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		if err := c.handler.Handle(ctx, msg.Value); err != nil {
-			logger.Warn(ctx, "message-push 处理 Kafka 消息失败，按阶段一策略提交 offset",
-				logger.ErrorField("error", err),
+		// 处理单条消息：
+		// - nil / 永久错误：立即 commit，向前推进 offset。
+		// - errRetriable：做有限次本地退避重试，仍失败则告警后 commit（避免单条消息卡死消费链路）。
+		handleErr := c.runHandleWithRetry(ctx, msg.Value)
+		if handleErr != nil {
+			logger.Warn(ctx, "message-push 本地重试仍失败，按阶段一策略提交 offset",
+				logger.ErrorField("error", handleErr),
 			)
 		}
 		if err := reader.CommitMessages(ctx, msg); err != nil {
@@ -151,4 +238,40 @@ func (c *Consumer) Start(ctx context.Context) error {
 			)
 		}
 	}
+}
+
+// runHandleWithRetry 对可重试错误做有限次退避重试；永久错误或成功立即返回。
+// 返回最后一次仍失败的错误，成功时返回 nil。
+func (c *Consumer) runHandleWithRetry(ctx context.Context, payload []byte) error {
+	var lastErr error
+	for attempt := 0; attempt < handleMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := c.handler.Handle(ctx, payload)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errRetriable) {
+			// 永久错误：交由 Handle 内的 Warn 已记录，不再重试。
+			return nil
+		}
+		lastErr = err
+		if attempt == handleMaxAttempts-1 {
+			break
+		}
+		backoff := handleBackoffs[attempt]
+		logger.Warn(ctx, "message-push 可重试错误，等待后重试",
+			logger.Int("attempt", attempt+1),
+			logger.Int("max_attempts", handleMaxAttempts),
+			logger.Any("backoff", backoff.String()),
+			logger.ErrorField("error", err),
+		)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return lastErr
 }

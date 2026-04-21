@@ -36,6 +36,7 @@ func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *gore
 
 // Run 启动服务。
 func (a *MessagePushApp) Run(ctx context.Context) error {
+	// 启动后先替换全局 logger，确保后续包级日志都落到 message-push 自己的日志配置。
 	logger.ReplaceGlobal(a.logger)
 	logger.Info(ctx, "message-push 服务启动中")
 	if err := a.consumer.Start(ctx); err != nil {
@@ -48,6 +49,7 @@ func (a *MessagePushApp) Run(ctx context.Context) error {
 func (a *MessagePushApp) Shutdown(ctx context.Context) error {
 	var errs []error
 	if a.connectCli != nil {
+		// 先关 connect 客户端连接池，避免退出过程中仍有下游连接悬挂。
 		if err := a.connectCli.Close(ctx); err != nil {
 			errs = append(errs, err)
 		}
