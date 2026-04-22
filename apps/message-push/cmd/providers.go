@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/connectcli"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/consumer"
+	"github.com/013677890/LCchat-Backend/apps/message-push/internal/groupcli"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
 	mpserver "github.com/013677890/LCchat-Backend/apps/message-push/internal/server"
 	"github.com/013677890/LCchat-Backend/config"
@@ -15,6 +17,8 @@ import (
 	"github.com/google/wire"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // messagePushRouteTTL = 路由存活窗口。
@@ -24,6 +28,8 @@ type messagePushRouteTTL time.Duration
 // messagePushConnectUserTimeout = 单次 PushToUser RPC 超时时间。
 // 用于限制 message-push 调用 connect 节点时的最长等待时间。
 type messagePushConnectUserTimeout time.Duration
+
+type messagePushUserGRPCAddress string
 
 // provideMessagePushLoggerConfig 提供 message-push 专用日志配置。
 func provideMessagePushLoggerConfig() config.LoggerConfig {
@@ -101,6 +107,27 @@ func provideMessagePushConnectUserTimeout() messagePushConnectUserTimeout {
 	return messagePushConnectUserTimeout(d)
 }
 
+func provideMessagePushUserGRPCAddress() messagePushUserGRPCAddress {
+	addr := os.Getenv("USER_GRPC_ADDR")
+	if addr == "" {
+		addr = ":9090"
+	}
+	return messagePushUserGRPCAddress(addr)
+}
+
+// 群聊扩散依赖 user-service 提供群成员列表，因此该连接是启动必需依赖。
+func provideMessagePushUserGRPCConn(_ *zap.Logger, addr messagePushUserGRPCAddress) (*googlegrpc.ClientConn, error) {
+	conn, err := googlegrpc.NewClient(string(addr), googlegrpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("message-push 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
+	}
+	return conn, nil
+}
+
+func provideGroupClient(conn *googlegrpc.ClientConn) *groupcli.Client {
+	return groupcli.NewClient(conn)
+}
+
 // provideRouteRepository 创建路由仓储。
 // message-push 依赖它从 Redis 读取用户当前在线设备所在的 connect 节点。
 func provideRouteRepository(client *goredis.Client, ttl messagePushRouteTTL) *route.RedisRepository {
@@ -119,9 +146,9 @@ func provideConnectSender(manager *connectcli.ClientManager, timeout messagePush
 }
 
 // provideEventHandler 创建 Kafka 事件处理器。
-// 它负责把 MsgPushEvent 解释为“查路由 → 调 connect 推送”的执行流程。
-func provideEventHandler(routes *route.RedisRepository, sender *connectcli.Sender) *consumer.EventHandler {
-	return consumer.NewEventHandler(routes, sender)
+// 它负责把 MsgPushEvent 解释为“查路由 / 查群成员 → 调 connect 推送”的执行流程。
+func provideEventHandler(routes *route.RedisRepository, sender *connectcli.Sender, groups *groupcli.Client) *consumer.EventHandler {
+	return consumer.NewEventHandler(routes, sender, groups)
 }
 
 // providePushConsumer 创建 msg.push topic 消费者。
@@ -149,6 +176,9 @@ var messagePushProviderSet = wire.NewSet(
 	provideMessagePushGroupID,
 	provideMessagePushRouteTTL,
 	provideMessagePushConnectUserTimeout,
+	provideMessagePushUserGRPCAddress,
+	provideMessagePushUserGRPCConn,
+	provideGroupClient,
 	provideMessagePushHTTPConfig,
 	provideMessagePushHTTPServer,
 	provideRouteRepository,

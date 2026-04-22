@@ -12,19 +12,21 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	googlegrpc "google.golang.org/grpc"
 )
 
 // MessagePushApp 统一管理 message-push 生命周期。
 type MessagePushApp struct {
-	logger      *zap.Logger
-	consumer    *consumer.Consumer
-	redis       *goredis.Client
-	connectCli  *connectcli.ClientManager
-	httpServer  *mpserver.Server
+	logger       *zap.Logger
+	consumer     *consumer.Consumer
+	redis        *goredis.Client
+	connectCli   *connectcli.ClientManager
+	userGRPCConn *googlegrpc.ClientConn
+	httpServer   *mpserver.Server
 }
 
 // NewMessagePushApp 创建 app。
-func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *goredis.Client, connectCli *connectcli.ClientManager, httpServer *mpserver.Server) (*MessagePushApp, error) {
+func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *goredis.Client, connectCli *connectcli.ClientManager, userGRPCConn *googlegrpc.ClientConn, httpServer *mpserver.Server) (*MessagePushApp, error) {
 	if log == nil {
 		return nil, errors.New("logger 未初始化")
 	}
@@ -34,10 +36,13 @@ func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *gore
 	if connectCli == nil {
 		return nil, errors.New("connect client manager 未初始化")
 	}
+	if userGRPCConn == nil {
+		return nil, errors.New("user-service gRPC 连接未初始化")
+	}
 	if httpServer == nil {
 		return nil, errors.New("http server 未初始化")
 	}
-	return &MessagePushApp{logger: log, consumer: consumer, redis: redis, connectCli: connectCli, httpServer: httpServer}, nil
+	return &MessagePushApp{logger: log, consumer: consumer, redis: redis, connectCli: connectCli, userGRPCConn: userGRPCConn, httpServer: httpServer}, nil
 }
 
 // Run 启动服务。
@@ -87,6 +92,11 @@ func (a *MessagePushApp) Shutdown(ctx context.Context) error {
 		// 先关 connect 客户端连接池，避免退出过程中仍有下游连接悬挂。
 		if err := a.connectCli.Close(ctx); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	if a.userGRPCConn != nil {
+		if err := a.userGRPCConn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 user-service gRPC 连接失败: %w", err))
 		}
 	}
 	if a.redis != nil {

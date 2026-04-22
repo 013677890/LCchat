@@ -28,11 +28,17 @@ func initializeMessagePushApp() (*MessagePushApp, error) {
 	clientManager := provideConnectClientManager()
 	mainMessagePushConnectUserTimeout := provideMessagePushConnectUserTimeout()
 	sender := provideConnectSender(clientManager, mainMessagePushConnectUserTimeout)
-	eventHandler := provideEventHandler(redisRepository, sender)
+	mainMessagePushUserGRPCAddress := provideMessagePushUserGRPCAddress()
+	clientConn, err := provideMessagePushUserGRPCConn(logger, mainMessagePushUserGRPCAddress)
+	if err != nil {
+		return nil, err
+	}
+	groupcliClient := provideGroupClient(clientConn)
+	eventHandler := provideEventHandler(redisRepository, sender, groupcliClient)
 	consumer := providePushConsumer(kafkaConfig, string2, eventHandler)
 	config := provideMessagePushHTTPConfig()
 	server := provideMessagePushHTTPServer(config)
-	messagePushApp, err := NewMessagePushApp(logger, consumer, client, clientManager, server)
+	messagePushApp, err := NewMessagePushApp(logger, consumer, client, clientManager, clientConn, server)
 	if err != nil {
 		return nil, err
 	}

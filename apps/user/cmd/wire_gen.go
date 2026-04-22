@@ -47,7 +47,10 @@ func initializeUserApp() (*UserApp, error) {
 	blacklistHandler := handler.NewBlacklistHandler(iBlacklistService)
 	iDeviceService := service.NewDeviceService(iDeviceRepository)
 	deviceHandler := handler.NewDeviceHandler(iDeviceService)
-	registrationFunc := provideUserRegistration(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler)
+	iGroupRepository := repository.NewGroupRepository(db)
+	iGroupService := service.NewGroupService(iGroupRepository)
+	groupHandler := handler.NewGroupHandler(iGroupService)
+	registrationFunc := provideUserRegistration(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, groupHandler)
 	mainUserGRPCAddress := provideUserGRPCAddress()
 	builtServer, err := provideUserGRPCServer(registrationFunc, mainUserGRPCAddress)
 	if err != nil {

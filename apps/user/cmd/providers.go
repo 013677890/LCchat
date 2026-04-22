@@ -132,6 +132,7 @@ func provideUserRegistration(
 	friendHandler *handler.FriendHandler,
 	blacklistHandler *handler.BlacklistHandler,
 	deviceHandler *handler.DeviceHandler,
+	groupHandler *handler.GroupHandler,
 ) grpcx.RegistrationFunc {
 	return func(s *grpc.Server, hs healthgrpc.HealthServer) {
 		userpb.RegisterAuthServiceServer(s, authHandler)
@@ -139,6 +140,7 @@ func provideUserRegistration(
 		userpb.RegisterFriendServiceServer(s, friendHandler)
 		userpb.RegisterBlacklistServiceServer(s, blacklistHandler)
 		userpb.RegisterDeviceServiceServer(s, deviceHandler)
+		userpb.RegisterGroupServiceServer(s, groupHandler)
 		if hs != nil {
 			if setter, ok := hs.(interface{ SetServingStatus(string, healthgrpc.HealthCheckResponse_ServingStatus) }); ok {
 				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
@@ -189,6 +191,7 @@ var userRepositoryProviderSet = wire.NewSet(
 	repository.NewApplyRepository,
 	repository.NewBlacklistRepository,
 	repository.NewDeviceRepository,
+	repository.NewGroupRepository,
 )
 
 var userServiceProviderSet = wire.NewSet(
@@ -197,6 +200,7 @@ var userServiceProviderSet = wire.NewSet(
 	service.NewFriendService,
 	service.NewBlacklistService,
 	service.NewDeviceService,
+	service.NewGroupService,
 )
 
 var userHandlerProviderSet = wire.NewSet(
@@ -205,6 +209,7 @@ var userHandlerProviderSet = wire.NewSet(
 	handler.NewFriendHandler,
 	handler.NewBlacklistHandler,
 	handler.NewDeviceHandler,
+	handler.NewGroupHandler,
 )
 
 var userAppProviderSet = wire.NewSet(

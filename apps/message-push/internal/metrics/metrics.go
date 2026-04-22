@@ -57,7 +57,7 @@ var (
 		Subsystem: "route",
 		Name:      "lookup_total",
 		Help:      "路由查询结果统计",
-	}, []string{"result"}) // result: hit / miss / error
+	}, []string{"event_type", "result"}) // event_type: MSG_PUSH / MSG_RECALL / MSG_MARK_READ, result: hit / miss / error
 
 	// PushToDeviceDuration connect PushToDevice RPC 耗时（秒）
 	PushToDeviceDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
@@ -74,7 +74,7 @@ var (
 		Subsystem: "connect",
 		Name:      "push_to_device_total",
 		Help:      "connect PushToDevice 调用总数",
-	}, []string{"result"}) // result: success / error
+	}, []string{"event_type", "result"}) // event_type: MSG_PUSH / MSG_RECALL / MSG_MARK_READ, result: success / error
 
 	// DeliveredDevices 成功投递的设备数
 	DeliveredDevices = promauto.NewHistogram(prometheus.HistogramOpts{

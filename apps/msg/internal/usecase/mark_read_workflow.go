@@ -76,9 +76,15 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 			logger.ErrorField("error", marshalErr),
 		)
 	} else {
+		convType := pb.ConvType_CONV_TYPE_GROUP
+		if len(req.ConvId) > 4 && req.ConvId[:4] == "p2p-" {
+			convType = pb.ConvType_CONV_TYPE_P2P
+		}
+
 		pushEvent := &pb.MsgPushEvent{
 			ReceiverUuid: req.OwnerUuid, // 推给自己的其他设备
 			Type:         "MSG_MARK_READ",
+			ConvType:     convType,
 			Data:         noticeData,
 			FromUuid:     req.OwnerUuid,
 			ServerTs:     time.Now().UnixMilli(),

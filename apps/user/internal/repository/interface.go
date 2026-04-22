@@ -203,6 +203,12 @@ type IApplyRepository interface {
 
 // ==================== 黑名单 Repository ====================
 
+// IGroupRepository 群组数据访问接口。
+type IGroupRepository interface {
+	// GetGroupMembers 获取群组有效成员列表。
+	GetGroupMembers(ctx context.Context, groupUUID string) ([]*model.GroupMember, error)
+}
+
 // IBlacklistRepository 黑名单数据访问接口
 type IBlacklistRepository interface {
 	// AddBlacklist 拉黑用户
