@@ -98,8 +98,16 @@ func (r *authRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (b
 
 // Create 创建新用户
 func (r *authRepositoryImpl) Create(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error) {
-	err := r.db.WithContext(ctx).Create(user).Error
-	if err != nil {
+	db := r.db.WithContext(ctx)
+	telephone := user.Telephone
+	if telephone == "" {
+		err := db.Omit("Telephone").Create(user).Error
+		if err != nil {
+			return nil, WrapDBError(err)
+		}
+		return user, nil
+	}
+	if err := db.Create(user).Error; err != nil {
 		return nil, WrapDBError(err)
 	}
 	return user, nil

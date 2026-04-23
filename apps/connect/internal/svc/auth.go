@@ -39,17 +39,36 @@ func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clie
 	clientIP = strings.TrimSpace(clientIP)
 
 	if token == "" {
+		logger.Warn(ctx, "连接鉴权失败：缺少 token")
 		return nil, ErrTokenRequired
 	}
 	if deviceID == "" {
+		logger.Warn(ctx, "连接鉴权失败：缺少 device_id")
 		return nil, ErrDeviceIDRequired
 	}
 
 	claims, err := util.ParseToken(token)
 	if err != nil {
+		logger.Warn(ctx, "连接鉴权失败：JWT 解析失败",
+			logger.String("device_id", deviceID),
+			logger.ErrorField("error", err),
+		)
 		return nil, ErrTokenInvalid
 	}
-	if claims.UserUUID == "" || claims.DeviceID == "" || claims.DeviceID != deviceID {
+	if claims.UserUUID == "" || claims.DeviceID == "" {
+		logger.Warn(ctx, "连接鉴权失败：JWT claims 缺少必要字段",
+			logger.String("user_uuid", claims.UserUUID),
+			logger.String("claims_device_id", claims.DeviceID),
+			logger.String("query_device_id", deviceID),
+		)
+		return nil, ErrTokenInvalid
+	}
+	if claims.DeviceID != deviceID {
+		logger.Warn(ctx, "连接鉴权失败：device_id 不匹配",
+			logger.String("user_uuid", claims.UserUUID),
+			logger.String("claims_device_id", claims.DeviceID),
+			logger.String("query_device_id", deviceID),
+		)
 		return nil, ErrTokenInvalid
 	}
 
@@ -60,6 +79,11 @@ func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clie
 		storedHash, getErr := s.redisClient.Get(ctx, key).Result()
 		switch {
 		case getErr == redis.Nil:
+			logger.Warn(ctx, "连接鉴权失败：AccessToken 哈希不存在",
+				logger.String("user_uuid", claims.UserUUID),
+				logger.String("device_id", claims.DeviceID),
+				logger.String("redis_key", key),
+			)
 			return nil, ErrTokenInvalid
 		case getErr != nil:
 			// Redis 异常时拒绝连接（fail-close），保证踢线等安全操作的严格性。
@@ -70,7 +94,15 @@ func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clie
 			)
 			return nil, ErrTokenInvalid
 		default:
-			if storedHash != md5Hex(token) {
+			currentHash := md5Hex(token)
+			if storedHash != currentHash {
+				logger.Warn(ctx, "连接鉴权失败：AccessToken 哈希不匹配",
+					logger.String("user_uuid", claims.UserUUID),
+					logger.String("device_id", claims.DeviceID),
+					logger.String("redis_key", key),
+					logger.String("stored_hash", storedHash),
+					logger.String("current_hash", currentHash),
+				)
 				return nil, ErrTokenInvalid
 			}
 		}

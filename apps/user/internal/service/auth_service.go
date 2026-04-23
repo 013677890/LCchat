@@ -112,7 +112,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *pb.RegisterRequest)
 		Email:     req.Email,
 		Password:  string(hashedPassword),
 		Nickname:  req.Nickname,
-		Telephone: req.Telephone,
+		Telephone: strings.TrimSpace(req.Telephone),
 		Status:    0,
 		IsAdmin:   0,
 	}

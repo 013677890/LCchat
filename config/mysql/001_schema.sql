@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS `user_info` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `uuid` CHAR(20) NOT NULL COMMENT '用户唯一id',
   `nickname` VARCHAR(20) NOT NULL COMMENT '昵称',
-  `telephone` VARCHAR(20) NOT NULL COMMENT '电话',
+  `telephone` VARCHAR(20) DEFAULT NULL COMMENT '电话',
   `email` VARCHAR(100) DEFAULT NULL COMMENT '邮箱',
   `avatar` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '头像',
   `gender` TINYINT DEFAULT 3 COMMENT '性别,1.男 2.女 3.未知',
@@ -137,6 +137,56 @@ CREATE TABLE IF NOT EXISTS `device_session` (
   KEY `idx_device_user_updated` (`user_uuid`, `updated_at`, `id`),
   KEY `idx_device_user_status_deleted` (`user_uuid`, `status`, `deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='设备会话';
+
+CREATE TABLE IF NOT EXISTS `conversation` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增id',
+  `conv_id` VARCHAR(128) NOT NULL COMMENT '会话ID',
+  `type` TINYINT NOT NULL COMMENT '1单聊 2群聊',
+  `owner_uuid` CHAR(20) NOT NULL COMMENT '会话归属用户uuid',
+  `target_uuid` CHAR(20) NOT NULL COMMENT '单聊为对端uuid，群聊为群uuid',
+  `last_msg_id` CHAR(64) DEFAULT NULL COMMENT '最后消息ID',
+  `last_msg_at` DATETIME(3) DEFAULT NULL COMMENT '最后消息时间',
+  `last_msg_preview` VARCHAR(255) DEFAULT NULL COMMENT '最后消息预览JSON',
+  `max_seq` BIGINT NOT NULL DEFAULT 0 COMMENT '会话内当前最大seq',
+  `read_seq` BIGINT NOT NULL DEFAULT 0 COMMENT '已读最大seq',
+  `clear_seq` BIGINT NOT NULL DEFAULT 0 COMMENT '会话清空位点',
+  `unread_count` BIGINT NOT NULL DEFAULT 0 COMMENT '未读数',
+  `mute` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '免打扰',
+  `pin` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '置顶',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0正常 1关闭/删除',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` DATETIME(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uidx_owner_conv` (`owner_uuid`, `target_uuid`),
+  KEY `idx_owner_status_update` (`owner_uuid`, `status`, `updated_at`),
+  KEY `idx_conversation_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话元数据';
+
+CREATE TABLE IF NOT EXISTS `message` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增id',
+  `conv_id` VARCHAR(128) NOT NULL COMMENT '会话ID',
+  `seq` BIGINT NOT NULL COMMENT '会话内序号',
+  `msg_id` CHAR(64) NOT NULL COMMENT '全局消息ID',
+  `client_msg_id` CHAR(64) NOT NULL COMMENT '客户端幂等ID',
+  `from_uuid` CHAR(20) NOT NULL COMMENT '发送者uuid',
+  `device_id` CHAR(64) NOT NULL COMMENT '发送设备ID',
+  `msg_type` SMALLINT NOT NULL COMMENT '消息类型',
+  `content` JSON NOT NULL COMMENT '消息内容JSON',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0正常 1撤回 2删除',
+  `reply_to_msg_id` CHAR(64) NOT NULL DEFAULT '' COMMENT '引用消息ID',
+  `at_users` JSON DEFAULT NULL COMMENT '被@用户UUID列表',
+  `send_time` DATETIME(3) DEFAULT NULL COMMENT '发送时间',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` DATETIME(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_message_msg_id` (`msg_id`),
+  UNIQUE KEY `uidx_sender_client` (`client_msg_id`, `from_uuid`, `device_id`),
+  KEY `idx_conv_seq` (`conv_id`, `seq`),
+  KEY `idx_conv_time` (`conv_id`, `send_time`),
+  KEY `idx_message_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='聊天消息';
 
 CREATE TABLE IF NOT EXISTS `group_conversation` (
   `group_uuid` CHAR(20) NOT NULL COMMENT '群组唯一id(业务主键，一对一关系无需自增ID)',

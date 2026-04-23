@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-var global *zap.Logger
+var global = zap.NewNop()
 
 // L 返回全局 logger（未初始化时为 nil）。
 // 使用场景：在包内无需显式传递 logger 时，直接 logger.L().Info(...)

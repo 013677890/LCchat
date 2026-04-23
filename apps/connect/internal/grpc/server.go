@@ -89,7 +89,7 @@ func (s *Server) Addr() string {
 
 // PushToDevice 向指定设备投递消息。
 func (s *Server) PushToDevice(ctx context.Context, req *pb.PushToDeviceRequest) (*pb.PushToDeviceResponse, error) {
-	data, err := proto.Marshal(req.Message)
+	data, err := marshalEnvelope(req.Message)
 	if err != nil {
 		logger.Warn(ctx, "向设备投递前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.PushToDeviceResponse{Delivered: false}, nil
@@ -100,7 +100,7 @@ func (s *Server) PushToDevice(ctx context.Context, req *pb.PushToDeviceRequest) 
 
 // PushToUser 向用户所有在线设备广播消息。
 func (s *Server) PushToUser(ctx context.Context, req *pb.PushToUserRequest) (*pb.PushToUserResponse, error) {
-	data, err := proto.Marshal(req.Message)
+	data, err := marshalEnvelope(req.Message)
 	if err != nil {
 		logger.Warn(ctx, "向用户广播前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.PushToUserResponse{DeliveredCount: 0}, nil
@@ -111,7 +111,7 @@ func (s *Server) PushToUser(ctx context.Context, req *pb.PushToUserRequest) (*pb
 
 // BroadcastToUsers 向多个用户广播相同消息。
 func (s *Server) BroadcastToUsers(ctx context.Context, req *pb.BroadcastToUsersRequest) (*pb.BroadcastToUsersResponse, error) {
-	data, err := proto.Marshal(req.Message)
+	data, err := marshalEnvelope(req.Message)
 	if err != nil {
 		logger.Warn(ctx, "批量广播前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.BroadcastToUsersResponse{}, nil
@@ -125,6 +125,13 @@ func (s *Server) BroadcastToUsers(ctx context.Context, req *pb.BroadcastToUsersR
 		}
 	}
 	return &pb.BroadcastToUsersResponse{SuccessCount: successCount, TotalDelivered: totalDelivered}, nil
+}
+
+func marshalEnvelope(message *pb.MessageEnvelope) ([]byte, error) {
+	if message == nil {
+		return nil, nil
+	}
+	return proto.Marshal(message)
 }
 
 // KickConnection 主动断开指定设备连接。

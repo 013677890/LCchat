@@ -112,7 +112,7 @@ func (m *ConnectionManager) Unregister(client *Client) {
 	}
 }
 
-// SendToDevice 向指定用户的指定设备发送消息。
+// SendToDevice 向指定用户的指定设备发送二进制业务帧。
 // 返回 false 表示目标连接不存在或写队列不可用。
 func (m *ConnectionManager) SendToDevice(userUUID, deviceID string, msg []byte) bool {
 	userBucket := m.userBucketFor(userUUID)
@@ -126,10 +126,10 @@ func (m *ConnectionManager) SendToDevice(userUUID, deviceID string, msg []byte) 
 	if client == nil {
 		return false
 	}
-	return client.Enqueue(msg)
+	return client.EnqueueBinary(msg)
 }
 
-// SendToUser 向用户的所有在线设备广播消息。
+// SendToUser 向用户的所有在线设备广播二进制业务帧。
 // 返回成功入队的设备数量，可用于统计下行投递率。
 func (m *ConnectionManager) SendToUser(userUUID string, msg []byte) int {
 	userBucket := m.userBucketFor(userUUID)
@@ -148,7 +148,7 @@ func (m *ConnectionManager) SendToUser(userUUID string, msg []byte) int {
 
 	sent := 0
 	for _, client := range clients {
-		if client.Enqueue(msg) {
+		if client.EnqueueBinary(msg) {
 			sent++
 		}
 	}

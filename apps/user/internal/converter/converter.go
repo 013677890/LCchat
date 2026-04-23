@@ -1,10 +1,11 @@
 package converter
 
 import (
+	"time"
+
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/util"
-	"time"
 )
 
 // ==================== UserInfo 转换函数 ====================

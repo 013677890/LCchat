@@ -298,6 +298,37 @@ func TestUserAuthServiceRegister(t *testing.T) {
 		assert.Equal(t, "u1", resp.UserUuid)
 		assert.Equal(t, "n1", resp.Nickname)
 	})
+
+	t.Run("success_without_telephone", func(t *testing.T) {
+		repo := &fakeAuthRepo{
+			verifyVerifyCodeFn: func(_ context.Context, _, _ string, codeType int32) (bool, error) {
+				require.Equal(t, int32(1), codeType)
+				return true, nil
+			},
+			createFn: func(_ context.Context, user *model.UserInfo) (*model.UserInfo, error) {
+				require.Equal(t, "a@test.com", user.Email)
+				require.NotEmpty(t, user.Password)
+				require.Equal(t, "", user.Telephone)
+				return &model.UserInfo{
+					Uuid:      user.Uuid,
+					Email:     user.Email,
+					Nickname:  "n1",
+					Telephone: user.Telephone,
+				}, nil
+			},
+		}
+		svc := NewAuthService(repo, &fakeAuthDeviceRepo{})
+
+		resp, err := svc.Register(context.Background(), &pb.RegisterRequest{
+			Email:      "a@test.com",
+			Password:   "pass123",
+			VerifyCode: "123456",
+			Nickname:   "n1",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Equal(t, "", resp.Telephone)
+	})
 }
 
 func TestUserAuthServiceLogin(t *testing.T) {

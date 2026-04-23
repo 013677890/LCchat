@@ -31,6 +31,11 @@ type MessageHandler func(raw []byte)
 // 用于在 read/write 循环退出后执行清理逻辑（例如从 manager 注销）。
 type CloseHandler func()
 
+type outboundFrame struct {
+	messageType int
+	payload     []byte
+}
+
 // Client 封装单条 WebSocket 连接。
 // 设计要点：
 // - send 队列用于削峰，避免业务 goroutine 直接阻塞在网络写；
@@ -40,7 +45,7 @@ type Client struct {
 	conn     *websocket.Conn
 	userUUID string
 	deviceID string
-	send     chan []byte
+	send     chan outboundFrame
 	done     chan struct{}
 	once     sync.Once
 }
@@ -51,7 +56,7 @@ func NewClient(conn *websocket.Conn, userUUID, deviceID string) *Client {
 		conn:     conn,
 		userUUID: userUUID,
 		deviceID: deviceID,
-		send:     make(chan []byte, defaultSendQueueSize),
+		send:     make(chan outboundFrame, defaultSendQueueSize),
 		done:     make(chan struct{}),
 	}
 }
@@ -70,19 +75,31 @@ func (c *Client) Done() <-chan struct{} {
 	return c.done
 }
 
-// Enqueue 将待发送消息投递到写队列。
+// Enqueue 将文本帧投递到写队列。
 // 返回值语义：
 // - true：已成功入队；
-// - false：连接已关闭或队列已满（调用方可选择断开连接或丢弃消息）。
+// - false：连接已关闭或队列已满。
 func (c *Client) Enqueue(msg []byte) bool {
+	return c.enqueue(websocket.TextMessage, msg)
+}
+
+// EnqueueBinary 将二进制帧投递到写队列。
+func (c *Client) EnqueueBinary(msg []byte) bool {
+	return c.enqueue(websocket.BinaryMessage, msg)
+}
+
+func (c *Client) enqueue(messageType int, msg []byte) bool {
 	if len(msg) == 0 {
 		return true
 	}
-	cloned := append([]byte(nil), msg...)
+	frame := outboundFrame{
+		messageType: messageType,
+		payload:     append([]byte(nil), msg...),
+	}
 	select {
 	case <-c.done:
 		return false
-	case c.send <- cloned:
+	case c.send <- frame:
 		return true
 	default:
 		return false
@@ -163,8 +180,8 @@ func (c *Client) writeLoop(ctx context.Context) {
 			return
 		case <-c.done:
 			return
-		case msg := <-c.send:
-			if err := c.writeBatch(msg); err != nil {
+		case frame := <-c.send:
+			if err := c.writeBatch(frame); err != nil {
 				c.Close()
 				return
 			}
@@ -179,15 +196,15 @@ func (c *Client) writeLoop(ctx context.Context) {
 
 // writeBatch 先发送当前消息，再尽量清空队列中已积压的消息。
 // 说明：每条业务消息仍保持独立 WebSocket 帧语义，避免破坏上层协议解析。
-func (c *Client) writeBatch(first []byte) error {
+func (c *Client) writeBatch(first outboundFrame) error {
 	if err := c.writeFrame(first); err != nil {
 		return err
 	}
 
 	for i := 0; i < wsBatchDrainLimit; i++ {
 		select {
-		case msg := <-c.send:
-			if err := c.writeFrame(msg); err != nil {
+		case frame := <-c.send:
+			if err := c.writeFrame(frame); err != nil {
 				return err
 			}
 		default:
@@ -197,15 +214,14 @@ func (c *Client) writeBatch(first []byte) error {
 	return nil
 }
 
-// writeFrame 使用 NextWriter 发送单条文本帧。
-// 与直接 WriteMessage 相比，可为后续更细粒度写优化保留扩展点。
-func (c *Client) writeFrame(msg []byte) error {
+// writeFrame 使用 NextWriter 发送单条帧。
+func (c *Client) writeFrame(frame outboundFrame) error {
 	_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-	writer, err := c.conn.NextWriter(websocket.TextMessage)
+	writer, err := c.conn.NextWriter(frame.messageType)
 	if err != nil {
 		return err
 	}
-	if _, err = writer.Write(msg); err != nil {
+	if _, err = writer.Write(frame.payload); err != nil {
 		_ = writer.Close()
 		return err
 	}
