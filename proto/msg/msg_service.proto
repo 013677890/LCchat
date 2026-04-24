@@ -32,7 +32,7 @@ service MsgService {
   // ==================== 消息操作 ====================
 
   // RecallMessage 撤回一条消息。
-  // 限制：当前仅发送者本人可撤回（群管理员撤回能力待实现），且必须在发送后 2 分钟内。
+  // 权限：发送者本人可在 2 分钟内撤回；群管理员/群主可撤回群内任意成员消息（不受时间限制）。
   // 撤回后 status 置为 1，content 被改写为系统提示 JSON（含 operator），
   // 同时对所有在线终端推送撤回通知。
   rpc RecallMessage(RecallMessageRequest) returns (RecallMessageResponse);

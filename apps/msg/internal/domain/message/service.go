@@ -28,6 +28,15 @@ func DefaultConfig() Config {
 	return Config{RecallWindow: 2 * time.Minute}
 }
 
+// ==================== 群角色查询（外部适配） ====================
+
+// GroupRoleQuerier 查询用户在群内的角色。
+// 0=普通成员, 1=管理员, 2=群主, -1=非群成员。
+// 由 infra 层通过 user-service gRPC 实现，msg 领域仅依赖此接口。
+type GroupRoleQuerier interface {
+	QueryMemberRole(ctx context.Context, groupUUID, userUUID string) (int8, error)
+}
+
 // ==================== Service 定义 ====================
 
 // Service 消息领域服务
@@ -40,8 +49,9 @@ func DefaultConfig() Config {
 //   - ❌ 不涉及 Kafka 投递（由 usecase 层调用 mq.Producer 完成）
 //   - ❌ 不依赖 conversation 领域包（保持领域隔离）
 type Service struct {
-	repo   Repository
-	config Config
+	repo        Repository
+	config      Config
+	groupRoleQr GroupRoleQuerier // 可选；nil 时群管撤回退化为仅允许发送者本人
 }
 
 // NewService 创建消息领域服务
@@ -51,6 +61,11 @@ func NewService(repo Repository, cfg ...Config) *Service {
 		c = cfg[0]
 	}
 	return &Service{repo: repo, config: c}
+}
+
+// SetGroupRoleQuerier 注入群角色查询实现（可选依赖，启动阶段调用一次）。
+func (s *Service) SetGroupRoleQuerier(q GroupRoleQuerier) {
+	s.groupRoleQr = q
 }
 
 // ==================== CreateMessage ====================
@@ -269,14 +284,30 @@ func (s *Service) RecallMessage(ctx context.Context, convId, msgId, operatorUuid
 		return nil, ErrMessageAlreadyRecalled
 	}
 
-	// 3. 权限校验：当前仅允许发送者本人撤回
-	// TODO: 群管理员撤回需查 group_member 表 role 字段
-	if msg.FromUuid != operatorUuid {
-		return nil, ErrRecallNoPermission
+	// 3. 权限校验
+	isGroupConv := !strings.HasPrefix(convId, "p2p-")
+	isSelf := msg.FromUuid == operatorUuid
+	isAdmin := false
+
+	if !isSelf {
+		if !isGroupConv {
+			return nil, ErrRecallNoPermission
+		}
+		if s.groupRoleQr == nil {
+			return nil, ErrRecallNoPermission
+		}
+		role, err := s.groupRoleQr.QueryMemberRole(ctx, convId, operatorUuid)
+		if err != nil {
+			return nil, fmt.Errorf("查询群角色失败: %w", err)
+		}
+		if role < 1 {
+			return nil, ErrRecallNoPermission
+		}
+		isAdmin = true
 	}
 
-	// 4. 时间窗口校验
-	if time.Since(msg.SendTime) > s.config.RecallWindow {
+	// 4. 时间窗口校验（群管理员/群主不受时间限制）
+	if !isAdmin && time.Since(msg.SendTime) > s.config.RecallWindow {
 		return nil, ErrRecallTimeout
 	}
 

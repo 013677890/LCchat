@@ -6,8 +6,10 @@ import (
 
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
+	"github.com/013677890/LCchat-Backend/apps/msg/internal/groupcli"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/protobuf/proto"
@@ -26,6 +28,7 @@ type SendMessageWorkflow struct {
 	msgService  *msgsvc.Service
 	convService *convsvc.Service
 	producer    *mq.Producer
+	groupCli    *groupcli.Client
 }
 
 // NewSendMessageWorkflow 创建发送消息用例
@@ -33,11 +36,13 @@ func NewSendMessageWorkflow(
 	msgService *msgsvc.Service,
 	convService *convsvc.Service,
 	producer *mq.Producer,
+	groupCli *groupcli.Client,
 ) *SendMessageWorkflow {
 	return &SendMessageWorkflow{
 		msgService:  msgService,
 		convService: convService,
 		producer:    producer,
+		groupCli:    groupCli,
 	}
 }
 
@@ -93,6 +98,27 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 				logger.String("conv_id", msg.ConvId),
 				logger.ErrorField("error", err),
 			)
+		}
+
+		// 异步确保群成员在 conversation 表有行（INSERT IGNORE，幂等安全）
+		if w.groupCli != nil {
+			groupUUID := msg.ConvId
+			async.RunSafe(ctx, func(taskCtx context.Context) {
+				members, err := w.groupCli.GetGroupMemberUUIDs(taskCtx, groupUUID)
+				if err != nil {
+					logger.Warn(taskCtx, "发送消息：获取群成员失败，跳过会话行初始化",
+						logger.String("group_uuid", groupUUID),
+						logger.ErrorField("error", err),
+					)
+					return
+				}
+				if err := w.convService.EnsureGroupMembersConv(taskCtx, members, groupUUID); err != nil {
+					logger.Warn(taskCtx, "发送消息：批量初始化群成员会话行失败（不阻断）",
+						logger.String("group_uuid", groupUUID),
+						logger.ErrorField("error", err),
+					)
+				}
+			}, 0)
 		}
 	}
 

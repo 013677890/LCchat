@@ -68,7 +68,7 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 
 	// 第一阶段支持三类下行事件，共享统一下发链路。
 	switch event.Type {
-	case "MSG_PUSH", "MSG_RECALL", "MSG_MARK_READ":
+	case "MSG_PUSH", "MSG_RECALL", "MSG_MARK_READ", "MSG_READ_RECEIPT":
 		// 支持的事件类型继续处理。
 	default:
 		result = "permanent_error"

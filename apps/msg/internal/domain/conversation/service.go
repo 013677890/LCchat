@@ -112,6 +112,12 @@ func (s *Service) UpsertGroupConv(ctx context.Context, msg *model.Message) error
 	return nil
 }
 
+// EnsureGroupMembersConv 确保群成员在 conversation 表有行（INSERT IGNORE）。
+// 首次发群消息时由 workflow 异步调用，后续消息因行已存在会被跳过。
+func (s *Service) EnsureGroupMembersConv(ctx context.Context, memberUUIDs []string, groupUUID string) error {
+	return s.repo.BatchInitGroupMemberConv(ctx, memberUUIDs, groupUUID)
+}
+
 // GetByOwnerAndConvId 获取单个个人会话记录
 func (s *Service) GetByOwnerAndConvId(ctx context.Context, ownerUuid, convId string) (*model.Conversation, error) {
 	return s.repo.GetByOwnerAndConvId(ctx, ownerUuid, convId)

@@ -78,13 +78,15 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 		)
 	} else {
 		serverTs := time.Now().UnixMilli()
+		isP2P := len(req.ConvId) > 4 && req.ConvId[:4] == "p2p-"
 		convType := pb.ConvType_CONV_TYPE_GROUP
-		if len(req.ConvId) > 4 && req.ConvId[:4] == "p2p-" {
+		if isP2P {
 			convType = pb.ConvType_CONV_TYPE_P2P
 		}
 
-		pushEvent := &pb.MsgPushEvent{
-			ReceiverUuid: req.OwnerUuid, // 推给自己的其他设备
+		// 事件 1：推给自己的其他设备（多端同步清红点）
+		selfSyncEvent := &pb.MsgPushEvent{
+			ReceiverUuid: req.OwnerUuid,
 			DeviceId:     ctxmeta.DeviceID(ctx),
 			Type:         "MSG_MARK_READ",
 			ConvType:     convType,
@@ -95,12 +97,35 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 			Seq:          0,
 		}
 
-		if err := w.producer.Publish(ctx, req.ConvId, pushEvent); err != nil {
-			// DB 已更新，其他设备下次打开时会重新拉取最新 read_seq
-			logger.Warn(ctx, "标记已读：投递 Kafka 失败（不阻断）",
+		if err := w.producer.Publish(ctx, req.ConvId, selfSyncEvent); err != nil {
+			logger.Warn(ctx, "标记已读：投递 Kafka（self-sync）失败（不阻断）",
 				logger.String("conv_id", req.ConvId),
 				logger.ErrorField("error", err),
 			)
+		}
+
+		// 事件 2：P2P 已读回执 → 通知对端显示"已读"
+		if isP2P {
+			peerUUID := extractPeerUuid(req.ConvId, req.OwnerUuid)
+			if peerUUID != "" {
+				receiptEvent := &pb.MsgPushEvent{
+					ReceiverUuid: peerUUID,
+					Type:         "MSG_READ_RECEIPT",
+					ConvType:     pb.ConvType_CONV_TYPE_P2P,
+					Data:         noticeData,
+					TraceId:      ctxmeta.TraceID(ctx),
+					FromUuid:     req.OwnerUuid,
+					ServerTs:     serverTs,
+					Seq:          0,
+				}
+				if err := w.producer.Publish(ctx, req.ConvId, receiptEvent); err != nil {
+					logger.Warn(ctx, "标记已读：投递 Kafka（read-receipt）失败（不阻断）",
+						logger.String("conv_id", req.ConvId),
+						logger.String("peer_uuid", peerUUID),
+						logger.ErrorField("error", err),
+					)
+				}
+			}
 		}
 	}
 

@@ -96,6 +96,29 @@ func (r *repositoryImpl) ListGroup(ctx context.Context, ownerUuid string, update
 	return convs, err
 }
 
+// BatchInitGroupMemberConv 批量初始化群成员 conversation 行。
+// INSERT IGNORE 语义：仅当 (owner_uuid, conv_id) 不存在时插入，已存在的跳过。
+func (r *repositoryImpl) BatchInitGroupMemberConv(ctx context.Context, memberUUIDs []string, groupUUID string) error {
+	if len(memberUUIDs) == 0 {
+		return nil
+	}
+	convs := make([]*model.Conversation, 0, len(memberUUIDs))
+	for _, uid := range memberUUIDs {
+		convs = append(convs, &model.Conversation{
+			ConvId:     groupUUID,
+			Type:       2, // GROUP
+			OwnerUuid:  uid,
+			TargetUuid: groupUUID,
+			Status:     0,
+		})
+	}
+	return r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "owner_uuid"}, {Name: "conv_id"}},
+			DoNothing: true,
+		}).CreateInBatches(convs, 100).Error
+}
+
 // Upsert 创建或更新个人会话
 //
 // 【Bug1 修复】

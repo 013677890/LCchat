@@ -34,13 +34,19 @@ func initializeMsgApp() (*MsgApp, error) {
 	}
 	repository := message.NewRepository(db, client)
 	config := provideMsgConfig()
-	service := provideMsgService(repository, config)
+	mainMsgUserGRPCAddress := provideMsgUserGRPCAddress()
+	clientConn, err := provideMsgUserGRPCConn(logger, mainMsgUserGRPCAddress)
+	if err != nil {
+		return nil, err
+	}
+	groupClient := provideMsgGroupClient(clientConn)
+	service := provideMsgService(repository, config, groupClient)
 	conversationRepository := conversation.NewRepository(db)
 	conversationService := conversation.NewService(conversationRepository)
 	kafkaConfig := provideKafkaConfig()
 	producer := provideKafkaProducer(kafkaConfig)
 	mqProducer := provideMsgProducer(kafkaConfig, producer)
-	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, mqProducer)
+	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, mqProducer, groupClient)
 	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(service, mqProducer)
 	markReadWorkflow := usecase.NewMarkReadWorkflow(conversationService, mqProducer)
 	msgHandler := handler.NewMsgHandler(service, conversationService, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)

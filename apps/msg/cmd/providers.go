@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
+	"github.com/013677890/LCchat-Backend/apps/msg/internal/groupcli"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/usecase"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
@@ -24,6 +26,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"gorm.io/gorm"
 )
@@ -31,6 +34,8 @@ import (
 type grpcAddress string
 
 type metricsAddress string
+
+type msgUserGRPCAddress string
 
 type msgAsyncReleaseTimeout time.Duration
 
@@ -91,8 +96,32 @@ func provideMsgConfig() message.Config {
 	return message.DefaultConfig()
 }
 
-func provideMsgService(repo message.Repository, cfg message.Config) *message.Service {
-	return message.NewService(repo, cfg)
+func provideMsgUserGRPCAddress() msgUserGRPCAddress {
+	addr := os.Getenv("USER_GRPC_ADDR")
+	if addr == "" {
+		addr = ":9090"
+	}
+	return msgUserGRPCAddress(addr)
+}
+
+func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (*grpc.ClientConn, error) {
+	conn, err := grpc.NewClient(string(addr), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("msg 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
+	}
+	return conn, nil
+}
+
+func provideMsgGroupClient(conn *grpc.ClientConn) *groupcli.Client {
+	return groupcli.NewClient(conn)
+}
+
+func provideMsgService(repo message.Repository, cfg message.Config, gc *groupcli.Client) *message.Service {
+	svc := message.NewService(repo, cfg)
+	if gc != nil {
+		svc.SetGroupRoleQuerier(gc)
+	}
+	return svc
 }
 
 func provideGRPCAddress() grpcAddress {
@@ -168,6 +197,9 @@ var msgInfraProviderSet = wire.NewSet(
 	provideKafkaProducer,
 	provideMsgProducer,
 	provideMsgConfig,
+	provideMsgUserGRPCAddress,
+	provideMsgUserGRPCConn,
+	provideMsgGroupClient,
 	provideMsgService,
 	provideGRPCAddress,
 	provideMetricsAddress,

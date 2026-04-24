@@ -39,6 +39,10 @@ type Repository interface {
 	//   - optional 语义：nil 表示不修改该字段
 	UpdateSettings(ctx context.Context, ownerUuid, convId string, mute *bool, pin *bool) error
 
+	// BatchInitGroupMemberConv 批量初始化群成员的 conversation 行（INSERT IGNORE 语义）。
+	// 仅当 (owner_uuid, target_uuid) 不存在时插入，已存在的跳过。
+	BatchInitGroupMemberConv(ctx context.Context, memberUUIDs []string, groupUUID string) error
+
 	// ==================== 群会话热数据 (group_conversation 表) ====================
 
 	// UpsertGroupConv 创建或更新群会话热数据
