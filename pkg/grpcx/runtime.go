@@ -58,6 +58,7 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 	unaryInters := []grpc.UnaryServerInterceptor{
 		RecoveryUnaryInterceptor(),
 		MetadataUnaryInterceptor(),
+		ValidateUnaryInterceptor(),
 		RateLimitUnaryInterceptor(rateLimitCfg),
 		metrics.UnaryInterceptor(),
 		ErrorNormalizeUnaryInterceptor(),

@@ -43,6 +43,7 @@ Burst:             8000,
 	unaryInters := []grpc.UnaryServerInterceptor{
 		grpcx.RecoveryUnaryInterceptor(),
 		grpcx.MetadataUnaryInterceptor(),
+		grpcx.ValidateUnaryInterceptor(),
 		grpcx.RateLimitUnaryInterceptor(rateLimitCfg),
 		metrics.UnaryInterceptor(),
 		grpcx.ErrorNormalizeUnaryInterceptor(),
