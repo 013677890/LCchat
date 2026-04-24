@@ -323,17 +323,19 @@ func buildLastMsgPreview(msg *model.Message) string {
 }
 
 func buildPreviewText(msg *model.Message) string {
-	switch msg.MsgType {
-	case 2:
+	switch model.MsgType(msg.MsgType) {
+	case model.MsgTypeImage:
 		return "[图片]"
-	case 3:
+	case model.MsgTypeVoice:
 		return "[语音]"
-	case 4:
+	case model.MsgTypeVideo:
 		return "[视频]"
-	case 5:
+	case model.MsgTypeFile:
 		return "[文件]"
-	case 6:
+	case model.MsgTypeLocation:
 		return "[位置]"
+	case model.MsgTypeSystem:
+		return "[系统消息]"
 	}
 
 	type textContent struct {

@@ -9,7 +9,7 @@ import (
 // Message 记录聊天消息（包含系统控制类消息）。
 // 设计要点：
 // - FromUuid 必填，系统/官方号请使用保留账号，不用空值。
-// - MsgType 区分普通气泡消息与系统控制消息（见 const.go）。
+// - MsgType 区分普通气泡消息与系统控制消息（见 message_const.go）。
 // - Content 为 JSON / 文本串，前端按 MsgType 解析。
 // - ClientMsgId 用于幂等（同一发送端的去重）。
 // - ConvId 关联会话，Seq 为会话内递增序号（便于排序与去重）。
@@ -21,7 +21,7 @@ type Message struct {
 	ClientMsgId  string         `gorm:"column:client_msg_id;type:char(64);not null;uniqueIndex:uidx_sender_client;comment:客户端幂等ID"`
 	FromUuid     string         `gorm:"column:from_uuid;type:char(20);not null;uniqueIndex:uidx_sender_client;comment:发送者uuid(系统消息也需填写保留账号)"`
 	DeviceId     string         `gorm:"column:device_id;type:char(64);not null;uniqueIndex:uidx_sender_client;comment:发送设备ID(幂等三元组: from_uuid+device_id+client_msg_id)"`
-	MsgType      int16          `gorm:"column:msg_type;not null;comment:消息类型(参考 const.go)"`
+	MsgType      int16          `gorm:"column:msg_type;not null;comment:消息类型(参考 message_const.go)"`
 	Content      string         `gorm:"column:content;type:json;not null;comment:消息内容(JSON,根据msg_type解析)"`
 	Status       int8           `gorm:"column:status;not null;default:0;comment:0正常 1撤回 2删除"`
 	ReplyToMsgId string         `gorm:"column:reply_to_msg_id;type:char(64);not null;default:'';comment:引用/回复的目标消息ID(空=非回复)"`

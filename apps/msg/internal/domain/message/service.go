@@ -111,14 +111,20 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		return &CreateResult{Msg: cachedMsg, IsIdempotent: true}, nil
 	}
 
-	// ---- Step 2: 计算 conv_id ----
+	// ---- Step 2: 校验消息类型 ----
+	msgType, ok := model.ParseMsgType(req.MsgType)
+	if !ok {
+		return nil, ErrUnsupportedMsgType
+	}
+
+	// ---- Step 3: 计算 conv_id ----
 	convId := computeConvId(req.ConvType, req.FromUuid, req.TargetUuid)
 
-	// ---- Step 3: 生成 ULID msg_id ----
+	// ---- Step 4: 生成 ULID msg_id ----
 	// ulid.Make() 内部使用 sync.Pool 并发安全熵池，无需手动创建随机源
 	msgId := id.GenerateULID()
 
-	// ---- Step 4: 分配 seq ----
+	// ---- Step 5: 分配 seq ----
 	// Redis INCR 保证原子递增，同一 conv_id 下严格有序
 	// 客户端用 seq 做排序和 gap 检测
 	seq, err := s.repo.AllocSeq(ctx, convId)
@@ -126,7 +132,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		return nil, fmt.Errorf("CreateMessage: alloc seq failed: %w", err)
 	}
 
-	// ---- Step 5: 构造 Message 实体 ----
+	// ---- Step 6: 构造 Message 实体 ----
 	now := time.Now()
 
 	// at_users: proto []string → JSON string 存 DB
@@ -144,7 +150,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		ClientMsgId:  req.ClientMsgId,
 		FromUuid:     req.FromUuid,
 		DeviceId:     req.DeviceId,
-		MsgType:      int16(req.MsgType),
+		MsgType:      int16(msgType),
 		Content:      req.Content,
 		Status:       0, // 0=正常
 		ReplyToMsgId: req.ReplyToMsgId,
@@ -152,7 +158,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		SendTime:     now,
 	}
 
-	// ---- Step 6: 落库 ----
+	// ---- Step 7: 落库 ----
 	if err := s.repo.Create(ctx, msg); err != nil {
 		if errors.Is(err, ErrDuplicateMessage) {
 			// DB 唯一索引兜底：SETNX 降级时可能走到这里
@@ -165,7 +171,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		return nil, fmt.Errorf("CreateMessage: db insert failed: %w", err)
 	}
 
-	// ---- Step 7: 回写幂等缓存 ----
+	// ---- Step 8: 回写幂等缓存 ----
 	// 覆盖 "PROCESSING" → 实际结果 JSON，TTL 延长到 10 分钟
 	// 忽略错误：Redis 回写失败不影响主流程
 	if err := s.repo.SetIdempotentResult(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId, msg); err != nil {
@@ -214,6 +220,15 @@ func (s *Service) PullMessages(ctx context.Context, convId string, anchorSeq int
 	}
 
 	return items, hasMore, nil
+}
+
+// GetMaxSeq 查询会话当前最大已落库 seq。
+func (s *Service) GetMaxSeq(ctx context.Context, convId string) (int64, error) {
+	maxSeq, err := s.repo.GetMaxSeq(ctx, convId)
+	if err != nil {
+		return 0, fmt.Errorf("查询会话最大序号失败: %w", err)
+	}
+	return maxSeq, nil
 }
 
 // ==================== GetMessagesByIds ====================

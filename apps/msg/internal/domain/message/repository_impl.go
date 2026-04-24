@@ -259,6 +259,27 @@ func (r *repositoryImpl) GetById(ctx context.Context, convId string, msgId strin
 	return &msg, nil
 }
 
+// GetMaxSeq 查询会话当前 seq 上界。
+// 优先读 Redis（AllocSeq 的 INCR 计数器），语义上是"已分配的最大 seq"。
+// Redis 异常时降级查 DB MAX(seq)。
+func (r *repositoryImpl) GetMaxSeq(ctx context.Context, convId string) (int64, error) {
+	key := rediskey.MsgSeqKey(convId)
+	val, err := r.redis.Get(ctx, key).Int64()
+	if err == nil {
+		return val, nil
+	}
+
+	var maxSeq int64
+	if dbErr := r.db.WithContext(ctx).
+		Model(&model.Message{}).
+		Where("conv_id = ?", convId).
+		Select("COALESCE(MAX(seq), 0)").
+		Scan(&maxSeq).Error; dbErr != nil {
+		return 0, fmt.Errorf("GetMaxSeq: db fallback failed: %w", dbErr)
+	}
+	return maxSeq, nil
+}
+
 // ==================== 撤回 ====================
 
 // UpdateStatus 更新消息状态和内容

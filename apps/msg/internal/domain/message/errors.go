@@ -10,6 +10,9 @@ var (
 	// ErrDuplicateMessage 消息重复（DB 唯一索引冲突）
 	ErrDuplicateMessage = errors.New("message: duplicate message")
 
+	// ErrUnsupportedMsgType 消息类型不支持
+	ErrUnsupportedMsgType = errors.New("message: unsupported msg type")
+
 	// ErrMessageNotFound 消息不存在
 	ErrMessageNotFound = errors.New("message: not found")
 

@@ -10,6 +10,7 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 )
 
 // MsgHandler 消息服务 gRPC Handler（薄层）
@@ -43,15 +44,9 @@ func NewMsgHandler(
 
 // SendMessage 发送消息。(单聊/群聊统一入口)
 func (h *MsgHandler) SendMessage(ctx context.Context, req *pb.SendMessageRequest) (*pb.SendMessageResponse, error) {
-	// 1. 调用发送消息工作流执行发送消息
 	resp, err := h.sendMessageWorkflow.Execute(ctx, req)
-	// 2. 检查发送消息工作流执行结果是否为空
 	if err != nil {
-		// 3. 检查是否为幂等处理错误
-		if errors.Is(err, msgsvc.ErrIdempotentProcessing) {
-			return nil, apperr.New(consts.CodeMessageDuplicate)
-		}
-		return nil, apperr.Wrap(err, consts.CodeMessageSendFail, consts.GetMessage(consts.CodeMessageSendFail))
+		return nil, mapMsgDomainError(ctx, err)
 	}
 	return resp, nil
 }
@@ -76,26 +71,40 @@ func (h *MsgHandler) MarkRead(ctx context.Context, req *pb.MarkReadRequest) (*pb
 
 // PullMessages 按会话增量拉取历史消息。
 func (h *MsgHandler) PullMessages(ctx context.Context, req *pb.PullMessagesRequest) (*pb.PullMessagesResponse, error) {
-	// 1. 设置清除序列号
+	ownerUUID := ctxmeta.UserUUID(ctx)
+	if ownerUUID == "" {
+		return nil, apperr.New(consts.CodeUnauthorized)
+	}
+
 	clearSeq := int64(0)
-	// 2. 设置拉取方向
+	conv, convErr := h.convService.GetByOwnerAndConvId(ctx, ownerUUID, req.ConvId)
+	if convErr != nil && !errors.Is(convErr, convsvc.ErrConversationNotFound) {
+		return nil, apperr.Wrap(convErr, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
+	}
+	if convErr == nil {
+		clearSeq = conv.ClearSeq
+	}
+
 	direction := msgsvc.DirectionForward
 	if req.Direction == pb.PullDirection_PULL_DIRECTION_BACKWARD {
 		direction = msgsvc.DirectionBackward
 	}
-	// 3. 设置拉取限制
+
 	limit := int(req.Limit)
 	if limit <= 0 {
 		limit = 50
 	}
+
+	maxSeq, err := h.msgService.GetMaxSeq(ctx, req.ConvId)
+	if err != nil {
+		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
+	}
+
 	msgs, hasMore, err := h.msgService.PullMessages(ctx, req.ConvId, req.AnchorSeq, direction, limit, clearSeq)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
 	}
-	var maxSeq int64
-	if len(msgs) > 0 {
-		maxSeq = msgs[len(msgs)-1].Seq
-	}
+
 	return &pb.PullMessagesResponse{Messages: msgs, HasMore: hasMore, MaxSeq: maxSeq}, nil
 }
 
@@ -152,10 +161,12 @@ func mapMsgDomainError(_ context.Context, err error) error {
 		return apperr.New(consts.CodeRecallTimeout)
 	case errors.Is(err, msgsvc.ErrRecallNoPermission):
 		return apperr.New(consts.CodeRecallNoPermission)
+	case errors.Is(err, msgsvc.ErrUnsupportedMsgType):
+		return apperr.New(consts.CodeMessageTypeNotSupport)
 	case errors.Is(err, msgsvc.ErrIdempotentProcessing):
 		return apperr.New(consts.CodeMessageDuplicate)
 	default:
-		return apperr.Wrap(err, consts.CodeInternalError, "消息处理失败")
+		return apperr.Wrap(err, consts.CodeMessageSendFail, "消息处理失败")
 	}
 }
 

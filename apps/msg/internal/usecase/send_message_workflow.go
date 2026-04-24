@@ -3,12 +3,12 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"time"
 
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/protobuf/proto"
 )
@@ -110,6 +110,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 			logger.ErrorField("error", marshalErr),
 		)
 	} else {
+		serverTs := msg.SendTime.UnixMilli()
 		pushEvent := &pb.MsgPushEvent{
 			ReceiverUuid: req.TargetUuid, // 单聊=对端 UUID, 群聊=群 UUID
 			DeviceId:     req.DeviceId,   // 发送方设备 ID（多端同步时排除）
@@ -117,7 +118,8 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 			ConvType:     req.ConvType,   // Push-Job 据此判断扩散策略
 			Data:         msgItemData,    // MsgItem 序列化 bytes
 			FromUuid:     req.FromUuid,   // 多端同步用
-			ServerTs:     time.Now().UnixMilli(),
+			TraceId:      ctxmeta.TraceID(ctx),
+			ServerTs:     serverTs,
 			Seq:          msg.Seq,
 		}
 

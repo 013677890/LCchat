@@ -47,6 +47,9 @@ type Repository interface {
 	// GetById 查单条消息
 	GetById(ctx context.Context, convId string, msgId string) (*model.Message, error)
 
+	// GetMaxSeq 查询会话当前最大已落库 seq
+	GetMaxSeq(ctx context.Context, convId string) (int64, error)
+
 	// ==================== 撤回 ====================
 
 	// UpdateStatus 更新消息状态和内容（撤回场景：status=1, content=提示JSON）

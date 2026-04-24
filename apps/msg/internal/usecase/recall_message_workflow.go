@@ -8,6 +8,7 @@ import (
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/protobuf/proto"
 )
@@ -47,11 +48,12 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 	// ============================================================
 	// Step 2: Kafka → MsgPushEvent{type="MSG_RECALL", data=RecallNotice}
 	// ============================================================
+	serverTs := time.Now().UnixMilli()
 	notice := &pb.RecallNotice{
 		ConvId:     req.ConvId,
 		MsgId:      req.MsgId,
 		Operator:   req.OperatorUuid,
-		RecallTime: time.Now().UnixMilli(),
+		RecallTime: serverTs,
 	}
 	noticeData, _ := proto.Marshal(notice)
 
@@ -65,11 +67,13 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 
 	pushEvent := &pb.MsgPushEvent{
 		ReceiverUuid: receiverUuid,
+		DeviceId:     ctxmeta.DeviceID(ctx),
 		Type:         "MSG_RECALL",
 		ConvType:     convType,
 		Data:         noticeData,
+		TraceId:      ctxmeta.TraceID(ctx),
 		FromUuid:     req.OperatorUuid,
-		ServerTs:     time.Now().UnixMilli(),
+		ServerTs:     serverTs,
 		Seq:          0,
 	}
 

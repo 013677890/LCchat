@@ -8,6 +8,7 @@ import (
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/protobuf/proto"
 )
@@ -76,6 +77,7 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 			logger.ErrorField("error", marshalErr),
 		)
 	} else {
+		serverTs := time.Now().UnixMilli()
 		convType := pb.ConvType_CONV_TYPE_GROUP
 		if len(req.ConvId) > 4 && req.ConvId[:4] == "p2p-" {
 			convType = pb.ConvType_CONV_TYPE_P2P
@@ -83,11 +85,13 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 
 		pushEvent := &pb.MsgPushEvent{
 			ReceiverUuid: req.OwnerUuid, // 推给自己的其他设备
+			DeviceId:     ctxmeta.DeviceID(ctx),
 			Type:         "MSG_MARK_READ",
 			ConvType:     convType,
 			Data:         noticeData,
+			TraceId:      ctxmeta.TraceID(ctx),
 			FromUuid:     req.OwnerUuid,
-			ServerTs:     time.Now().UnixMilli(),
+			ServerTs:     serverTs,
 			Seq:          0,
 		}
 
