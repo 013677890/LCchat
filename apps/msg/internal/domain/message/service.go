@@ -228,6 +228,9 @@ func (s *Service) PullMessages(ctx context.Context, convId string, anchorSeq int
 	if hasMore {
 		msgs = msgs[:limit]
 	}
+	if direction == DirectionBackward {
+		reverseMessages(msgs)
+	}
 
 	items := make([]*pb.MsgItem, 0, len(msgs))
 	for _, msg := range msgs {
@@ -237,13 +240,22 @@ func (s *Service) PullMessages(ctx context.Context, convId string, anchorSeq int
 	return items, hasMore, nil
 }
 
-// GetMaxSeq 查询会话当前最大已落库 seq。
+// GetMaxSeq 查询会话当前 seq 上界。
+//
+// 短期语义：该值可能来自 Redis 已分配序号上界，而不是严格“已落库最大 seq”。
+// 当 Redis INCR 成功但 DB 落库失败时会产生 seq 空洞，客户端做 gap 补拉时需要容忍空洞。
 func (s *Service) GetMaxSeq(ctx context.Context, convId string) (int64, error) {
 	maxSeq, err := s.repo.GetMaxSeq(ctx, convId)
 	if err != nil {
 		return 0, fmt.Errorf("查询会话最大序号失败: %w", err)
 	}
 	return maxSeq, nil
+}
+
+func reverseMessages(msgs []*model.Message) {
+	for left, right := 0, len(msgs)-1; left < right; left, right = left+1, right-1 {
+		msgs[left], msgs[right] = msgs[right], msgs[left]
+	}
 }
 
 // ==================== GetMessagesByIds ====================

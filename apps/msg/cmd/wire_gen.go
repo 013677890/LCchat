@@ -40,13 +40,14 @@ func initializeMsgApp() (*MsgApp, error) {
 		return nil, err
 	}
 	groupClient := provideMsgGroupClient(clientConn)
+	permissionChecker := provideMsgPermissionChecker(clientConn)
 	service := provideMsgService(repository, config, groupClient)
 	conversationRepository := conversation.NewRepository(db)
 	conversationService := conversation.NewService(conversationRepository)
 	kafkaConfig := provideKafkaConfig()
 	producer := provideKafkaProducer(kafkaConfig)
 	mqProducer := provideMsgProducer(kafkaConfig, producer)
-	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, mqProducer, groupClient)
+	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, mqProducer, groupClient, permissionChecker)
 	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(service, mqProducer)
 	markReadWorkflow := usecase.NewMarkReadWorkflow(conversationService, mqProducer)
 	msgHandler := handler.NewMsgHandler(service, conversationService, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)

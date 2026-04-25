@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"time"
 
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
@@ -25,10 +26,16 @@ import (
 //  5. mq.Producer.Publish → 写 Kafka MsgPushEvent (key=conv_id)
 //  6. 返回 {msg_id, seq, conv_id, send_time}
 type SendMessageWorkflow struct {
-	msgService  *msgsvc.Service
-	convService *convsvc.Service
-	producer    *mq.Producer
-	groupCli    *groupcli.Client
+	msgService        *msgsvc.Service
+	convService       *convsvc.Service
+	producer          *mq.Producer
+	groupCli          *groupcli.Client
+	permissionChecker PermissionChecker
+}
+
+// PermissionChecker 校验发送者是否有权限向目标会话发送消息。
+type PermissionChecker interface {
+	CheckCanSend(ctx context.Context, req *pb.SendMessageRequest) error
 }
 
 // NewSendMessageWorkflow 创建发送消息用例
@@ -37,17 +44,27 @@ func NewSendMessageWorkflow(
 	convService *convsvc.Service,
 	producer *mq.Producer,
 	groupCli *groupcli.Client,
+	permissionChecker PermissionChecker,
 ) *SendMessageWorkflow {
 	return &SendMessageWorkflow{
-		msgService:  msgService,
-		convService: convService,
-		producer:    producer,
-		groupCli:    groupCli,
+		msgService:        msgService,
+		convService:       convService,
+		producer:          producer,
+		groupCli:          groupCli,
+		permissionChecker: permissionChecker,
 	}
 }
 
 // Execute 执行发送消息的完整流程
 func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRequest) (*pb.SendMessageResponse, error) {
+	// ============================================================
+	// Step 0: 跨服务权限校验（好友/黑名单/群成员）
+	// ============================================================
+	if w.permissionChecker != nil {
+		if err := w.permissionChecker.CheckCanSend(ctx, req); err != nil {
+			return nil, fmt.Errorf("SendMessageWorkflow: 发送权限校验失败: %w", err)
+		}
+	}
 
 	// ============================================================
 	// Step 1: 消息领域 → 幂等检查 + ULID + conv_id + seq + 落库
@@ -100,25 +117,16 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 			)
 		}
 
-		// 异步确保群成员在 conversation 表有行（INSERT IGNORE，幂等安全）
+		// 同步兜底确保群成员在 conversation 表有行。失败不阻断发送，但会再交给异步补偿重试。
 		if w.groupCli != nil {
 			groupUUID := msg.ConvId
-			async.RunSafe(ctx, func(taskCtx context.Context) {
-				members, err := w.groupCli.GetGroupMemberUUIDs(taskCtx, groupUUID)
-				if err != nil {
-					logger.Warn(taskCtx, "发送消息：获取群成员失败，跳过会话行初始化",
-						logger.String("group_uuid", groupUUID),
-						logger.ErrorField("error", err),
-					)
-					return
-				}
-				if err := w.convService.EnsureGroupMembersConv(taskCtx, members, groupUUID); err != nil {
-					logger.Warn(taskCtx, "发送消息：批量初始化群成员会话行失败（不阻断）",
-						logger.String("group_uuid", groupUUID),
-						logger.ErrorField("error", err),
-					)
-				}
-			}, 0)
+			if err := w.ensureGroupMembersConv(ctx, groupUUID); err != nil {
+				logger.Warn(ctx, "发送消息：初始化群成员会话行失败，将异步补偿",
+					logger.String("group_uuid", groupUUID),
+					logger.ErrorField("error", err),
+				)
+				w.retryEnsureGroupMembersConv(ctx, groupUUID)
+			}
 		}
 	}
 
@@ -167,4 +175,44 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 		ConvId:   msg.ConvId,
 		SendTime: msg.SendTime.UnixMilli(),
 	}, nil
+}
+
+func (w *SendMessageWorkflow) ensureGroupMembersConv(ctx context.Context, groupUUID string) error {
+	members, err := w.groupCli.GetGroupMemberUUIDs(ctx, groupUUID)
+	if err != nil {
+		return fmt.Errorf("获取群成员失败: %w", err)
+	}
+	if err := w.convService.EnsureGroupMembersConv(ctx, members, groupUUID); err != nil {
+		return fmt.Errorf("批量初始化群成员会话行失败: %w", err)
+	}
+	return nil
+}
+
+func (w *SendMessageWorkflow) retryEnsureGroupMembersConv(ctx context.Context, groupUUID string) {
+	async.RunSafe(ctx, func(taskCtx context.Context) {
+		backoffs := []time.Duration{200 * time.Millisecond, time.Second, 3 * time.Second}
+		var lastErr error
+		for attempt, backoff := range backoffs {
+			select {
+			case <-taskCtx.Done():
+				return
+			case <-time.After(backoff):
+			}
+
+			if err := w.ensureGroupMembersConv(taskCtx, groupUUID); err != nil {
+				lastErr = err
+				logger.Warn(taskCtx, "发送消息：群成员会话行补偿失败，将继续重试",
+					logger.String("group_uuid", groupUUID),
+					logger.Int("attempt", attempt+1),
+					logger.ErrorField("error", err),
+				)
+				continue
+			}
+			return
+		}
+		logger.Warn(taskCtx, "发送消息：群成员会话行补偿重试耗尽",
+			logger.String("group_uuid", groupUUID),
+			logger.ErrorField("error", lastErr),
+		)
+	}, 10*time.Second)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/groupcli"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/usecase"
+	"github.com/013677890/LCchat-Backend/apps/msg/internal/usercli"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/config"
@@ -32,26 +33,14 @@ import (
 )
 
 type grpcAddress string
-
 type metricsAddress string
-
 type msgUserGRPCAddress string
-
 type msgAsyncReleaseTimeout time.Duration
-
 type msgGRPCShutdownTimeout time.Duration
 
-func provideLoggerConfig() config.LoggerConfig {
-	return config.DefaultLoggerConfig()
-}
-
-func provideAsyncConfig() config.AsyncConfig {
-	return config.DefaultAsyncConfig()
-}
-
-func provideMySQLConfig() config.MySQLConfig {
-	return config.DefaultMySQLConfig()
-}
+func provideLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
+func provideAsyncConfig() config.AsyncConfig   { return config.DefaultAsyncConfig() }
+func provideMySQLConfig() config.MySQLConfig   { return config.DefaultMySQLConfig() }
 
 func provideRedisConfig() config.RedisConfig {
 	cfg := config.DefaultRedisConfig()
@@ -60,41 +49,25 @@ func provideRedisConfig() config.RedisConfig {
 	return cfg
 }
 
-func provideKafkaConfig() config.KafkaConfig {
-	return config.DefaultKafkaConfig()
-}
-
-func provideLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
-	return logger.Build(cfg)
-}
-
+func provideKafkaConfig() config.KafkaConfig                     { return config.DefaultKafkaConfig() }
+func provideLogger(cfg config.LoggerConfig) (*zap.Logger, error) { return logger.Build(cfg) }
 func provideAsyncPool(_ *zap.Logger, cfg config.AsyncConfig) (*ants.Pool, error) {
 	return async.Build(cfg)
 }
-
 func provideAsyncReleaseTimeout(cfg config.AsyncConfig) msgAsyncReleaseTimeout {
 	return msgAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
-
-func provideMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
-	return mysql.Build(cfg)
-}
-
+func provideMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) { return mysql.Build(cfg) }
 func provideRedisClient(_ *zap.Logger, cfg config.RedisConfig) (*goredis.Client, error) {
 	return pkgredis.Build(cfg)
 }
-
 func provideKafkaProducer(cfg config.KafkaConfig) *kafka.Producer {
 	return kafka.NewProducer(cfg.Brokers, cfg.MsgPushTopic)
 }
-
 func provideMsgProducer(cfg config.KafkaConfig, producer *kafka.Producer) *mq.Producer {
 	return mq.NewProducer(producer, cfg.MsgPushTopic)
 }
-
-func provideMsgConfig() message.Config {
-	return message.DefaultConfig()
-}
+func provideMsgConfig() message.Config { return message.DefaultConfig() }
 
 func provideMsgUserGRPCAddress() msgUserGRPCAddress {
 	addr := os.Getenv("USER_GRPC_ADDR")
@@ -112,8 +85,9 @@ func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (*grpc.Clien
 	return conn, nil
 }
 
-func provideMsgGroupClient(conn *grpc.ClientConn) *groupcli.Client {
-	return groupcli.NewClient(conn)
+func provideMsgGroupClient(conn *grpc.ClientConn) *groupcli.Client { return groupcli.NewClient(conn) }
+func provideMsgPermissionChecker(conn *grpc.ClientConn) *usercli.PermissionChecker {
+	return usercli.NewPermissionChecker(conn)
 }
 
 func provideMsgService(repo message.Repository, cfg message.Config, gc *groupcli.Client) *message.Service {
@@ -158,12 +132,7 @@ func provideMsgRegistration(msgHandler *handler.MsgHandler) grpcx.RegistrationFu
 }
 
 func provideMsgGRPCServer(register grpcx.RegistrationFunc, addr grpcAddress) (*grpcx.BuiltServer, error) {
-	opts := grpcx.ServerOptions{
-		Address:          string(addr),
-		Namespace:        "msg",
-		EnableHealth:     true,
-		EnableReflection: true,
-	}
+	opts := grpcx.ServerOptions{Address: string(addr), Namespace: "msg", EnableHealth: true, EnableReflection: true}
 	return grpcx.NewServer(opts, register)
 }
 
@@ -174,10 +143,7 @@ func provideMsgGRPCListener(addr grpcAddress) (net.Listener, error) {
 func provideMetricsServer(addr metricsAddress, built *grpcx.BuiltServer) *http.Server {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", built.Metrics.Handler())
-	return &http.Server{
-		Addr:    string(addr),
-		Handler: metricsMux,
-	}
+	return &http.Server{Addr: string(addr), Handler: metricsMux}
 }
 
 var _ = conversation.NewRepository
@@ -200,6 +166,7 @@ var msgInfraProviderSet = wire.NewSet(
 	provideMsgUserGRPCAddress,
 	provideMsgUserGRPCConn,
 	provideMsgGroupClient,
+	provideMsgPermissionChecker,
 	provideMsgService,
 	provideGRPCAddress,
 	provideMetricsAddress,
@@ -219,9 +186,7 @@ var msgDomainProviderSet = wire.NewSet(
 	usecase.NewMarkReadWorkflow,
 )
 
-var msgHandlerProviderSet = wire.NewSet(
-	handler.NewMsgHandler,
-)
+var msgHandlerProviderSet = wire.NewSet(handler.NewMsgHandler)
 
 var msgAppProviderSet = wire.NewSet(
 	msgInfraProviderSet,

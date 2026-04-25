@@ -55,7 +55,15 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 		Operator:   req.OperatorUuid,
 		RecallTime: serverTs,
 	}
-	noticeData, _ := proto.Marshal(notice)
+	noticeData, marshalErr := proto.Marshal(notice)
+	if marshalErr != nil {
+		logger.Warn(ctx, "撤回消息：RecallNotice 序列化失败，跳过 Kafka 投递",
+			logger.String("conv_id", req.ConvId),
+			logger.String("msg_id", req.MsgId),
+			logger.ErrorField("error", marshalErr),
+		)
+		return &pb.RecallMessageResponse{}, nil
+	}
 
 	// 确定 receiver + conv_type
 	convType := pb.ConvType_CONV_TYPE_GROUP
