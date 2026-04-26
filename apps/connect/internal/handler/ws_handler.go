@@ -1,12 +1,6 @@
 package handler
 
 import (
-	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
-	"github.com/013677890/LCchat-Backend/apps/connect/internal/svc"
-	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/result"
 	"context"
 	"errors"
 	"net/http"
@@ -14,6 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
+	"github.com/013677890/LCchat-Backend/apps/connect/internal/svc"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -139,11 +139,13 @@ func (h *WSHandler) handleConnection(ctx context.Context, conn *websocket.Conn, 
 		logger.Int("online_count", h.connManager.Count()),
 	)
 
-	client.Run(ctx, func(raw []byte) {
-		h.handleMessage(ctx, client, session, raw)
+	client.Run(ctx, func(messageType int, raw []byte) {
+		h.handleMessage(ctx, client, session, messageType, raw)
 	}, func() {
-		h.connManager.Unregister(client)
-		h.connectSvc.OnDisconnect(ctx, session)
+		removed := h.connManager.Unregister(client)
+		if removed {
+			h.connectSvc.OnDisconnect(ctx, session)
+		}
 		logger.Info(ctx, "WebSocket 连接已断开",
 			logger.String("user_uuid", session.UserUUID),
 			logger.String("device_id", session.DeviceID),
@@ -153,47 +155,96 @@ func (h *WSHandler) handleConnection(ctx context.Context, conn *websocket.Conn, 
 }
 
 // handleMessage 处理客户端上行帧。
-// 当前支持：
-// - heartbeat: 更新活跃时间并返回 heartbeat_ack；
-// - message: 预留消息链路（当前仅回 message_ack 占位）。
-func (h *WSHandler) handleMessage(ctx context.Context, client *manager.Client, session *svc.Session, raw []byte) {
-	envelope, err := h.connectSvc.ParseEnvelope(raw)
+// 当前协议：WebSocket Binary 承载 connect.MessageEnvelope protobuf。
+// 其中 MSG_ACK 的 data 字段承载 MessageAck protobuf payload。
+func (h *WSHandler) handleMessage(ctx context.Context, client *manager.Client, session *svc.Session, messageType int, raw []byte) {
+	if messageType != websocket.BinaryMessage {
+		h.sendErrorFrame(ctx, client, consts.CodeConnectMessageFormatError)
+		return
+	}
+
+	envelope, err := h.connectSvc.ParseProtoEnvelope(raw)
 	if err != nil {
 		h.sendErrorFrame(ctx, client, consts.CodeConnectMessageFormatError)
 		return
 	}
 
-	switch envelope.Type {
-	case "heartbeat":
+	switch {
+	case envelope.Type == "heartbeat":
 		h.connectSvc.OnHeartbeat(ctx, session)
-		ack, marshalErr := h.connectSvc.MarshalEnvelope("heartbeat_ack", nil)
+		ack, marshalErr := h.connectSvc.MarshalProtoEnvelope("heartbeat_ack", nil, 0)
 		if marshalErr != nil {
-			logger.Warn(ctx, "心跳应答序列化失败",
-				logger.ErrorField("error", marshalErr),
-			)
+			logger.Warn(ctx, "心跳应答序列化失败", logger.ErrorField("error", marshalErr))
 			return
 		}
-		if !client.Enqueue(ack) {
+		if !client.EnqueueBinary(ack) {
 			client.Close()
 		}
-	case "message":
+	case envelope.Type == "message":
 		// TODO: 接入 msg 服务进行消息路由与持久化，并返回投递结果回执。
-		ack, marshalErr := h.connectSvc.MarshalEnvelope("message_ack", nil)
-		if marshalErr == nil && !client.Enqueue(ack) {
+		ack, marshalErr := h.connectSvc.MarshalProtoEnvelope("message_ack", nil, 0)
+		if marshalErr == nil && !client.EnqueueBinary(ack) {
 			client.Close()
 		}
+	case svc.IsMessageAckEnvelopeType(envelope.Type):
+		h.handleMessageAck(ctx, client, session, envelope.Data)
 	default:
 		h.sendErrorFrame(ctx, client, consts.CodeConnectMessageTypeNotSupport)
+	}
+}
+
+func (h *WSHandler) handleMessageAck(ctx context.Context, client *manager.Client, session *svc.Session, data []byte) {
+	ackData, err := h.connectSvc.ParseMessageAck(data)
+	if err != nil {
+		h.sendErrorFrame(ctx, client, consts.CodeConnectMessageFormatError)
+		return
+	}
+
+	maxDeliveredSeq := client.MaxDeliveredSeq(ackData.ConvID)
+	if ackData.Seq <= 0 || ackData.Seq > maxDeliveredSeq {
+		logger.Warn(ctx, "消息 ACK 超过当前连接已下发位点，拒绝写入",
+			logger.String("user_uuid", session.UserUUID),
+			logger.String("device_id", session.DeviceID),
+			logger.String("conv_id", ackData.ConvID),
+			logger.Int64("ack_seq", ackData.Seq),
+			logger.Int64("max_delivered_seq", maxDeliveredSeq),
+		)
+		h.sendErrorFrame(ctx, client, consts.CodeConnectMessageFormatError)
+		return
+	}
+
+	storedSeq, err := h.connectSvc.StoreMessageAck(ctx, session, ackData)
+	if err != nil {
+		logger.Warn(ctx, "消息 ACK 位点写入失败",
+			logger.String("user_uuid", session.UserUUID),
+			logger.String("device_id", session.DeviceID),
+			logger.String("conv_id", ackData.ConvID),
+			logger.Int64("seq", ackData.Seq),
+			logger.ErrorField("error", err),
+		)
+		h.sendErrorFrame(ctx, client, consts.CodeServiceUnavailable)
+		return
+	}
+
+	payload := h.connectSvc.MarshalMessageAckAck(svc.MessageAckResponseData{
+		ConvID: ackData.ConvID,
+		Seq:    storedSeq,
+	})
+	ack, err := h.connectSvc.MarshalProtoEnvelope(svc.EnvelopeTypeMessageAckAck, payload, storedSeq)
+	if err != nil {
+		logger.Warn(ctx, "消息 ACK 应答序列化失败", logger.ErrorField("error", err))
+		return
+	}
+	if !client.EnqueueBinary(ack) {
+		client.Close()
 	}
 }
 
 // sendErrorFrame 发送 ws 协议层错误帧。
 // 发送失败通常表示连接不可写，此时主动关闭连接避免资源泄漏。
 func (h *WSHandler) sendErrorFrame(ctx context.Context, client *manager.Client, code int) {
-	payload, err := h.connectSvc.MarshalEnvelope("error", svc.ErrorData{
-		Code:    code,
-		Message: consts.GetMessage(code),
-	})
+	payload := h.connectSvc.MarshalErrorFrame(code, consts.GetMessage(code))
+	frame, err := h.connectSvc.MarshalProtoEnvelope(svc.EnvelopeTypeError, payload, 0)
 	if err != nil {
 		logger.Warn(ctx, "错误帧序列化失败",
 			logger.Int("code", code),
@@ -201,7 +252,7 @@ func (h *WSHandler) sendErrorFrame(ctx context.Context, client *manager.Client, 
 		)
 		return
 	}
-	if !client.Enqueue(payload) {
+	if !client.EnqueueBinary(frame) {
 		client.Close()
 	}
 }

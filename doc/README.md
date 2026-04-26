@@ -45,3 +45,4 @@ doc/
 - [MinIO 使用方法](guides/minio使用方法.md)
 - [验证码邮件发送](guides/验证码邮件发送使用说明.md)
 - [监控集成说明](guides/监控集成说明.md)
+- [实际测试指南](guides/实际测试指南.md)

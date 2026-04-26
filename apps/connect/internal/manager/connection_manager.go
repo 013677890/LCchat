@@ -88,9 +88,10 @@ func (m *ConnectionManager) Register(client *Client) (replaced *Client) {
 
 // Unregister 注销一个连接。
 // 只有当 map 中当前连接与入参完全一致时才删除，防止并发替换时误删新连接。
-func (m *ConnectionManager) Unregister(client *Client) {
+// 返回 true 表示该连接确实从在线索引中移除；调用方可据此决定是否清理外部路由。
+func (m *ConnectionManager) Unregister(client *Client) bool {
 	if client == nil {
-		return
+		return false
 	}
 
 	userUUID := client.UserUUID()
@@ -105,16 +106,18 @@ func (m *ConnectionManager) Unregister(client *Client) {
 		// 防御并发替换：仅当指针一致时才删除，避免误删新连接。
 		if existed, ok := userConns[deviceID]; ok && existed == client {
 			delete(userConns, deviceID)
-		}
-		if len(userConns) == 0 {
-			delete(userBucket.byUser, userUUID)
+			if len(userConns) == 0 {
+				delete(userBucket.byUser, userUUID)
+			}
+			return true
 		}
 	}
+	return false
 }
 
 // SendToDevice 向指定用户的指定设备发送二进制业务帧。
 // 返回 false 表示目标连接不存在或写队列不可用。
-func (m *ConnectionManager) SendToDevice(userUUID, deviceID string, msg []byte) bool {
+func (m *ConnectionManager) SendToDevice(userUUID, deviceID string, msg []byte, delivery DeliveryMetadata) bool {
 	userBucket := m.userBucketFor(userUUID)
 
 	userBucket.mu.RLock()
@@ -126,12 +129,12 @@ func (m *ConnectionManager) SendToDevice(userUUID, deviceID string, msg []byte) 
 	if client == nil {
 		return false
 	}
-	return client.EnqueueBinary(msg)
+	return client.EnqueueBinaryWithDelivery(msg, delivery)
 }
 
 // SendToUser 向用户的所有在线设备广播二进制业务帧。
 // 返回成功入队的设备数量，可用于统计下行投递率。
-func (m *ConnectionManager) SendToUser(userUUID string, msg []byte) int {
+func (m *ConnectionManager) SendToUser(userUUID string, msg []byte, delivery DeliveryMetadata) int {
 	userBucket := m.userBucketFor(userUUID)
 
 	userBucket.mu.RLock()
@@ -148,7 +151,7 @@ func (m *ConnectionManager) SendToUser(userUUID string, msg []byte) int {
 
 	sent := 0
 	for _, client := range clients {
-		if client.EnqueueBinary(msg) {
+		if client.EnqueueBinaryWithDelivery(msg, delivery) {
 			sent++
 		}
 	}

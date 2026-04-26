@@ -53,9 +53,11 @@ in this project. It is intended for AI agents and new contributors.
 - `doc/`: product and API documentation
 
 #### 2.1 Where to Read First
-- `doc/API接口规范.md`: common API conventions
+- `doc/api/API接口规范.md`: common API conventions
 - `doc/user_doc/*`: per-module API docs (auth, user, friends, blacklist)
-- `doc/07-错误码.md`: full error code definitions
+- `doc/message_doc/*`: message service and message link docs
+- `doc/guides/实际测试指南.md`: practical testing guide for Docker Compose, HTTP, WebSocket, and message delivery checks
+- `doc/07-错误码.md` or current error-code docs: full error code definitions
 
 ### 3. Conventions & Patterns
 
@@ -404,6 +406,8 @@ in this project. It is intended for AI agents and new contributors.
 
 #### Documentation Hygiene
 - Update `doc/user_doc` when endpoints or paths change.
+- Update `doc/message_doc` when message APIs, message states, or delivery flows change.
+- Update `doc/guides/实际测试指南.md` when startup commands, ports, health checks, Redis keys, or end-to-end testing steps change.
 - Keep paths consistent with gateway routes.
 
 ### 5. Example: Adding a New Auth Endpoint
@@ -428,6 +432,16 @@ in this project. It is intended for AI agents and new contributors.
 4. Expose gateway handler/service + DTO conversions.
 5. Update docs and ensure route paths match.
 6. Run lints on edited files.
+7. Perform practical verification proportional to the change; use `doc/guides/实际测试指南.md` as the canonical runbook.
+
+#### 7.1 Practical Testing Workflow
+- Start with fast checks: `go build ./...` for compile/DI drift, then targeted `go test` packages for edited logic.
+- For handler, middleware, DTO, route, or gateway-service edits, run nearby gateway router/service tests and hit the real Gateway endpoint once.
+- For Redis, DB, Kafka, Wire, service startup, Connect, message-push, or message-link edits, run the Docker Compose integration path (`docker compose up -d --build`) and confirm services are healthy.
+- For auth/user flows, verify through Gateway with real HTTP requests; local smoke tests may inject verification codes into Redis key `user:verify_code:{email}:{type}` instead of relying on SMTP.
+- For P2P messaging, create two users, establish friendship first, then call `POST /api/v1/auth/messages/send` and verify `PullMessages` returns the new `msgId`.
+- For downlink delivery, keep the receiver connected to `ws://localhost:8081/ws?token=...&device_id=...`, verify `user:routing:{user_uuid}` in Redis, and inspect `message-push` / `connect` logs.
+- In final reports, do not write only “已测试”; include commands, response `code`, key `trace_id`/log observations, and any untested scope.
 
 ### 8. Service Decoupling Guidelines
 

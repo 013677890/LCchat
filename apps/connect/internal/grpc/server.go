@@ -4,10 +4,12 @@ import (
 	"context"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
 	"github.com/013677890/LCchat-Backend/apps/connect/pb"
+	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/grpc"
@@ -34,9 +36,9 @@ func NewServer(addr string, connManager *manager.ConnectionManager) *Server {
 	// 构建拦截器链：Recovery → Metadata → RateLimit → Metrics → Logging
 	// connect 的 RPS 阈值高于 user 服务（大量推送调用）。
 	rateLimitCfg := grpcx.RateLimitConfig{
-RequestsPerSecond: 5000,
-Burst:             8000,
-}
+		RequestsPerSecond: 5000,
+		Burst:             8000,
+	}
 	metrics := grpcx.NewMetrics(grpcx.MetricsConfig{Namespace: "connect"})
 
 	// 顺序保持与通用 grpcx.Start 一致，避免 connect 服务链路行为漂移。
@@ -95,7 +97,8 @@ func (s *Server) PushToDevice(ctx context.Context, req *pb.PushToDeviceRequest) 
 		logger.Warn(ctx, "向设备投递前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.PushToDeviceResponse{Delivered: false}, nil
 	}
-	delivered := s.connManager.SendToDevice(req.UserUuid, req.DeviceId, data)
+	delivery := deliveryMetadata(ctx, req.Message)
+	delivered := s.connManager.SendToDevice(req.UserUuid, req.DeviceId, data, delivery)
 	return &pb.PushToDeviceResponse{Delivered: delivered}, nil
 }
 
@@ -106,7 +109,8 @@ func (s *Server) PushToUser(ctx context.Context, req *pb.PushToUserRequest) (*pb
 		logger.Warn(ctx, "向用户广播前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.PushToUserResponse{DeliveredCount: 0}, nil
 	}
-	count := s.connManager.SendToUser(req.UserUuid, data)
+	delivery := deliveryMetadata(ctx, req.Message)
+	count := s.connManager.SendToUser(req.UserUuid, data, delivery)
 	return &pb.PushToUserResponse{DeliveredCount: int32(count)}, nil
 }
 
@@ -117,9 +121,10 @@ func (s *Server) BroadcastToUsers(ctx context.Context, req *pb.BroadcastToUsersR
 		logger.Warn(ctx, "批量广播前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.BroadcastToUsersResponse{}, nil
 	}
+	delivery := deliveryMetadata(ctx, req.Message)
 	var successCount, totalDelivered int32
 	for _, userUUID := range req.UserUuids {
-		count := s.connManager.SendToUser(userUUID, data)
+		count := s.connManager.SendToUser(userUUID, data, delivery)
 		if count > 0 {
 			successCount++
 			totalDelivered += int32(count)
@@ -133,6 +138,32 @@ func marshalEnvelope(message *pb.MessageEnvelope) ([]byte, error) {
 		return nil, nil
 	}
 	return proto.Marshal(message)
+}
+
+func deliveryMetadata(ctx context.Context, message *pb.MessageEnvelope) manager.DeliveryMetadata {
+	if message == nil || !message.GetAckRequired() || message.GetSeq() <= 0 {
+		return manager.DeliveryMetadata{}
+	}
+
+	metadata := manager.DeliveryMetadata{
+		Seq:         message.GetSeq(),
+		AckRequired: true,
+	}
+	if message.GetType() != "MSG_PUSH" {
+		return metadata
+	}
+
+	var item msgpb.MsgItem
+	if err := proto.Unmarshal(message.GetData(), &item); err != nil {
+		logger.Warn(ctx, "解析下行消息 ACK 水位失败",
+			logger.String("message_type", message.GetType()),
+			logger.Int64("seq", message.GetSeq()),
+			logger.ErrorField("error", err),
+		)
+		return metadata
+	}
+	metadata.ConvID = strings.TrimSpace(item.GetConvId())
+	return metadata
 }
 
 // KickConnection 主动断开指定设备连接。

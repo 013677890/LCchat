@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package connect;
+
+option go_package = "github.com/013677890/LCchat-Backend/apps/connect/pb";
+
+// MessageAck is the WebSocket binary/protobuf payload for type=MSG_ACK.
+// It is sent by a client after receiving a downlink MessageEnvelope with
+// ack_required=true.
+message MessageAck {
+  // conv_id: conversation ID of the acknowledged message stream.
+  string conv_id = 1;
+  // seq: max contiguous sequence processed by this device in conv_id.
+  int64 seq = 2;
+  // msg_id: optional message ID, used only for debugging/observability.
+  string msg_id = 3;
+}
+
+// MessageAckAck is the WebSocket binary/protobuf payload for type=MSG_ACK_ACK.
+message MessageAckAck {
+  // conv_id: conversation ID whose ACK was accepted.
+  string conv_id = 1;
+  // seq: stored max ACK sequence after monotonic merge.
+  int64 seq = 2;
+}
+
+// ErrorFrame is the WebSocket binary/protobuf payload for type=error.
+message ErrorFrame {
+  int32 code = 1;
+  string message = 2;
+}

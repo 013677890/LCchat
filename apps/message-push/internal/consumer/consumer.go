@@ -66,7 +66,7 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		return nil
 	}
 
-	// 第一阶段支持三类下行事件，共享统一下发链路。
+	// 第一阶段支持四类下行事件，共享统一下发链路。
 	switch event.Type {
 	case "MSG_PUSH", "MSG_RECALL", "MSG_MARK_READ", "MSG_READ_RECEIPT":
 		// 支持的事件类型继续处理。
@@ -89,50 +89,61 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 	}
 
 	var routes []route.DeviceRoute
-	switch event.ConvType {
-	case msgpb.ConvType_CONV_TYPE_P2P:
-		receiverRoutes, routeErr := h.routes.ListUserRoutes(ctx, event.ReceiverUuid)
-		if routeErr != nil {
-			result = "retriable_error"
-			metrics.RouteHitRate.WithLabelValues(event.Type, "error").Inc()
-			return fmt.Errorf("%w: 读取用户路由失败: %v", errRetriable, routeErr)
+	appendUserRoutes := func(userUUID, excludeDeviceID, logLabel string) error {
+		if userUUID == "" || h.routes == nil {
+			return nil
 		}
-		if len(receiverRoutes) == 0 {
+		userRoutes, routeErr := h.routes.ListUserRoutes(ctx, userUUID)
+		if routeErr != nil {
+			metrics.RouteHitRate.WithLabelValues(event.Type, "error").Inc()
+			return routeErr
+		}
+
+		appended := 0
+		for _, deviceRoute := range userRoutes {
+			if excludeDeviceID != "" && deviceRoute.DeviceID == excludeDeviceID {
+				continue
+			}
+			routes = append(routes, deviceRoute)
+			appended++
+		}
+		if appended == 0 {
 			metrics.RouteHitRate.WithLabelValues(event.Type, "miss").Inc()
-			logger.Warn(ctx, "message-push 未找到接收方在线路由，按离线处理",
-				logger.String("receiver_uuid", event.ReceiverUuid),
-			)
+			if logLabel != "" {
+				logger.Warn(ctx, logLabel,
+					logger.String("user_uuid", userUUID),
+					logger.String("exclude_device_id", excludeDeviceID),
+				)
+			}
 		} else {
 			metrics.RouteHitRate.WithLabelValues(event.Type, "hit").Inc()
-			routes = append(routes, receiverRoutes...)
 		}
-	case msgpb.ConvType_CONV_TYPE_GROUP:
+		return nil
+	}
+
+	appendGroupRoutes := func(groupUUID, excludeUserUUID string) error {
 		if h.groups == nil {
 			result = "permanent_error"
 			logger.Warn(ctx, "message-push 群组客户端未初始化，跳过群聊扩散",
-				logger.String("group_uuid", event.ReceiverUuid),
+				logger.String("group_uuid", groupUUID),
 			)
 			return nil
 		}
-		memberUUIDs, groupErr := h.groups.GetGroupMembers(ctx, event.ReceiverUuid)
+		memberUUIDs, groupErr := h.groups.GetGroupMembers(ctx, groupUUID)
 		if groupErr != nil {
 			result = "retriable_error"
 			return fmt.Errorf("%w: 获取群成员失败: %v", errRetriable, groupErr)
 		}
 		filteredMemberUUIDs := make([]string, 0, len(memberUUIDs))
 		for _, userUUID := range memberUUIDs {
-			if userUUID == "" {
-				continue
-			}
-			// 群聊广播不包含发送者本人；发送者多端同步由下面的 self-sync 统一处理。
-			if event.FromUuid != "" && userUUID == event.FromUuid {
+			if userUUID == "" || (excludeUserUUID != "" && userUUID == excludeUserUUID) {
 				continue
 			}
 			filteredMemberUUIDs = append(filteredMemberUUIDs, userUUID)
 		}
 		if len(filteredMemberUUIDs) == 0 {
 			logger.Warn(ctx, "message-push 未找到群成员，跳过群聊扩散",
-				logger.String("group_uuid", event.ReceiverUuid),
+				logger.String("group_uuid", groupUUID),
 			)
 			return nil
 		}
@@ -151,33 +162,47 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 			metrics.RouteHitRate.WithLabelValues(event.Type, "hit").Inc()
 			routes = append(routes, userRoutes...)
 		}
-	default:
-		result = "permanent_error"
-		metrics.EventTypeSkipped.WithLabelValues(event.Type, "unsupported_conv_type").Inc()
-		logger.Warn(ctx, "message-push 暂未处理该会话类型，先跳过",
-			logger.String("event_type", event.Type),
-			logger.Int("conv_type", int(event.ConvType)),
-		)
 		return nil
 	}
 
-	if event.FromUuid != "" {
-		fromRoutes, routeErr := h.routes.ListUserRoutes(ctx, event.FromUuid)
-		if routeErr != nil {
-			result = "retriable_error"
-			metrics.RouteHitRate.WithLabelValues(event.Type, "error").Inc()
-			return fmt.Errorf("%w: 读取发送方路由失败: %v", errRetriable, routeErr)
-		}
-		if len(fromRoutes) == 0 {
-			metrics.RouteHitRate.WithLabelValues(event.Type, "miss").Inc()
-		} else {
-			metrics.RouteHitRate.WithLabelValues(event.Type, "hit").Inc()
-			for _, deviceRoute := range fromRoutes {
-				if event.DeviceId != "" && deviceRoute.DeviceID == event.DeviceId {
-					continue
-				}
-				routes = append(routes, deviceRoute)
+	switch event.Type {
+	case "MSG_PUSH", "MSG_RECALL":
+		switch event.ConvType {
+		case msgpb.ConvType_CONV_TYPE_P2P:
+			if err := appendUserRoutes(event.ReceiverUuid, "", "message-push 未找到接收方在线路由，按离线处理"); err != nil {
+				result = "retriable_error"
+				return fmt.Errorf("%w: 读取用户路由失败: %v", errRetriable, err)
 			}
+		case msgpb.ConvType_CONV_TYPE_GROUP:
+			if err := appendGroupRoutes(event.ReceiverUuid, event.FromUuid); err != nil {
+				return err
+			}
+		default:
+			result = "permanent_error"
+			metrics.EventTypeSkipped.WithLabelValues(event.Type, "unsupported_conv_type").Inc()
+			logger.Warn(ctx, "message-push 暂未处理该会话类型，先跳过",
+				logger.String("event_type", event.Type),
+				logger.Int("conv_type", int(event.ConvType)),
+			)
+			return nil
+		}
+
+		// 发消息/撤回需要同步发送方其他设备，但不能把这条规则泛化到已读类事件。
+		if err := appendUserRoutes(event.FromUuid, event.DeviceId, ""); err != nil {
+			result = "retriable_error"
+			return fmt.Errorf("%w: 读取发送方路由失败: %v", errRetriable, err)
+		}
+	case "MSG_MARK_READ":
+		// 已读同步只投递给发起用户的其他设备；忽略 conv_type，避免群聊已读被误当作群扩散。
+		if err := appendUserRoutes(event.ReceiverUuid, event.DeviceId, ""); err != nil {
+			result = "retriable_error"
+			return fmt.Errorf("%w: 读取已读同步路由失败: %v", errRetriable, err)
+		}
+	case "MSG_READ_RECEIPT":
+		// 已读回执只通知对端，不回灌给已读发起人的其他设备。
+		if err := appendUserRoutes(event.ReceiverUuid, "", "message-push 未找到已读回执接收方在线路由，按离线处理"); err != nil {
+			result = "retriable_error"
+			return fmt.Errorf("%w: 读取已读回执路由失败: %v", errRetriable, err)
 		}
 	}
 
@@ -211,7 +236,7 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		Seq:         seq,
 		ServerTs:    event.ServerTs,
 		TraceId:     event.TraceId,
-		AckRequired: false,
+		AckRequired: ackRequiredForEvent(event.Type, seq),
 	}
 
 	var (
