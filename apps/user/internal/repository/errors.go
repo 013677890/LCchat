@@ -1,8 +1,8 @@
 package repository
 
 import (
-	"ChatServer/apps/user/mq"
-	"ChatServer/pkg/logger"
+	"github.com/013677890/LCchat-Backend/apps/user/mq"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"context"
 	"errors"
 	"fmt"
@@ -84,7 +84,7 @@ func WrapRedisError(err error) error {
 
 // 日志记录redis错误
 func LogRedisError(ctx context.Context, err error) {
-	logger.Error(ctx, "Redis 操作错误", logger.ErrorField("error", err))
+	logger.Warn(ctx, "Redis 操作错误，已降级处理", logger.ErrorField("error", err))
 }
 
 // LogAndRetryRedisError 日志记录redis错误并发送到kafka重试

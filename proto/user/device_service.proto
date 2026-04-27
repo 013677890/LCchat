@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package user;
 
-option go_package = "ChatServer/apps/user/pb";
+option go_package = "github.com/013677890/LCchat-Backend/apps/user/pb";
 
 // 导入通用数据模型
 import "proto/user/common.proto";

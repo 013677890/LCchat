@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"ChatServer/pkg/logger"
-
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
@@ -29,7 +30,8 @@ func DefaultLoggingConfig() LoggingConfig {
 }
 
 // LoggingUnaryInterceptor 记录每次 Unary 请求的 method、耗时、状态码。
-// 错误请求始终记 Warn；正常请求根据 SlowThreshold 决定 Info 或 Warn。
+// 错误请求按业务码区分：业务错误记 Info，服务端错误记 Error 并附带堆栈。
+// 正常请求根据 SlowThreshold 决定 Info 或 Warn。
 func LoggingUnaryInterceptor(cfgs ...LoggingConfig) grpc.UnaryServerInterceptor {
 	cfg := DefaultLoggingConfig()
 	if len(cfgs) > 0 {
@@ -42,7 +44,6 @@ func LoggingUnaryInterceptor(cfgs ...LoggingConfig) grpc.UnaryServerInterceptor 
 	}
 
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-		// 跳过忽略列表中的方法
 		if _, skip := ignoreSet[info.FullMethod]; skip {
 			return handler(ctx, req)
 		}
@@ -50,29 +51,37 @@ func LoggingUnaryInterceptor(cfgs ...LoggingConfig) grpc.UnaryServerInterceptor 
 		start := time.Now()
 		resp, err = handler(ctx, req)
 		cost := time.Since(start)
-		code := status.Code(err)
 
+		fields := []zap.Field{
+			logger.String("method", info.FullMethod),
+			logger.Duration("cost", cost),
+			logger.String("grpc_code", status.Code(err).String()),
+		}
 		if err != nil {
-			logger.Warn(ctx, "grpc unary request",
-				logger.String("method", info.FullMethod),
-				logger.Duration("cost", cost),
-				logger.String("code", code.String()),
-				logger.ErrorField("error", err),
+			appErr := apperr.WithStack(err)
+			code := apperr.Code(appErr)
+			fields = append(fields,
+				logger.Int("business_code", code),
+				logger.ErrorField("error", appErr),
 			)
-		} else if cfg.SlowThreshold > 0 && cost >= cfg.SlowThreshold {
-			logger.Warn(ctx, "grpc unary slow request",
-				logger.String("method", info.FullMethod),
-				logger.Duration("cost", cost),
-				logger.String("code", code.String()),
-			)
-		} else {
-			logger.Info(ctx, "grpc unary request",
-				logger.String("method", info.FullMethod),
-				logger.Duration("cost", cost),
-				logger.String("code", code.String()),
-			)
+			if code >= 30000 {
+				fields = append(fields,
+					logger.String("top_frame", apperr.TopFrame(appErr)),
+					logger.StackFrames("stack", apperr.Frames(appErr)),
+				)
+				logger.Error(ctx, "gRPC 请求完成", fields...)
+				apperr.MarkLogged(appErr)
+			} else {
+				logger.Info(ctx, "gRPC 请求完成", fields...)
+			}
+			return resp, appErr
 		}
 
-		return resp, err
+		if cfg.SlowThreshold > 0 && cost >= cfg.SlowThreshold {
+			logger.Warn(ctx, "gRPC 慢请求", fields...)
+		} else {
+			logger.Info(ctx, "gRPC 请求完成", fields...)
+		}
+		return resp, nil
 	}
 }

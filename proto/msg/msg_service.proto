@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package msg;
 
-option go_package = "ChatServer/apps/msg/pb";
+option go_package = "github.com/013677890/LCchat-Backend/apps/msg/pb";
 
 import "validate/validate.proto";
 import "proto/msg/msg_common.proto";
@@ -32,7 +32,7 @@ service MsgService {
   // ==================== 消息操作 ====================
 
   // RecallMessage 撤回一条消息。
-  // 限制：仅发送者或群管理员可撤回，且必须在发送后 2 分钟内。
+  // 权限：发送者本人可在 2 分钟内撤回；群管理员/群主可撤回群内任意成员消息（不受时间限制）。
   // 撤回后 status 置为 1，content 被改写为系统提示 JSON（含 operator），
   // 同时对所有在线终端推送撤回通知。
   rpc RecallMessage(RecallMessageRequest) returns (RecallMessageResponse);
@@ -46,12 +46,14 @@ service MsgService {
   rpc GetConversations(GetConversationsRequest) returns (GetConversationsResponse);
 
   // MarkRead 标记会话已读（基于已读位点 read_seq）。
-  // 多端同步：服务端更新 read_seq 后，会向该用户其他在线设备推送 MarkRead 通知，
+  // 多端同步：服务端更新 read_seq 后，会向该用户在线设备推送 MarkRead 通知，
   // 各端据此同步清除红点。
   rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
 
   // DeleteConversation 删除（关闭）会话。
-  // 逻辑删除：status 置为 1，不影响消息数据。
+  // 逻辑删除：status 置为 1，同时记录 clear_seq = 当前 max_seq。
+  // 后续 PullMessages 时增加 seq > clear_seq 过滤，防止被删除的消息"幽灵复活"。
+  // read_seq 同步设为 max_seq（未读数归零）。
   rpc DeleteConversation(DeleteConversationRequest) returns (DeleteConversationResponse);
 
   // UpdateConversationSettings 更新会话设置（免打扰/置顶）。
@@ -149,7 +151,7 @@ message RecallMessageRequest {
   // msg_id: 要撤回的消息 ID。
   string msg_id = 2 [(validate.rules).string.min_len = 1];
   // operator_uuid: 撤回操作者 UUID（从 JWT 中提取）。
-  // 可能是消息发送者本人，也可能是群管理员。
+  // 当前仅支持消息发送者本人。
   string operator_uuid = 3 [(validate.rules).string.min_len = 1];
 }
 
@@ -164,8 +166,8 @@ message GetConversationsRequest {
   int64 updated_since = 2;
   // page_size: 分页大小，默认 50，上限 200。
   int32 page_size = 3 [(validate.rules).int32 = {gte: 0, lte: 200}];
-  // cursor: 分页游标（上一页最后一条的 updated_at 值），首页传 0。
-  int64 cursor = 4;
+  // cursor: 分页游标（上一页最后一条的 updated_at_id 值），首页传 ""。
+  string cursor = 4;
 }
 
 message GetConversationsResponse {
@@ -174,7 +176,7 @@ message GetConversationsResponse {
   // has_more: 是否还有更多会话。
   bool has_more = 2;
   // next_cursor: 下一页游标。
-  int64 next_cursor = 3;
+  string next_cursor = 3;
 }
 
 // ==================== 会话操作 ====================
@@ -188,12 +190,14 @@ message MarkReadRequest {
   // 服务端逻辑：
   // 1. 更新该用户的 read_seq = max(DB.read_seq, req.read_seq)；
   // 2. 计算 unread_count = conv.max_seq - read_seq；
-  // 3. 推送 MarkRead 通知给该用户的其他在线设备，Payload 包含新的 read_seq。
+  // 3. 推送 MarkRead 通知给该用户在线设备，Payload 包含新的 read_seq。
   int64 read_seq = 3 [(validate.rules).int64.gt = 0];
 }
 
 message MarkReadResponse {
-  // unread_count: 标记后的剩余未读数（通常为 0）。
+  // unread_count: 标记后的剩余未读数。
+  // 由 max(0, conv.max_seq - read_seq) 动态计算，
+  // 若标记期间有并发新消息插入，此值可能大于 0。
   int32 unread_count = 1;
 }
 

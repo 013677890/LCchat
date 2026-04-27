@@ -1,9 +1,9 @@
 package repository
 
 import (
-	"ChatServer/consts/redisKey"
-	"ChatServer/pkg/async"
-	"ChatServer/model"
+	"github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/model"
 	"context"
 	"errors"
 	"time"

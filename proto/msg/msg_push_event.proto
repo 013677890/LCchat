@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package msg;
+
+option go_package = "github.com/013677890/LCchat-Backend/apps/msg/pb";
+
+import "proto/msg/msg_common.proto";
+
+// MsgPushEvent 为 msg-service 写入 Kafka 的消息推送事件。
+// Kafka Topic: msg.push
+// Kafka Key:   conv_id（保证同一会话的消息在同一 Partition 内有序消费）
+// Kafka Value: MsgPushEvent 序列化后的 bytes
+//
+// 消费者：Push-Job（独立 Kafka 消费者服务）
+// Push-Job 的职责：
+//   1. 从 Kafka 拉取 MsgPushEvent
+//   2. 根据 conv_type 判断扩散策略：
+//      - conv_type=1（单聊，写扩散）：receiver_uuid 为对端用户 UUID
+//      - conv_type=2（群聊，读扩散）：receiver_uuid 为群 UUID，
+//        查询 Redis 群成员列表拆分为多个 user_uuid
+//   3. 对每个目标 user_uuid，查 Redis 路由表 user:routing:{uuid}
+//      获取其所在 Connect 节点的 gRPC 地址
+//   4. 通过 gRPC 调用对应 Connect 节点的 PushToUser 接口投递消息
+//   5. 多端同步（Self-Sync）：向 from_uuid 下除 device_id 以外的在线设备投递一份
+//
+// 注意：msg-service 写完 Kafka 后立即返回 200 OK，绝不等待推送结果。
+// Kafka 是上行发送与下行推送之间的"防弹衣"，确保发消息永远丝滑。
+message MsgPushEvent {
+  // receiver_uuid: 单聊=对端用户 UUID；群聊=群 UUID。
+  string receiver_uuid = 1;
+  // device_id: 空=广播该用户所有在线设备；非空=仅推送指定设备。
+  // 对于多端同步场景，此字段用于排除发送方当前设备。
+  string device_id = 2;
+  // type: 消息类型，与 MessageEnvelope.type 保持一致。
+  // 取值："MSG_PUSH" | "MSG_RECALL" | "MSG_MARK_READ"
+  string type = 3;
+  // conv_type: 会话类型，Consumer 据此判断扩散策略。
+  ConvType conv_type = 4;
+  // data: 按 type 序列化的业务 proto bytes。
+  // type="MSG_PUSH"      → MsgItem
+  // type="MSG_RECALL"    → RecallNotice
+  // type="MSG_MARK_READ" → MarkReadNotice
+  bytes data = 5;
+  // trace_id: 链路追踪 ID。
+  string trace_id = 6;
+  // server_ts: 服务端时间戳（unix 毫秒）。
+  int64 server_ts = 7;
+  // from_uuid: 发送方 UUID。
+  // Push-Job 消费后用于多端同步：向 from_uuid 下除 device_id 以外的在线设备也投递一份，
+  // 实现发送方其他终端实时看到自己发出的消息。
+  string from_uuid = 8;
+  // seq: 透传到 MessageEnvelope.seq 的事件顺序键。
+  // MSG_PUSH 填 MsgItem.seq；MSG_RECALL / MSG_MARK_READ 填 0。
+  int64 seq = 9;
+}
+
+// RecallNotice 撤回通知。
+// 由 msg-service 在撤回成功后写入 Kafka，Push-Job 消费后封装为
+// MessageEnvelope{type="MSG_RECALL"} 推送到会话内所有在线设备。
+// 客户端收到后将对应消息气泡替换为"xxx 撤回了一条消息"。
+message RecallNotice {
+  // conv_id: 会话 ID。
+  string conv_id = 1;
+  // msg_id: 被撤回的消息 ID。
+  string msg_id = 2;
+  // operator: 撤回操作者 UUID（当前仅支持发送者本人）。
+  string operator = 3;
+  // recall_time: 撤回时间（unix 毫秒）。
+  int64 recall_time = 4;
+}
+
+// MarkReadNotice 已读同步通知（多端同步）。
+// 由 msg-service 在 MarkRead 成功后写入 Kafka，Push-Job 消费后封装为
+// MessageEnvelope{type="MSG_MARK_READ"} 推送到该用户在线设备。
+// 各端据此同步清除红点。
+message MarkReadNotice {
+  // conv_id: 会话 ID。
+  string conv_id = 1;
+  // read_seq: 已读到的最大 seq。
+  int64 read_seq = 2;
+}
+

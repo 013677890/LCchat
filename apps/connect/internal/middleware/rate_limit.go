@@ -1,10 +1,10 @@
 package middleware
 
 import (
-	"ChatServer/consts"
-	"ChatServer/pkg/ctxmeta"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/result"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 	"net/http"
 	"os"
 	"strconv"

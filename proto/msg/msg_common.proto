@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package msg;
 
-option go_package = "ChatServer/apps/msg/pb";
+option go_package = "github.com/013677890/LCchat-Backend/apps/msg/pb";
 
 // ==================== 通用数据模型 ====================
 
@@ -20,7 +20,7 @@ enum ConvType {
 //   当消息被撤回时，content 字段会被服务端改写为系统提示 JSON，格式示例：
 //   {"text": "张三撤回了一条消息", "operator": "uuid-xxx"}
 //   客户端应按 status 判断是否渲染为撤回样式，operator 字段标识撤回操作者
-//   （可能是发送者本人，也可能是群管理员）。
+//   （当前仅支持发送者本人）。
 message MsgItem {
   // msg_id: 全局唯一消息 ID（服务端生成，ULID/雪花）。
   string msg_id = 1;
@@ -46,6 +46,17 @@ message MsgItem {
   repeated string at_users = 11;
 }
 
+// LastMsgPreview 会话列表中的最后消息预览结构。
+message LastMsgPreview {
+  // msg_id: 最后一条消息 ID（用于跳转/定位）。
+  string msg_id = 1;
+  // preview_json: 预览 JSON 字符串（后端透传，不解析）。
+  // 结构约定：{"sender_uuid":"usr_xxx","preview":"消息预览"}
+  string preview_json = 2;
+  // send_time: 最后一条消息发送时间（unix 毫秒）。
+  int64 send_time = 3;
+}
+
 // ConversationItem 会话列表项，对应 model.Conversation 视图。
 message ConversationItem {
   // conv_id: 会话 ID。
@@ -54,8 +65,8 @@ message ConversationItem {
   ConvType conv_type = 2;
   // target_uuid: 单聊为对端 UUID，群聊为群 UUID。
   string target_uuid = 3;
-  // last_msg: 最后一条消息摘要（可能为空，如新会话）。
-  MsgItem last_msg = 4;
+  // last_msg: 最后一条消息预览（可能为空，如新会话）。
+  LastMsgPreview last_msg = 4;
   // unread_count: 未读消息数。
   int32 unread_count = 5;
   // mute: 是否免打扰。
@@ -64,9 +75,4 @@ message ConversationItem {
   bool pin = 7;
   // updated_at: 会话最后更新时间（unix 毫秒），用于增量同步排序。
   int64 updated_at = 8;
-  // last_msg_sender_name: 最后一条消息发送者昵称快照。
-  // 用于会话列表快速展示，不保证实时最新（用户改名后不会回刷历史快照）。
-  string last_msg_sender_name = 9;
-  // last_msg_sender_avatar: 最后一条消息发送者头像快照。
-  string last_msg_sender_avatar = 10;
 }

@@ -3,7 +3,7 @@ package grpcx
 import (
 	"context"
 
-	"ChatServer/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"

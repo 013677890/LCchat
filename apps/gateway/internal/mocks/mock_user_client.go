@@ -5,7 +5,7 @@
 package mocks
 
 import (
-	pb "ChatServer/apps/user/pb"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	context "context"
 	reflect "reflect"
 

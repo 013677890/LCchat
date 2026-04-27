@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"ChatServer/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"context"
 
 	"google.golang.org/grpc"

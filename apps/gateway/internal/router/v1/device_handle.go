@@ -1,13 +1,12 @@
 package v1
 
 import (
-	"ChatServer/apps/gateway/internal/dto"
-	"ChatServer/apps/gateway/internal/middleware"
-	"ChatServer/apps/gateway/internal/service"
-	"ChatServer/apps/gateway/internal/utils"
-	"ChatServer/consts"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/result"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,10 +39,7 @@ func (h *DeviceHandler) GetDeviceList(c *gin.Context) {
 			result.Fail(c, nil, utils.ExtractErrorCode(err))
 			return
 		}
-		logger.Error(ctx, "获取设备列表服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -73,10 +69,7 @@ func (h *DeviceHandler) KickDevice(c *gin.Context) {
 			result.Fail(c, nil, utils.ExtractErrorCode(err))
 			return
 		}
-		logger.Error(ctx, "踢出设备服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -106,10 +99,7 @@ func (h *DeviceHandler) GetOnlineStatus(c *gin.Context) {
 			result.Fail(c, nil, utils.ExtractErrorCode(err))
 			return
 		}
-		logger.Error(ctx, "获取在线状态服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -148,10 +138,7 @@ func (h *DeviceHandler) BatchGetOnlineStatus(c *gin.Context) {
 			result.Fail(c, nil, utils.ExtractErrorCode(err))
 			return
 		}
-		logger.Error(ctx, "批量获取在线状态服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 

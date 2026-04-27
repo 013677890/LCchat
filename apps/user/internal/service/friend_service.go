@@ -1,19 +1,17 @@
 package service
 
 import (
-	"ChatServer/apps/user/internal/repository"
-	pb "ChatServer/apps/user/pb"
-	"ChatServer/consts"
-	"ChatServer/model"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/util"
 	"context"
 	"errors"
-	"strconv"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
 // friendServiceImpl 好友关系服务实现
@@ -56,92 +54,52 @@ func (s *friendServiceImpl) SendFriendApply(ctx context.Context, req *pb.SendFri
 	// 1. 从context中获取当前用户UUID（申请人）
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 检查不能添加自己为好友
 	if currentUserUUID == req.TargetUuid {
-		logger.Warn(ctx, "不能添加自己为好友",
-			logger.String("user_uuid", currentUserUUID),
-		)
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeCannotAddSelf))
+		return nil, apperr.New(consts.CodeCannotAddSelf)
 	}
 
 	// 3. 检查是否已经是好友
 	isFriend, err := s.friendRepo.IsFriend(ctx, currentUserUUID, req.TargetUuid)
 	if err != nil {
-		logger.Error(ctx, "检查是否好友失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查是否好友失败")
 	}
 
 	if isFriend {
-		logger.Info(ctx, "已经是好友",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-		)
-		return nil, status.Error(codes.AlreadyExists, strconv.Itoa(consts.CodeAlreadyFriend))
+		return nil, apperr.New(consts.CodeAlreadyFriend)
 	}
 
 	// 4. 检查是否存在待处理的申请
 	exists, err := s.applyRepo.ExistsPendingRequest(ctx, currentUserUUID, req.TargetUuid)
 	if err != nil {
-		logger.Error(ctx, "检查待处理申请失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查待处理申请失败")
 	}
 
 	if exists {
-		logger.Info(ctx, "好友申请已发送",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-		)
-		return nil, status.Error(codes.AlreadyExists, strconv.Itoa(consts.CodeFriendRequestSent))
+		return nil, apperr.New(consts.CodeFriendRequestSent)
 	}
 
 	// 5. 检查对方是否已将你拉黑
 	isBlockedByTarget, err := s.blacklistRepo.IsBlocked(ctx, req.TargetUuid, currentUserUUID)
 	if err != nil {
-		logger.Error(ctx, "检查是否被拉黑失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查是否被拉黑失败")
 	}
 
 	if isBlockedByTarget {
-		logger.Info(ctx, "对方已将你拉黑",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-		)
-		return nil, status.Error(codes.FailedPrecondition, strconv.Itoa(consts.CodePeerBlacklistYou))
+		return nil, apperr.New(consts.CodePeerBlacklistYou)
 	}
 
 	// 6. 检查你是否已将对方拉黑
 	isBlocked, err := s.blacklistRepo.IsBlocked(ctx, currentUserUUID, req.TargetUuid)
 	if err != nil {
-		logger.Error(ctx, "检查拉黑状态失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查拉黑状态失败")
 	}
 
 	if isBlocked {
-		logger.Info(ctx, "你已将对方拉黑",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-		)
-		return nil, status.Error(codes.FailedPrecondition, strconv.Itoa(consts.CodeYouBlacklistPeer))
+		return nil, apperr.New(consts.CodeYouBlacklistPeer)
 	}
 
 	// 7. 创建好友申请记录
@@ -157,21 +115,8 @@ func (s *friendServiceImpl) SendFriendApply(ctx context.Context, req *pb.SendFri
 
 	createdApply, err := s.applyRepo.Create(ctx, apply)
 	if err != nil {
-		logger.Error(ctx, "创建好友申请失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("target_uuid", req.TargetUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建好友申请失败")
 	}
-
-	logger.Info(ctx, "发送好友申请成功",
-		logger.String("user_uuid", currentUserUUID),
-		logger.String("target_uuid", req.TargetUuid),
-		logger.Int64("apply_id", createdApply.Id),
-		logger.String("reason", req.Reason),
-		logger.String("source", req.Source),
-	)
 
 	// 8. 返回申请ID
 	return &pb.SendFriendApplyResponse{
@@ -184,8 +129,7 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 	// 从上下文获取当前用户
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 兜底分页参数（即使网关做了默认值，这里也防御性处理）
@@ -201,14 +145,7 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 	// 查询申请列表（status<0 表示全部状态）
 	applies, total, err := s.applyRepo.GetPendingList(ctx, currentUserUUID, int(req.Status), int(page), int(pageSize))
 	if err != nil {
-		logger.Error(ctx, "获取好友申请列表失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.Int32("status", req.Status),
-			logger.Int32("page", page),
-			logger.Int32("page_size", pageSize),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取好友申请列表失败")
 	}
 
 	if len(applies) == 0 {
@@ -291,8 +228,7 @@ func (s *friendServiceImpl) GetSentApplyList(ctx context.Context, req *pb.GetSen
 	// 从上下文获取当前用户（申请人）
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 兜底分页参数（即使网关做了默认值，这里也防御性处理）
@@ -308,14 +244,7 @@ func (s *friendServiceImpl) GetSentApplyList(ctx context.Context, req *pb.GetSen
 	// 查询发出的申请列表（status<0 表示全部状态）
 	applies, total, err := s.applyRepo.GetSentList(ctx, currentUserUUID, int(req.Status), int(page), int(pageSize))
 	if err != nil {
-		logger.Error(ctx, "获取发出的申请列表失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.Int32("status", req.Status),
-			logger.Int32("page", page),
-			logger.Int32("page_size", pageSize),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取发出的申请列表失败")
 	}
 
 	if len(applies) == 0 {
@@ -376,82 +305,42 @@ func (s *friendServiceImpl) HandleFriendApply(ctx context.Context, req *pb.Handl
 	// 1. 从context获取当前用户UUID（处理人）
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 根据applyId获取申请详情
 	apply, err := s.applyRepo.GetByID(ctx, req.ApplyId)
 	if err != nil {
-		logger.Warn(ctx, "获取好友申请失败",
-			logger.Int64("apply_id", req.ApplyId),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.NotFound, strconv.Itoa(consts.CodeApplyNotFoundOrHandle))
+		return apperr.New(consts.CodeApplyNotFoundOrHandle)
 	}
 	if apply == nil {
-		logger.Warn(ctx, "好友申请不存在",
-			logger.Int64("apply_id", req.ApplyId),
-		)
-		return status.Error(codes.NotFound, strconv.Itoa(consts.CodeApplyNotFoundOrHandle))
+		return apperr.New(consts.CodeApplyNotFoundOrHandle)
 	}
 
 	// 3. 验证当前用户是否有权限处理该申请
 	if apply.TargetUuid != currentUserUUID {
-		logger.Warn(ctx, "无权限处理该申请",
-			logger.Int64("apply_id", req.ApplyId),
-			logger.String("target_uuid", apply.TargetUuid),
-			logger.String("current_user", currentUserUUID),
-		)
-		return status.Error(codes.PermissionDenied, strconv.Itoa(consts.CodeNoPermission))
+		return apperr.New(consts.CodeNoPermission)
 	}
 
 	// 4. 处理申请
 	if req.Action == 1 {
 		// 同意：事务性更新申请状态 + 创建好友关系
-		alreadyProcessed, err := s.applyRepo.AcceptApplyAndCreateRelation(ctx, req.ApplyId, currentUserUUID, apply.ApplicantUuid, req.Remark)
+		_, err := s.applyRepo.AcceptApplyAndCreateRelation(ctx, req.ApplyId, currentUserUUID, apply.ApplicantUuid, req.Remark)
 		if err != nil {
-			logger.Error(ctx, "同意好友申请失败",
-				logger.Int64("apply_id", req.ApplyId),
-				logger.ErrorField("error", err),
-			)
-			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+			return apperr.Wrap(err, consts.CodeInternalError, "同意好友申请失败")
 		}
 
-		if alreadyProcessed {
-			logger.Info(ctx, "申请已被处理（幂等成功）",
-				logger.Int64("apply_id", req.ApplyId),
-			)
-		} else {
-			logger.Info(ctx, "同意好友申请，创建好友关系成功",
-				logger.String("user_uuid", currentUserUUID),
-				logger.String("friend_uuid", apply.ApplicantUuid),
-				logger.Int64("apply_id", req.ApplyId),
-			)
-		}
 	} else {
 		// 拒绝：只更新申请状态
 		err = s.applyRepo.UpdateStatus(ctx, req.ApplyId, int(req.Action), req.Remark)
 		if err != nil {
 			// ErrApplyNotFound 也是幂等成功
 			if err == repository.ErrApplyNotFound {
-				logger.Info(ctx, "申请已被处理（幂等成功）",
-					logger.Int64("apply_id", req.ApplyId),
-				)
 				return nil
 			}
-			logger.Error(ctx, "拒绝好友申请失败",
-				logger.Int64("apply_id", req.ApplyId),
-				logger.ErrorField("error", err),
-			)
-			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+			return apperr.Wrap(err, consts.CodeInternalError, "拒绝好友申请失败")
 		}
 
-		logger.Info(ctx, "拒绝好友申请",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("applicant_uuid", apply.ApplicantUuid),
-			logger.Int64("apply_id", req.ApplyId),
-		)
 	}
 
 	return nil
@@ -462,8 +351,7 @@ func (s *friendServiceImpl) GetUnreadApplyCount(ctx context.Context, req *pb.Get
 	// 1. 获取当前用户 UUID
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 只读 Redis 未读数量（不命中直接返回 0）
@@ -486,27 +374,17 @@ func (s *friendServiceImpl) MarkApplyAsRead(ctx context.Context, req *pb.MarkApp
 	// 1. 获取当前用户 UUID
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 标记已读（applyIds 为空则标记全部）
 	if len(req.ApplyIds) == 0 {
 		if _, err := s.applyRepo.MarkAllAsRead(ctx, currentUserUUID); err != nil {
-			logger.Error(ctx, "标记全部申请已读失败",
-				logger.String("user_uuid", currentUserUUID),
-				logger.ErrorField("error", err),
-			)
-			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+			return apperr.Wrap(err, consts.CodeInternalError, "标记全部申请已读失败")
 		}
 	} else {
 		if _, err := s.applyRepo.MarkAsRead(ctx, currentUserUUID, req.ApplyIds); err != nil {
-			logger.Error(ctx, "标记申请已读失败",
-				logger.String("user_uuid", currentUserUUID),
-				logger.Int("count", len(req.ApplyIds)),
-				logger.ErrorField("error", err),
-			)
-			return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+			return apperr.Wrap(err, consts.CodeInternalError, "标记申请已读失败")
 		}
 	}
 
@@ -526,8 +404,7 @@ func (s *friendServiceImpl) GetFriendList(ctx context.Context, req *pb.GetFriend
 	// 1. 从context中获取当前用户UUID
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 兜底分页参数（即使网关做了默认值，这里也防御性处理）
@@ -543,14 +420,7 @@ func (s *friendServiceImpl) GetFriendList(ctx context.Context, req *pb.GetFriend
 	// 3. 获取好友关系列表
 	relations, total, version, err := s.friendRepo.GetFriendList(ctx, currentUserUUID, req.GroupTag, int(page), int(pageSize))
 	if err != nil {
-		logger.Error(ctx, "获取好友列表失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("group_tag", req.GroupTag),
-			logger.Int32("page", page),
-			logger.Int32("page_size", pageSize),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取好友列表失败")
 	}
 
 	if len(relations) == 0 {
@@ -603,8 +473,7 @@ func (s *friendServiceImpl) SyncFriendList(ctx context.Context, req *pb.SyncFrie
 	// 1. 从context中获取当前用户UUID
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 兜底同步参数
@@ -623,13 +492,7 @@ func (s *friendServiceImpl) SyncFriendList(ctx context.Context, req *pb.SyncFrie
 	// 3. 查询增量变更（按时间升序）
 	relations, serverTime, hasMore, err := s.friendRepo.SyncFriendList(ctx, currentUserUUID, version, limit)
 	if err != nil {
-		logger.Error(ctx, "增量同步好友列表失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.Int("limit", limit),
-			logger.Int64("version", version),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "增量同步好友列表失败")
 	}
 
 	// 4. 无变更：直接返回（latestVersion 使用服务器时间回退一小段）
@@ -709,32 +572,21 @@ func (s *friendServiceImpl) DeleteFriend(ctx context.Context, req *pb.DeleteFrie
 	// 1. 从context中获取当前用户UUID
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 参数校验
 	if req == nil || req.UserUuid == "" {
-		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return apperr.New(consts.CodeParamError)
 	}
 
 	// 3. 删除好友关系（单向）
 	if err := s.friendRepo.DeleteFriendRelation(ctx, currentUserUUID, req.UserUuid); err != nil {
 		if errors.Is(err, repository.ErrRecordNotFound) {
-			return status.Error(codes.NotFound, strconv.Itoa(consts.CodeNotFriend))
+			return apperr.New(consts.CodeNotFriend)
 		}
-		logger.Error(ctx, "删除好友关系失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("peer_uuid", req.UserUuid),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "删除好友关系失败")
 	}
-
-	logger.Info(ctx, "删除好友成功",
-		logger.String("user_uuid", currentUserUUID),
-		logger.String("peer_uuid", req.UserUuid),
-	)
 
 	return nil
 }
@@ -744,32 +596,21 @@ func (s *friendServiceImpl) SetFriendRemark(ctx context.Context, req *pb.SetFrie
 	// 1. 从context中获取当前用户UUID
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 参数校验
 	if req == nil || req.UserUuid == "" {
-		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return apperr.New(consts.CodeParamError)
 	}
 
 	// 3. 设置好友备注
 	if err := s.friendRepo.SetFriendRemark(ctx, currentUserUUID, req.UserUuid, req.Remark); err != nil {
 		if errors.Is(err, repository.ErrRecordNotFound) {
-			return status.Error(codes.NotFound, strconv.Itoa(consts.CodeNotFriend))
+			return apperr.New(consts.CodeNotFriend)
 		}
-		logger.Error(ctx, "设置好友备注失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("peer_uuid", req.UserUuid),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "设置好友备注失败")
 	}
-
-	logger.Info(ctx, "设置好友备注成功",
-		logger.String("user_uuid", currentUserUUID),
-		logger.String("peer_uuid", req.UserUuid),
-	)
 
 	return nil
 }
@@ -779,51 +620,35 @@ func (s *friendServiceImpl) SetFriendTag(ctx context.Context, req *pb.SetFriendT
 	// 1. 从context中获取当前用户UUID
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 参数校验
 	if req == nil || req.UserUuid == "" {
-		return status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return apperr.New(consts.CodeParamError)
 	}
 
 	// 3. 设置好友标签
 	if err := s.friendRepo.SetFriendTag(ctx, currentUserUUID, req.UserUuid, req.GroupTag); err != nil {
 		if errors.Is(err, repository.ErrRecordNotFound) {
-			return status.Error(codes.NotFound, strconv.Itoa(consts.CodeNotFriend))
+			return apperr.New(consts.CodeNotFriend)
 		}
-		logger.Error(ctx, "设置好友标签失败",
-			logger.String("user_uuid", currentUserUUID),
-			logger.String("peer_uuid", req.UserUuid),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "设置好友标签失败")
 	}
-
-	logger.Info(ctx, "设置好友标签成功",
-		logger.String("user_uuid", currentUserUUID),
-		logger.String("peer_uuid", req.UserUuid),
-	)
 
 	return nil
 }
 
 // GetTagList 获取标签列表
 func (s *friendServiceImpl) GetTagList(ctx context.Context, req *pb.GetTagListRequest) (*pb.GetTagListResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "获取标签列表功能暂未实现")
+	return nil, apperr.NewWithMessage(consts.CodeMethodNotAllowed, "获取标签列表功能暂未实现")
 }
 
 // CheckIsFriend 判断是否好友
 func (s *friendServiceImpl) CheckIsFriend(ctx context.Context, req *pb.CheckIsFriendRequest) (*pb.CheckIsFriendResponse, error) {
 	isFriend, err := s.friendRepo.CheckIsFriendRelation(ctx, req.UserUuid, req.PeerUuid)
 	if err != nil {
-		logger.Error(ctx, "判断是否好友失败",
-			logger.String("user_uuid", req.UserUuid),
-			logger.String("peer_uuid", req.PeerUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "判断是否好友失败")
 	}
 	return &pb.CheckIsFriendResponse{
 		IsFriend: isFriend,
@@ -840,12 +665,7 @@ func (s *friendServiceImpl) BatchCheckIsFriend(ctx context.Context, req *pb.Batc
 
 	result, err := s.friendRepo.BatchCheckIsFriend(ctx, req.UserUuid, req.PeerUuids)
 	if err != nil {
-		logger.Error(ctx, "批量判断是否好友失败",
-			logger.String("user_uuid", req.UserUuid),
-			logger.Int("count", len(req.PeerUuids)),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "批量判断是否好友失败")
 	}
 
 	items := make([]*pb.FriendCheckItem, 0, len(req.PeerUuids))
@@ -867,17 +687,12 @@ func (s *friendServiceImpl) BatchCheckIsFriend(ctx context.Context, req *pb.Batc
 // GetRelationStatus 获取关系状态
 func (s *friendServiceImpl) GetRelationStatus(ctx context.Context, req *pb.GetRelationStatusRequest) (*pb.GetRelationStatusResponse, error) {
 	if req == nil || req.UserUuid == "" || req.PeerUuid == "" {
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return nil, apperr.New(consts.CodeParamError)
 	}
 
 	relation, err := s.friendRepo.GetRelationStatus(ctx, req.UserUuid, req.PeerUuid)
 	if err != nil {
-		logger.Error(ctx, "获取关系状态失败",
-			logger.String("user_uuid", req.UserUuid),
-			logger.String("peer_uuid", req.PeerUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取关系状态失败")
 	}
 
 	resp := &pb.GetRelationStatusResponse{

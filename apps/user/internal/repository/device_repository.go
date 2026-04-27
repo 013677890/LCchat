@@ -1,10 +1,10 @@
 package repository
 
 import (
-	"ChatServer/apps/user/mq"
-	"ChatServer/consts/redisKey"
-	"ChatServer/model"
-	pkgdeviceactive "ChatServer/pkg/deviceactive"
+	"github.com/013677890/LCchat-Backend/apps/user/mq"
+	"github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/model"
+	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"context"
 	"crypto/md5"
 	"encoding/hex"

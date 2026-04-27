@@ -1,7 +1,7 @@
 package dto
 
 import (
-	userpb "ChatServer/apps/user/pb"
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 )
 
 // ==================== 通用 DTO 定义 ====================

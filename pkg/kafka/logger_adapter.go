@@ -1,7 +1,7 @@
 package kafka
 
 import (
-	"ChatServer/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"context"
 
 	"go.uber.org/zap"

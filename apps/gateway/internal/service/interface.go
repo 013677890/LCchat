@@ -1,8 +1,9 @@
 package service
 
 import (
-	"ChatServer/apps/gateway/internal/dto"
 	"context"
+
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 )
 
 // AuthService 认证服务接口
@@ -164,4 +165,33 @@ type UserService interface {
 	BatchGetProfile(ctx context.Context, req *dto.BatchGetProfileRequest) (*dto.BatchGetProfileResponse, error)
 	// DeleteAccount 注销账号
 	DeleteAccount(ctx context.Context, req *dto.DeleteAccountRequest) (*dto.DeleteAccountResponse, error)
+}
+
+// MsgService 消息服务接口
+// 职责：
+//   - 调用下游消息服务进行消息和会话相关操作
+type MsgService interface {
+	// SendMessage 发送消息
+	SendMessage(ctx context.Context, req *dto.SendMessageRequest) (*dto.SendMessageResponse, error)
+
+	// PullMessages 拉取历史消息
+	PullMessages(ctx context.Context, req *dto.PullMessagesRequest) (*dto.PullMessagesResponse, error)
+
+	// GetMessagesByIds 批量获取指定消息
+	GetMessagesByIds(ctx context.Context, req *dto.GetMessagesByIdsRequest) (*dto.GetMessagesByIdsResponse, error)
+
+	// RecallMessage 撤回消息
+	RecallMessage(ctx context.Context, req *dto.RecallMessageRequest) error
+
+	// GetConversations 获取会话列表
+	GetConversations(ctx context.Context, req *dto.GetConversationsRequest) (*dto.GetConversationsResponse, error)
+
+	// MarkRead 标记会话已读
+	MarkRead(ctx context.Context, req *dto.MarkReadRequest) (*dto.MarkReadResponse, error)
+
+	// DeleteConversation 删除会话
+	DeleteConversation(ctx context.Context, req *dto.DeleteConversationRequest) error
+
+	// UpdateConversationSettings 更新会话设置
+	UpdateConversationSettings(ctx context.Context, req *dto.UpdateConvSettingsRequest) error
 }

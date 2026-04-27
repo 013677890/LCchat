@@ -1,14 +1,13 @@
 package v1
 
 import (
-	"ChatServer/apps/gateway/internal/dto"
-	"ChatServer/apps/gateway/internal/middleware"
-	"ChatServer/apps/gateway/internal/service"
-	"ChatServer/apps/gateway/internal/utils"
-	"ChatServer/consts"
-	"ChatServer/pkg/ctxmeta"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/result"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -56,8 +55,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// 2. 设备 ID 优先取 context，其次取 X-Device-ID；空值视为参数错误
 	deviceID := resolveDeviceID(c)
 	if deviceID == "" {
-		ctx := middleware.NewContextWithGin(c)
-		logger.Warn(ctx, "请求头中无设备ID")
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}
@@ -76,11 +73,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "登录服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -118,11 +111,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "注册服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -160,11 +149,7 @@ func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "发送验证码服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -193,8 +178,6 @@ func (h *AuthHandler) LoginByCode(c *gin.Context) {
 	// 2. 设备 ID 优先取 context，其次取 X-Device-ID；空值视为参数错误
 	deviceID := resolveDeviceID(c)
 	if deviceID == "" {
-		ctx := middleware.NewContextWithGin(c)
-		logger.Warn(ctx, "请求头中无设备ID")
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}
@@ -213,11 +196,7 @@ func (h *AuthHandler) LoginByCode(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "验证码登录服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -255,11 +234,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "登出服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -297,11 +272,7 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "重置密码服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -337,11 +308,6 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 	// 2. 若请求头提供了设备 ID，必须与 body 保持一致，避免身份来源混乱。
 	if headerDeviceID := strings.TrimSpace(c.GetHeader(ctxmeta.HeaderDeviceID)); headerDeviceID != "" && headerDeviceID != req.DeviceID {
-		ctx := middleware.NewContextWithGin(c)
-		logger.Warn(ctx, "刷新Token请求设备ID不一致",
-			logger.String("header_device_id", headerDeviceID),
-			logger.String("body_device_id", req.DeviceID),
-		)
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}
@@ -363,11 +329,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "刷新Token服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -405,11 +367,7 @@ func (h *AuthHandler) VerifyCode(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "校验验证码服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 

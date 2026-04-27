@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"ChatServer/config"
-	"ChatServer/pkg/logger"
+	"github.com/013677890/LCchat-Backend/config"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"

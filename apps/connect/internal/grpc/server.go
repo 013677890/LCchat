@@ -1,15 +1,17 @@
 package grpc
 
 import (
-	"ChatServer/apps/connect/internal/manager"
-	"ChatServer/apps/connect/pb"
-	"ChatServer/pkg/grpcx"
-	"ChatServer/pkg/logger"
 	"context"
 	"net"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
+	"github.com/013677890/LCchat-Backend/apps/connect/pb"
+	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/proto"
@@ -39,20 +41,21 @@ func NewServer(addr string, connManager *manager.ConnectionManager) *Server {
 	}
 	metrics := grpcx.NewMetrics(grpcx.MetricsConfig{Namespace: "connect"})
 
+	// 顺序保持与通用 grpcx.Start 一致，避免 connect 服务链路行为漂移。
 	unaryInters := []grpc.UnaryServerInterceptor{
 		grpcx.RecoveryUnaryInterceptor(),
 		grpcx.MetadataUnaryInterceptor(),
+		grpcx.ValidateUnaryInterceptor(),
 		grpcx.RateLimitUnaryInterceptor(rateLimitCfg),
 		metrics.UnaryInterceptor(),
+		grpcx.ErrorNormalizeUnaryInterceptor(),
 		grpcx.LoggingUnaryInterceptor(grpcx.LoggingConfig{
-			SlowThreshold: 200 * time.Millisecond, // 推送类 RPC 要求更低延迟
+			SlowThreshold: 200 * time.Millisecond,
 			IgnoreMethods: []string{"/grpc.health.v1.Health/Check"},
 		}),
 	}
 
-	grpcServer := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(unaryInters...),
-	)
+	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(unaryInters...))
 	pb.RegisterConnectServiceServer(grpcServer, s)
 
 	// 开发/调试阶段开启反射，方便 grpcurl 等工具调用。
@@ -79,95 +82,99 @@ func (s *Server) Stop() {
 	s.grpcServer.GracefulStop()
 }
 
-// ==================== RPC 实现 ====================
+// Addr 返回 gRPC 监听地址，便于启动日志复用。
+func (s *Server) Addr() string {
+	if s == nil {
+		return ""
+	}
+	return s.addr
+}
 
-// PushToDevice 向指定用户的指定设备投递消息。
+// PushToDevice 向指定设备投递消息。
 func (s *Server) PushToDevice(ctx context.Context, req *pb.PushToDeviceRequest) (*pb.PushToDeviceResponse, error) {
-	data, err := proto.Marshal(req.Message)
+	data, err := marshalEnvelope(req.Message)
 	if err != nil {
-		logger.Warn(ctx, "PushToDevice: 序列化 MessageEnvelope 失败",
-			logger.ErrorField("error", err),
-		)
+		logger.Warn(ctx, "向设备投递前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.PushToDeviceResponse{Delivered: false}, nil
 	}
-
-	delivered := s.connManager.SendToDevice(req.UserUuid, req.DeviceId, data)
+	delivery := deliveryMetadata(ctx, req.Message)
+	delivered := s.connManager.SendToDevice(req.UserUuid, req.DeviceId, data, delivery)
 	return &pb.PushToDeviceResponse{Delivered: delivered}, nil
 }
 
-// PushToUser 向用户所有在线设备广播。
+// PushToUser 向用户所有在线设备广播消息。
 func (s *Server) PushToUser(ctx context.Context, req *pb.PushToUserRequest) (*pb.PushToUserResponse, error) {
-	data, err := proto.Marshal(req.Message)
+	data, err := marshalEnvelope(req.Message)
 	if err != nil {
-		logger.Warn(ctx, "PushToUser: 序列化 MessageEnvelope 失败",
-			logger.ErrorField("error", err),
-		)
+		logger.Warn(ctx, "向用户广播前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.PushToUserResponse{DeliveredCount: 0}, nil
 	}
-
-	count := s.connManager.SendToUser(req.UserUuid, data)
+	delivery := deliveryMetadata(ctx, req.Message)
+	count := s.connManager.SendToUser(req.UserUuid, data, delivery)
 	return &pb.PushToUserResponse{DeliveredCount: int32(count)}, nil
 }
 
-// BroadcastToUsers 批量向多个用户广播相同的消息。
+// BroadcastToUsers 向多个用户广播相同消息。
 func (s *Server) BroadcastToUsers(ctx context.Context, req *pb.BroadcastToUsersRequest) (*pb.BroadcastToUsersResponse, error) {
-	data, err := proto.Marshal(req.Message)
+	data, err := marshalEnvelope(req.Message)
 	if err != nil {
-		logger.Warn(ctx, "BroadcastToUsers: 序列化 MessageEnvelope 失败",
-			logger.ErrorField("error", err),
-		)
+		logger.Warn(ctx, "批量广播前序列化消息失败", logger.ErrorField("error", err))
 		return &pb.BroadcastToUsersResponse{}, nil
 	}
-
+	delivery := deliveryMetadata(ctx, req.Message)
 	var successCount, totalDelivered int32
 	for _, userUUID := range req.UserUuids {
-		count := s.connManager.SendToUser(userUUID, data)
+		count := s.connManager.SendToUser(userUUID, data, delivery)
 		if count > 0 {
 			successCount++
 			totalDelivered += int32(count)
 		}
 	}
+	return &pb.BroadcastToUsersResponse{SuccessCount: successCount, TotalDelivered: totalDelivered}, nil
+}
 
-	return &pb.BroadcastToUsersResponse{
-		SuccessCount:   successCount,
-		TotalDelivered: totalDelivered,
-	}, nil
+func marshalEnvelope(message *pb.MessageEnvelope) ([]byte, error) {
+	if message == nil {
+		return nil, nil
+	}
+	return proto.Marshal(message)
+}
+
+func deliveryMetadata(ctx context.Context, message *pb.MessageEnvelope) manager.DeliveryMetadata {
+	if message == nil || !message.GetAckRequired() || message.GetSeq() <= 0 {
+		return manager.DeliveryMetadata{}
+	}
+
+	metadata := manager.DeliveryMetadata{
+		Seq:         message.GetSeq(),
+		AckRequired: true,
+	}
+	if message.GetType() != "MSG_PUSH" {
+		return metadata
+	}
+
+	var item msgpb.MsgItem
+	if err := proto.Unmarshal(message.GetData(), &item); err != nil {
+		logger.Warn(ctx, "解析下行消息 ACK 水位失败",
+			logger.String("message_type", message.GetType()),
+			logger.Int64("seq", message.GetSeq()),
+			logger.ErrorField("error", err),
+		)
+		return metadata
+	}
+	metadata.ConvID = strings.TrimSpace(item.GetConvId())
+	return metadata
 }
 
 // KickConnection 主动断开指定设备连接。
 func (s *Server) KickConnection(ctx context.Context, req *pb.KickConnectionRequest) (*pb.KickConnectionResponse, error) {
 	success := s.connManager.KickDevice(req.UserUuid, req.DeviceId)
-
 	if success {
-		logger.Info(ctx, "KickConnection: 连接已断开",
+		logger.Info(ctx, "主动断开连接成功",
 			logger.String("user_uuid", req.UserUuid),
 			logger.String("device_id", req.DeviceId),
 			logger.String("reason", req.Reason),
 		)
 	}
-
 	return &pb.KickConnectionResponse{Success: success}, nil
-}
-
-// GetOnlineStatus 获取单个用户的在线设备列表。
-func (s *Server) GetOnlineStatus(_ context.Context, req *pb.GetOnlineStatusRequest) (*pb.GetOnlineStatusResponse, error) {
-	devices := s.connManager.GetOnlineDevices(req.UserUuid)
-	return &pb.GetOnlineStatusResponse{
-		IsOnline:      len(devices) > 0,
-		OnlineDevices: devices,
-	}, nil
-}
-
-// BatchGetOnlineStatus 批量获取多个用户的在线状态。
-func (s *Server) BatchGetOnlineStatus(_ context.Context, req *pb.BatchGetOnlineStatusRequest) (*pb.BatchGetOnlineStatusResponse, error) {
-	items := make([]*pb.UserOnlineStatus, 0, len(req.UserUuids))
-	for _, userUUID := range req.UserUuids {
-		devices := s.connManager.GetOnlineDevices(userUUID)
-		items = append(items, &pb.UserOnlineStatus{
-			UserUuid:      userUUID,
-			IsOnline:      len(devices) > 0,
-			OnlineDevices: devices,
-		})
-	}
-	return &pb.BatchGetOnlineStatusResponse{Items: items}, nil
 }

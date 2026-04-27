@@ -1,24 +1,22 @@
 package service
 
 import (
-	"ChatServer/apps/user/internal/converter"
-	"ChatServer/apps/user/internal/repository"
-	"ChatServer/apps/user/internal/utils"
-	pb "ChatServer/apps/user/pb"
-	"ChatServer/consts"
-	"ChatServer/pkg/async"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/util"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/converter"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/utils"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"context"
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // userServiceImpl 用户信息服务实现
@@ -50,25 +48,17 @@ func (s *userServiceImpl) GetProfile(ctx context.Context, req *pb.GetProfileRequ
 	// 1. 从context中获取用户UUID
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 查询用户信息
 	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
 	if err != nil {
-		logger.Error(ctx, "查询用户信息失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
 	}
 
 	if userInfo == nil {
-		logger.Warn(ctx, "用户不存在",
-			logger.String("user_uuid", userUUID),
-		)
-		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+		return nil, apperr.New(consts.CodeUserNotFound)
 	}
 
 	// 3. 转换为Protobuf格式并返回
@@ -92,18 +82,11 @@ func (s *userServiceImpl) GetOtherProfile(ctx context.Context, req *pb.GetOtherP
 	// 1. 查询目标用户信息
 	targetUserInfo, err := s.userRepo.GetByUUID(ctx, req.UserUuid)
 	if err != nil {
-		logger.Error(ctx, "查询用户信息失败",
-			logger.String("target_user_uuid", req.UserUuid),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
 	}
 
 	if targetUserInfo == nil {
-		logger.Warn(ctx, "用户不存在",
-			logger.String("target_user_uuid", req.UserUuid),
-		)
-		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+		return nil, apperr.New(consts.CodeUserNotFound)
 	}
 
 	// 2. 返回用户信息（脱敏由Gateway层负责）
@@ -125,20 +108,13 @@ func (s *userServiceImpl) SearchUser(ctx context.Context, req *pb.SearchUserRequ
 	// 1. 从context中获取当前用户UUID
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 调用搜索用户
 	users, total, err := s.userRepo.SearchUser(ctx, req.Keyword, int(req.Page), int(req.PageSize))
 	if err != nil {
-		logger.Error(ctx, "搜索用户失败",
-			logger.String("keyword", req.Keyword),
-			logger.Int("page", int(req.Page)),
-			logger.Int("page_size", int(req.PageSize)),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "搜索用户失败")
 	}
 
 	if len(users) == 0 {
@@ -168,15 +144,6 @@ func (s *userServiceImpl) SearchUser(ctx context.Context, req *pb.SearchUserRequ
 
 	// 4. 计算总页数
 	totalPages := int32((total + int64(req.PageSize) - 1) / int64(req.PageSize))
-
-	logger.Info(ctx, "搜索用户成功",
-		logger.String("keyword", req.Keyword),
-		logger.String("user_uuid", currentUserUUID),
-		logger.Int("page", int(req.Page)),
-		logger.Int("page_size", int(req.PageSize)),
-		logger.Int64("total", total),
-		logger.Int("found", len(users)),
-	)
 
 	// 5. 返回搜索结果
 	return &pb.SearchUserResponse{
@@ -208,14 +175,12 @@ func (s *userServiceImpl) UpdateProfile(ctx context.Context, req *pb.UpdateProfi
 	// 1. 从context中获取用户UUID
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 验证请求参数（至少提供一个字段）
 	if req.Nickname == "" && req.Birthday == "" && req.Signature == "" && req.Gender == 0 {
-		logger.Warn(ctx, "更新基本信息请求参数为空")
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return nil, apperr.New(consts.CodeParamError)
 	}
 
 	// 2.1 如果提供了生日，验证生日格式
@@ -223,48 +188,30 @@ func (s *userServiceImpl) UpdateProfile(ctx context.Context, req *pb.UpdateProfi
 		// 验证生日格式 (YYYY-MM-DD)
 		birthdayPattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 		if !birthdayPattern.MatchString(req.Birthday) {
-			logger.Warn(ctx, "生日格式错误",
-				logger.String("birthday", req.Birthday),
-			)
-			return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeBirthdayFormatError))
+			return nil, apperr.New(consts.CodeBirthdayFormatError)
 		}
 
 		// 验证生日是否是有效日期
 		_, err := time.Parse("2006-01-02", req.Birthday)
 		if err != nil {
-			logger.Warn(ctx, "生日日期无效",
-				logger.String("birthday", req.Birthday),
-				logger.ErrorField("error", err),
-			)
-			return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeBirthdayFormatError))
+			return nil, apperr.New(consts.CodeBirthdayFormatError)
 		}
 	}
 
 	// 3. 更新基本信息
 	err := s.userRepo.UpdateBasicInfo(ctx, userUUID, req.Nickname, req.Signature, req.Birthday, int8(req.Gender))
 	if err != nil {
-		logger.Error(ctx, "更新基本信息失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新基本信息失败")
 	}
 
 	// 4. 查询更新后的用户信息
 	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
 	if err != nil {
-		logger.Error(ctx, "查询更新后的用户信息失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询更新后的用户信息失败")
 	}
 
 	if userInfo == nil {
-		logger.Warn(ctx, "用户不存在",
-			logger.String("user_uuid", userUUID),
-		)
-		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+		return nil, apperr.New(consts.CodeUserNotFound)
 	}
 
 	// 5. 转换为Protobuf格式并返回
@@ -288,33 +235,19 @@ func (s *userServiceImpl) UploadAvatar(ctx context.Context, req *pb.UploadAvatar
 	// 1. 从context中获取用户UUID
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 验证头像URL不为空
 	if req.AvatarUrl == "" {
-		logger.Warn(ctx, "头像URL为空",
-			logger.String("user_uuid", userUUID),
-		)
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return nil, apperr.New(consts.CodeParamError)
 	}
 
 	// 3. 更新数据库中的头像字段
 	err := s.userRepo.UpdateAvatar(ctx, userUUID, req.AvatarUrl)
 	if err != nil {
-		logger.Error(ctx, "更新头像失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("avatar_url", req.AvatarUrl),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新头像失败")
 	}
-
-	logger.Info(ctx, "更新头像成功",
-		logger.String("user_uuid", userUUID),
-		logger.String("avatar_url", req.AvatarUrl),
-	)
 
 	// 4. 返回新的头像URL
 	return &pb.UploadAvatarResponse{
@@ -341,74 +274,48 @@ func (s *userServiceImpl) ChangePassword(ctx context.Context, req *pb.ChangePass
 	// 1. 从context中获取用户UUID
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 查询用户信息
 	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
 	if err != nil {
-		logger.Error(ctx, "查询用户信息失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
 	}
 
 	if userInfo == nil {
-		logger.Warn(ctx, "用户不存在",
-			logger.String("user_uuid", userUUID),
-		)
-		return status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+		return apperr.New(consts.CodeUserNotFound)
 	}
 
 	// 3. 校验旧密码是否正确
 	err = bcrypt.CompareHashAndPassword([]byte(userInfo.Password), []byte(req.OldPassword))
 	if err != nil {
-		logger.Warn(ctx, "旧密码错误",
-			logger.String("user_uuid", userUUID),
-		)
-		return status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodePasswordError))
+		return apperr.New(consts.CodePasswordError)
 	}
 
 	// 4. 校验新密码是否与旧密码相同
 	err = bcrypt.CompareHashAndPassword([]byte(userInfo.Password), []byte(req.NewPassword))
 	if err == nil {
 		// 密码相同
-		logger.Warn(ctx, "新密码不能与旧密码相同",
-			logger.String("user_uuid", userUUID),
-		)
-		return status.Error(codes.FailedPrecondition, strconv.Itoa(consts.CodePasswordSameAsOld))
+		return apperr.New(consts.CodePasswordSameAsOld)
 	}
 
 	// 5. 生成新密码哈希
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
-		logger.Error(ctx, "生成密码哈希失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "生成密码哈希失败")
 	}
 
 	// 6. 更新密码
 	err = s.userRepo.UpdatePassword(ctx, userUUID, string(hashedPassword))
 	if err != nil {
-		logger.Error(ctx, "更新密码失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return apperr.Wrap(err, consts.CodeInternalError, "更新密码失败")
 	}
 
 	// 7. 踢出其他所有设备的登录态（删除所有设备的token）
 	// 注意：当前设备保持登录态，其他设备被踢出
 	// 这里需要在repository中实现踢出其他设备的方法，暂时跳过
 	// TODO: 实现踢出其他设备登录态
-
-	logger.Info(ctx, "密码修改成功",
-		logger.String("user_uuid", userUUID),
-	)
 
 	return nil
 }
@@ -430,30 +337,19 @@ func (s *userServiceImpl) ChangeEmail(ctx context.Context, req *pb.ChangeEmailRe
 	// 1. 从context中获取用户UUID
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
-	// 记录换绑邮箱请求（新旧邮箱脱敏）
-	logger.Info(ctx, "用户换绑邮箱请求",
-		logger.String("user_uuid", userUUID),
-		logger.String("new_email", utils.MaskEmail(req.NewEmail)),
-	)
+	// 访问日志已经由统一拦截器记录，这里不重复记录换绑邮箱入口日志。
+	// 保留下方业务校验、错误处理和成功结果日志即可。
 
 	// 2. 检查新邮箱是否已被使用
 	exists, err := s.userRepo.ExistsByEmail(ctx, req.NewEmail)
 	if err != nil {
-		logger.Error(ctx, "检查邮箱是否存在失败",
-			logger.String("email", utils.MaskEmail(req.NewEmail)),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查邮箱是否存在失败")
 	}
 	if exists {
-		logger.Warn(ctx, "邮箱已被使用",
-			logger.String("email", utils.MaskEmail(req.NewEmail)),
-		)
-		return nil, status.Error(codes.AlreadyExists, strconv.Itoa(consts.CodeEmailAlreadyExist))
+		return nil, apperr.New(consts.CodeEmailAlreadyExist)
 	}
 
 	// 3. 校验验证码（type=4: 换绑邮箱）
@@ -461,50 +357,27 @@ func (s *userServiceImpl) ChangeEmail(ctx context.Context, req *pb.ChangeEmailRe
 	if err != nil {
 		// 判断是 Redis Key 不存在还是其他错误
 		if errors.Is(err, repository.ErrRedisNil) {
-			logger.Warn(ctx, "验证码已过期",
-				logger.String("email", utils.MaskEmail(req.NewEmail)),
-			)
-			return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeExpire))
+			return nil, apperr.New(consts.CodeVerifyCodeExpire)
 		}
-		logger.Error(ctx, "校验验证码失败",
-			logger.String("email", utils.MaskEmail(req.NewEmail)),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
 	}
 	if !isValid {
-		logger.Warn(ctx, "验证码错误",
-			logger.String("email", utils.MaskEmail(req.NewEmail)),
-		)
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeVerifyCodeError))
+		return nil, apperr.New(consts.CodeVerifyCodeError)
 	}
 
 	// 4. 查询用户当前信息，获取旧邮箱用于日志记录
 	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
 	if err != nil {
-		logger.Error(ctx, "查询用户信息失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
 	}
 	if userInfo == nil {
-		logger.Warn(ctx, "用户不存在",
-			logger.String("user_uuid", userUUID),
-		)
-		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+		return nil, apperr.New(consts.CodeUserNotFound)
 	}
 
 	// 5. 更新邮箱
 	err = s.userRepo.UpdateEmail(ctx, userUUID, req.NewEmail)
 	if err != nil {
-		logger.Error(ctx, "更新邮箱失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("old_email", utils.MaskEmail(userInfo.Email)),
-			logger.String("new_email", utils.MaskEmail(req.NewEmail)),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新邮箱失败")
 	}
 
 	// 6. 删除验证码（type=4: 换绑邮箱）
@@ -517,12 +390,6 @@ func (s *userServiceImpl) ChangeEmail(ctx context.Context, req *pb.ChangeEmailRe
 	}
 
 	// 7. 换绑成功
-	logger.Info(ctx, "邮箱更换成功",
-		logger.String("user_uuid", userUUID),
-		logger.String("old_email", utils.MaskEmail(userInfo.Email)),
-		logger.String("new_email", utils.MaskEmail(req.NewEmail)),
-	)
-
 	return &pb.ChangeEmailResponse{
 		Email: req.NewEmail,
 	}, nil
@@ -530,7 +397,7 @@ func (s *userServiceImpl) ChangeEmail(ctx context.Context, req *pb.ChangeEmailRe
 
 // ChangeTelephone 绑定/换绑手机
 func (s *userServiceImpl) ChangeTelephone(ctx context.Context, req *pb.ChangeTelephoneRequest) (*pb.ChangeTelephoneResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "绑定/换绑手机功能暂未实现")
+	return nil, apperr.NewWithMessage(consts.CodeInternalError, "绑定/换绑手机功能暂未实现")
 }
 
 // GetQRCode 获取用户二维码
@@ -549,28 +416,19 @@ func (s *userServiceImpl) GetQRCode(ctx context.Context, req *pb.GetQRCodeReques
 	// 1. 从context中获取用户UUID
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 如果已有二维码 token，则直接返回
 	token, expireTime, err := s.userRepo.GetQRCodeTokenByUserUUID(ctx, userUUID)
 	if err == nil {
-		logger.Info(ctx, "用户已有二维码 token",
-			logger.String("user_uuid", userUUID),
-			logger.String("qrcode_url", fmt.Sprintf("https://www.LCchat.top/q/%s", token)),
-		)
 		return &pb.GetQRCodeResponse{
 			Qrcode:   fmt.Sprintf("https://www.LCchat.top/q/%s", token),
 			ExpireAt: expireTime.Format(time.RFC3339),
 		}, nil
 	} else if errors.Is(err, repository.ErrRedisNil) {
 	} else {
-		logger.Error(ctx, "获取用户二维码 token失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取用户二维码 token失败")
 	}
 
 	// 3. 使用雪花算法生成唯一的二维码 token
@@ -579,12 +437,7 @@ func (s *userServiceImpl) GetQRCode(ctx context.Context, req *pb.GetQRCodeReques
 	// 3. 在 Redis 中保存 token -> userUUID 和 userUUID -> token 的映射关系
 	err = s.userRepo.SaveQRCode(ctx, userUUID, token)
 	if err != nil {
-		logger.Error(ctx, "保存二维码到Redis失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("token", token),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "保存二维码到Redis失败")
 	}
 
 	// 4. 构造二维码 URL
@@ -592,12 +445,6 @@ func (s *userServiceImpl) GetQRCode(ctx context.Context, req *pb.GetQRCodeReques
 
 	// 5. 计算过期时间（当前时间 + 48小时）
 	expireAt := time.Now().Add(48 * time.Hour).Format(time.RFC3339)
-
-	logger.Info(ctx, "生成用户二维码成功",
-		logger.String("user_uuid", userUUID),
-		logger.String("token", token),
-		logger.String("qrcode_url", qrcodeURL),
-	)
 
 	// 6. 返回二维码 URL 和过期时间
 	return &pb.GetQRCodeResponse{
@@ -623,45 +470,29 @@ func (s *userServiceImpl) DeleteAccount(ctx context.Context, req *pb.DeleteAccou
 	// 1. 从context中获取用户UUID
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
 	// 2. 查询用户信息
 	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
 	if err != nil {
-		logger.Error(ctx, "查询用户信息失败",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
 	}
 
 	if userInfo == nil {
-		logger.Warn(ctx, "用户不存在",
-			logger.String("user_uuid", userUUID),
-		)
-		return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeUserNotFound))
+		return nil, apperr.New(consts.CodeUserNotFound)
 	}
 
 	// 3. 校验密码是否正确
 	err = bcrypt.CompareHashAndPassword([]byte(userInfo.Password), []byte(req.Password))
 	if err != nil {
-		logger.Warn(ctx, "密码错误",
-			logger.String("user_uuid", userUUID),
-		)
-		return nil, status.Error(codes.Unauthenticated, strconv.Itoa(consts.CodePasswordError))
+		return nil, apperr.New(consts.CodePasswordError)
 	}
 
 	// 4. 软删除用户（设置 deleted_at 时间戳）
 	err = s.userRepo.Delete(ctx, userUUID)
 	if err != nil {
-		logger.Error(ctx, "注销账号失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("reason", req.Reason),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "注销账号失败")
 	}
 
 	// 5. 异步清理用户所有设备的 Redis 会话（不阻塞返回）
@@ -671,23 +502,12 @@ func (s *userServiceImpl) DeleteAccount(ctx context.Context, req *pb.DeleteAccou
 				logger.String("user_uuid", userUUID),
 				logger.ErrorField("error", err),
 			)
-		} else {
-			logger.Info(asyncCtx, "用户 Redis 会话清理完成",
-				logger.String("user_uuid", userUUID),
-			)
 		}
 	}, 5*time.Second)
 
 	// 6. 计算恢复截止时间（30天后）
 	deleteAt := time.Now()
 	recoverDeadline := deleteAt.Add(30 * 24 * time.Hour)
-
-	logger.Info(ctx, "账号注销成功",
-		logger.String("user_uuid", userUUID),
-		logger.String("reason", req.Reason),
-		logger.String("delete_at", deleteAt.Format(time.RFC3339)),
-		logger.String("recover_deadline", recoverDeadline.Format(time.RFC3339)),
-	)
 
 	// 7. 返回注销时间和恢复截止时间
 	return &pb.DeleteAccountResponse{
@@ -709,27 +529,19 @@ func (s *userServiceImpl) DeleteAccount(ctx context.Context, req *pb.DeleteAccou
 func (s *userServiceImpl) BatchGetProfile(ctx context.Context, req *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error) {
 	// 1. 验证请求参数
 	if len(req.UserUuids) == 0 {
-		logger.Warn(ctx, "批量获取用户信息请求为空")
 		return &pb.BatchGetProfileResponse{
 			Users: []*pb.SimpleUserInfo{},
 		}, nil
 	}
 
 	if len(req.UserUuids) > 100 {
-		logger.Warn(ctx, "批量获取用户信息超过最大限制",
-			logger.Int("count", len(req.UserUuids)),
-		)
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeParamError))
+		return nil, apperr.New(consts.CodeParamError)
 	}
 
 	// 2. 批量查询用户信息
 	users, err := s.userRepo.BatchGetByUUIDs(ctx, req.UserUuids)
 	if err != nil {
-		logger.Error(ctx, "批量查询用户信息失败",
-			logger.Int("count", len(req.UserUuids)),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "批量查询用户信息失败")
 	}
 
 	// 3. 转换为SimpleUserInfo格式
@@ -743,11 +555,6 @@ func (s *userServiceImpl) BatchGetProfile(ctx context.Context, req *pb.BatchGetP
 			Signature: user.Signature,
 		})
 	}
-
-	logger.Info(ctx, "批量获取用户信息成功",
-		logger.Int("requested", len(req.UserUuids)),
-		logger.Int("found", len(simpleUsers)),
-	)
 
 	return &pb.BatchGetProfileResponse{
 		Users: simpleUsers,
@@ -768,8 +575,7 @@ func (s *userServiceImpl) BatchGetProfile(ctx context.Context, req *pb.BatchGetP
 func (s *userServiceImpl) ParseQRCode(ctx context.Context, req *pb.ParseQRCodeRequest) (*pb.ParseQRCodeResponse, error) {
 	// 1. 验证 token 是否为空
 	if req.Token == "" {
-		logger.Warn(ctx, "二维码 token 为空")
-		return nil, status.Error(codes.InvalidArgument, strconv.Itoa(consts.CodeQRCodeFormatError))
+		return nil, apperr.New(consts.CodeQRCodeFormatError)
 	}
 
 	// 2. 从 Redis 中根据 token 获取用户 UUID
@@ -777,21 +583,10 @@ func (s *userServiceImpl) ParseQRCode(ctx context.Context, req *pb.ParseQRCodeRe
 	if err != nil {
 		if errors.Is(err, repository.ErrRedisNil) {
 			// Redis 中不存在该 token，说明二维码已过期或无效
-			logger.Warn(ctx, "二维码已过期",
-				logger.String("token", req.Token),
-			)
-			return nil, status.Error(codes.NotFound, strconv.Itoa(consts.CodeQRCodeExpired))
+			return nil, apperr.New(consts.CodeQRCodeExpired)
 		}
-		logger.Error(ctx, "从 Redis 获取二维码 token 失败",
-			logger.String("token", req.Token),
-			logger.ErrorField("error", err),
-		)
-		return nil, status.Error(codes.Internal, strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "从 Redis 获取二维码 token 失败")
 	}
-
-	logger.Info(ctx, "解析二维码成功",
-		logger.String("user_uuid", userUUID),
-	)
 
 	// 4. 返回用户 UUID
 	return &pb.ParseQRCodeResponse{

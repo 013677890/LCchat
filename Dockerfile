@@ -1,5 +1,5 @@
-# 使用稳定的 Go 1.25 版本
-FROM golang:1.25
+# 使用更轻的 Go 1.25 Alpine 镜像
+FROM golang:1.25-alpine
 
 WORKDIR /app
 

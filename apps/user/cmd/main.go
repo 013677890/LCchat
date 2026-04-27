@@ -2,281 +2,45 @@ package main
 
 import (
 	"context"
-	"log"
-	"net/http"
+	"errors"
+	"fmt"
 	"os"
-	"strconv"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"ChatServer/apps/user/internal/handler"
-	"ChatServer/apps/user/internal/repository"
-	"ChatServer/apps/user/internal/service"
-	"ChatServer/apps/user/mq"
-	userpb "ChatServer/apps/user/pb"
-	"ChatServer/config"
-	"ChatServer/pkg/async"
-	"ChatServer/pkg/ctxmeta"
-	pkgdeviceactive "ChatServer/pkg/deviceactive"
-	"ChatServer/pkg/grpcx"
-	"ChatServer/pkg/kafka"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/mysql"
-	pkgredis "ChatServer/pkg/redis"
-	"ChatServer/pkg/util"
-
-	"google.golang.org/grpc"
-	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
+// main 只保留进程级职责：构造 App、监听退出信号、协调 Run/Shutdown。
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// 1. 初始化日志
-	logCfg := config.DefaultLoggerConfig()
-	zl, err := logger.Build(logCfg)
+	app, err := initializeUserApp()
 	if err != nil {
-		log.Fatalf("初始化日志失败: %v", err)
-	}
-	logger.ReplaceGlobal(zl)
-	defer zl.Sync()
-
-	// 1.2 初始化验证码邮件配置（授权码仅从环境变量读取，避免硬编码密钥）
-	initVerifyEmailConfig(ctx)
-
-	// 1.5 初始化 Async 协程池
-	async.SetContextPropagator(func(parent context.Context) context.Context {
-		return ctxmeta.CopyKnownFromParent(parent)
-	})
-
-	asyncCfg := config.DefaultAsyncConfig()
-	if err := async.Init(asyncCfg); err != nil {
-		log.Fatalf("初始化 Async 协程池失败: %v", err)
-	}
-	defer func() {
-		if err := async.Release(); err != nil {
-			logger.Error(ctx, "释放 Async 协程池失败", logger.ErrorField("error", err))
-		}
-	}()
-	logger.Info(ctx, "Async 协程池初始化完成", logger.Int("pool_size", asyncCfg.PoolSize))
-
-	// 2. 初始化MySQL
-	dbCfg := config.DefaultMySQLConfig()
-	db, err := mysql.Build(dbCfg)
-	if err != nil {
-		log.Fatalf("初始化MySQL失败: %v", err)
-	}
-	mysql.ReplaceGlobal(db)
-
-	// 3. 初始化Redis
-	redisCfg := config.DefaultRedisConfig()
-	// 调整 Redis 读写超时时间为 50ms（快速失败）
-	redisCfg.ReadTimeout = 50 * time.Millisecond
-	redisCfg.WriteTimeout = 50 * time.Millisecond
-
-	redisClient, err := pkgredis.Build(redisCfg)
-	if err != nil {
-		// Redis 初始化失败不阻塞启动（降级到只用 MySQL）
-		logger.Warn(ctx, "Redis 初始化失败，将降级到 MySQL-Only 模式",
-			logger.ErrorField("error", err),
-		)
-		redisClient = nil
-	} else {
-		pkgredis.ReplaceGlobal(redisClient)
-		logger.Info(ctx, "Redis 初始化成功",
-			logger.String("addr", redisCfg.Addr),
-		)
+		fmt.Fprintf(os.Stderr, "初始化 UserApp 失败: %v\n", err)
+		os.Exit(1)
 	}
 
-	// 4. 初始化 Kafka（仅在 Redis 可用时启动）
-	var kafkaProducer *kafka.Producer
-	var redisConsumer *mq.RedisRetryConsumer
-	if redisClient != nil {
-		kafkaCfg := config.DefaultKafkaConfig()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-		// 创建 Kafka Producer
-		kafkaProducer = kafka.NewProducer(kafkaCfg.Brokers, kafkaCfg.RedisRetryTopic)
-		mq.SetGlobalProducer(kafkaProducer)
-		logger.Info(ctx, "Kafka Producer 初始化成功",
-			logger.String("brokers", kafkaCfg.Brokers[0]),
-			logger.String("topic", kafkaCfg.RedisRetryTopic),
-		)
-
-		// 创建 Redis 重试消费者
-		zapLogger := kafka.NewZapLoggerAdapter(logger.L())
-		redisConsumer = mq.NewRedisRetryConsumer(
-			kafkaCfg.Brokers,
-			kafkaCfg.RedisRetryTopic,
-			kafkaCfg.ConsumerConfig.GroupID,
-			redisClient,
-			kafkaProducer,
-			zapLogger,
-		)
-
-		// 启动消费者（在后台 goroutine 中运行）
-		go func() {
-			logger.Info(ctx, "Redis 重试消费者启动中",
-				logger.String("topic", kafkaCfg.RedisRetryTopic),
-				logger.String("group_id", kafkaCfg.ConsumerConfig.GroupID),
-			)
-			if err := redisConsumer.Start(ctx); err != nil {
-				logger.Error(ctx, "Redis 重试消费者运行错误", logger.ErrorField("error", err))
-			}
-		}()
-
-		// 确保程序退出时关闭 Kafka 连接
-		defer func() {
-			if kafkaProducer != nil {
-				if err := kafkaProducer.Close(); err != nil {
-					logger.Error(ctx, "关闭 Kafka Producer 失败", logger.ErrorField("error", err))
-				}
-			}
-			if redisConsumer != nil {
-				if err := redisConsumer.Close(); err != nil {
-					logger.Error(ctx, "关闭 Redis 重试消费者失败", logger.ErrorField("error", err))
-				}
-			}
-		}()
-	}
-
-	// 4.5 初始化设备活跃时间配置（用于在线判定窗口管理）
-	deviceActiveCfg := config.DefaultDeviceActiveConfig()
-	pkgdeviceactive.SetOnlineWindow(deviceActiveCfg.OnlineWindow)
-	logger.Info(ctx, "User 设备活跃配置已加载",
-		logger.Duration("online_window", deviceActiveCfg.OnlineWindow),
-		logger.Duration("update_interval", deviceActiveCfg.UpdateInterval),
-		logger.Duration("flush_interval", deviceActiveCfg.FlushInterval),
-	)
-
-	// 5. 组装依赖 - Repository 层
-	authRepo := repository.NewAuthRepository(db, redisClient)
-	userRepo := repository.NewUserRepository(db, redisClient)
-	friendRepo := repository.NewFriendRepository(db, redisClient)
-	applyRepo := repository.NewApplyRepository(db, redisClient)
-	blacklistRepo := repository.NewBlacklistRepository(db, redisClient)
-	deviceRepo := repository.NewDeviceRepository(db, redisClient)
-
-	// 6. 组装依赖 - Service 层
-	authService := service.NewAuthService(authRepo, deviceRepo)
-	userService := service.NewUserService(userRepo, authRepo, deviceRepo)
-	friendService := service.NewFriendService(friendRepo, applyRepo, blacklistRepo)
-	blacklistService := service.NewBlacklistService(blacklistRepo)
-	deviceService := service.NewDeviceService(deviceRepo)
-
-	// 7. 组装依赖 - Handler 层
-	authHandler := handler.NewAuthHandler(authService)
-	userHandler := handler.NewUserHandler(userService)
-	friendHandler := handler.NewFriendHandler(friendService)
-	blacklistHandler := handler.NewBlacklistHandler(blacklistService)
-	deviceHandler := handler.NewDeviceHandler(deviceService)
-
-	// 8. 初始化小组件
-	util.InitSnowflake(1) // 雪花算法
-
-	// 9. 启动 Metrics HTTP Server（暴露 Prometheus 指标）。
-	// 注意：必须在 grpcx.Start 之前启动，因为 Start 是阻塞调用。
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", grpcx.DefaultHandler())
-
-	metricsAddr := os.Getenv("USER_METRICS_ADDR")
-	if metricsAddr == "" {
-		metricsAddr = ":9091"
-	}
-	metricsServer := &http.Server{
-		Addr:    metricsAddr,
-		Handler: metricsMux,
-	}
-
+	runErrCh := make(chan error, 1)
 	go func() {
-		logger.Info(ctx, "Metrics HTTP Server 启动中", logger.String("address", metricsAddr))
-		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error(ctx, "Metrics HTTP Server 启动失败", logger.ErrorField("error", err))
-		}
+		runErrCh <- app.Run(ctx)
 	}()
 
-	// 10. 启动 gRPC Server（阻塞直到服务停止）。
-	grpcAddr := os.Getenv("USER_GRPC_ADDR")
-	if grpcAddr == "" {
-		grpcAddr = ":9090"
-	}
-
-	opts := grpcx.ServerOptions{
-		Address:          grpcAddr,
-		Namespace:        "user",
-		EnableHealth:     true,
-		EnableReflection: true, // 生产环境建议关闭
-	}
-
-	logger.Info(ctx, "User 服务启动中",
-		logger.String("grpc_address", grpcAddr),
-		logger.String("metrics_address", metricsAddr),
-	)
-
-	if _, err := grpcx.Start(ctx, opts, func(s *grpc.Server, hs healthgrpc.HealthServer) {
-		userpb.RegisterAuthServiceServer(s, authHandler)
-		userpb.RegisterUserServiceServer(s, userHandler)
-		userpb.RegisterFriendServiceServer(s, friendHandler)
-		userpb.RegisterBlacklistServiceServer(s, blacklistHandler)
-		userpb.RegisterDeviceServiceServer(s, deviceHandler)
-
-		if hs != nil {
-			if setter, ok := hs.(interface {
-				SetServingStatus(service string, status healthgrpc.HealthCheckResponse_ServingStatus)
-			}); ok {
-				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
-			}
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			logger.Error(context.Background(), "User 服务运行失败", logger.ErrorField("error", err))
 		}
-	}); err != nil {
-		log.Fatalf("启动gRPC服务失败: %v", err)
-	}
-}
-
-func initVerifyEmailConfig(ctx context.Context) {
-	smtpHost := getEnv("EMAIL_SMTP_HOST", "smtp.qq.com")
-	smtpPort := getEnvInt("EMAIL_SMTP_PORT", 465)
-	senderName := getEnv("EMAIL_SENDER_NAME", "LCChat")
-	senderEmail := getEnv("EMAIL_SENDER", "2315635418@qq.com")
-	authCode := os.Getenv("EMAIL_AUTH_CODE")
-
-	util.SetEmailConfig(util.EmailConfig{
-		SMTPHost:     smtpHost,
-		SMTPPort:     smtpPort,
-		SenderEmail:  senderEmail,
-		SenderName:   senderName,
-		AuthPassword: authCode,
-	})
-
-	if authCode == "" {
-		logger.Warn(ctx, "验证码邮件授权码未配置，发送验证码将失败",
-			logger.String("env", "EMAIL_AUTH_CODE"),
-			logger.String("sender_email", senderEmail),
-		)
-		return
+	case <-ctx.Done():
+		logger.Warn(context.Background(), "收到退出信号，开始关闭 User 服务", logger.Any("err", ctx.Err()))
 	}
 
-	logger.Info(ctx, "验证码邮件配置已加载",
-		logger.String("smtp_host", smtpHost),
-		logger.Int("smtp_port", smtpPort),
-		logger.String("sender_email", senderEmail),
-	)
-}
-
-func getEnv(key, defaultValue string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultValue
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := app.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+		logger.Error(context.Background(), "关闭 User 服务失败", logger.ErrorField("error", err))
+		os.Exit(1)
 	}
-	return v
-}
-
-func getEnvInt(key string, defaultValue int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return defaultValue
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return defaultValue
-	}
-	return n
 }

@@ -1,10 +1,12 @@
 package svc
 
 import (
-	userpb "ChatServer/apps/user/pb"
-	"ChatServer/model"
-	"ChatServer/pkg/logger"
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"context"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -17,6 +19,9 @@ const (
 	// statusQueueSize 设备状态 RPC 任务队列容量。
 	// 队列满时新任务会被丢弃（仅 log Warn），不会阻塞调用方。
 	statusQueueSize = 8192
+
+	// routeTTL 路由表默认 TTL。
+	routeTTL = 180 * time.Second
 )
 
 // deviceStatusTask 表示一条设备状态更新 RPC 任务。
@@ -25,6 +30,10 @@ type deviceStatusTask struct {
 	userUUID string
 	deviceID string
 	status   int8
+}
+
+func connectRouteAddr() string {
+	return strings.TrimSpace(os.Getenv("CONNECT_SELF_GRPC_ADDR"))
 }
 
 // OnConnect 在连接建立后触发。
@@ -37,6 +46,9 @@ func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
 		s.activeSyncer.Delete(session.UserUUID, session.DeviceID)
 		_ = s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now())
 	}
+	if addr := connectRouteAddr(); addr != "" {
+		s.UpsertUserRoute(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), routeTTL)
+	}
 	s.updateDeviceStatusAsync(ctx, session, model.DeviceStatusOnline)
 }
 
@@ -44,9 +56,16 @@ func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
 // 受本地节流保护：窗口内的重复心跳不会重复触发同步。
 func (s *ConnectService) OnHeartbeat(ctx context.Context, session *Session) {
 	if s.activeSyncer == nil {
+		if addr := connectRouteAddr(); addr != "" {
+			s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), routeTTL)
+		}
 		return
 	}
-	_ = s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now())
+	if s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now()) {
+		if addr := connectRouteAddr(); addr != "" {
+			s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), routeTTL)
+		}
+	}
 }
 
 // OnDisconnect 在连接断开后触发。
@@ -57,6 +76,7 @@ func (s *ConnectService) OnDisconnect(ctx context.Context, session *Session) {
 	if s.activeSyncer != nil {
 		s.activeSyncer.Delete(session.UserUUID, session.DeviceID)
 	}
+	s.RemoveUserRoute(ctx, session.UserUUID, session.DeviceID)
 	s.updateDeviceStatusAsync(ctx, session, model.DeviceStatusOffline)
 }
 

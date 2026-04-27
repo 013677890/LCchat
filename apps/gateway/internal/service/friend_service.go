@@ -1,14 +1,12 @@
 package service
 
 import (
-	"ChatServer/apps/gateway/internal/dto"
-	"ChatServer/apps/gateway/internal/pb"
-	"ChatServer/apps/gateway/internal/utils"
-	userpb "ChatServer/apps/user/pb"
-	"ChatServer/consts"
-	"ChatServer/pkg/logger"
 	"context"
-	"time"
+
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
 // FriendServiceImpl 好友服务实现
@@ -26,8 +24,6 @@ func NewFriendService(userClient pb.UserServiceClient) FriendService {
 
 // SendFriendApply 发送好友申请
 func (s *FriendServiceImpl) SendFriendApply(ctx context.Context, req *dto.SendFriendApplyRequest) (*dto.SendFriendApplyResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoSendFriendApplyRequest(req)
 
@@ -35,16 +31,6 @@ func (s *FriendServiceImpl) SendFriendApply(ctx context.Context, req *dto.SendFr
 	grpcResp, err := s.userClient.SendFriendApply(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -55,8 +41,6 @@ func (s *FriendServiceImpl) SendFriendApply(ctx context.Context, req *dto.SendFr
 
 // GetFriendApplyList 获取好友申请列表
 func (s *FriendServiceImpl) GetFriendApplyList(ctx context.Context, req *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := &userpb.GetFriendApplyListRequest{
 		Status:   req.Status,
@@ -68,16 +52,6 @@ func (s *FriendServiceImpl) GetFriendApplyList(ctx context.Context, req *dto.Get
 	grpcResp, err := s.userClient.GetFriendApplyList(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -120,8 +94,6 @@ func (s *FriendServiceImpl) GetFriendApplyList(ctx context.Context, req *dto.Get
 
 // GetSentApplyList 获取发出的申请列表
 func (s *FriendServiceImpl) GetSentApplyList(ctx context.Context, req *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := &userpb.GetSentApplyListRequest{
 		Status:   req.Status,
@@ -133,16 +105,6 @@ func (s *FriendServiceImpl) GetSentApplyList(ctx context.Context, req *dto.GetSe
 	grpcResp, err := s.userClient.GetSentApplyList(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -190,8 +152,6 @@ func (s *FriendServiceImpl) GetSentApplyList(ctx context.Context, req *dto.GetSe
 
 // HandleFriendApply 处理好友申请
 func (s *FriendServiceImpl) HandleFriendApply(ctx context.Context, req *dto.HandleFriendApplyRequest) (*dto.HandleFriendApplyResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoHandleFriendApplyRequest(req)
 
@@ -199,16 +159,6 @@ func (s *FriendServiceImpl) HandleFriendApply(ctx context.Context, req *dto.Hand
 	_, err := s.userClient.HandleFriendApply(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -219,22 +169,10 @@ func (s *FriendServiceImpl) HandleFriendApply(ctx context.Context, req *dto.Hand
 
 // GetUnreadApplyCount 获取未读申请数量
 func (s *FriendServiceImpl) GetUnreadApplyCount(ctx context.Context, req *dto.GetUnreadApplyCountRequest) (*dto.GetUnreadApplyCountResponse, error) {
-	startTime := time.Now()
-
 	// 1. 调用用户服务获取未读申请数量(gRPC)
 	grpcResp, err := s.userClient.GetUnreadApplyCount(ctx, &userpb.GetUnreadApplyCountRequest{})
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -245,8 +183,6 @@ func (s *FriendServiceImpl) GetUnreadApplyCount(ctx context.Context, req *dto.Ge
 
 // MarkApplyAsRead 标记申请已读
 func (s *FriendServiceImpl) MarkApplyAsRead(ctx context.Context, req *dto.MarkApplyAsReadRequest) (*dto.MarkApplyAsReadResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoMarkApplyAsReadRequest(req)
 
@@ -254,16 +190,6 @@ func (s *FriendServiceImpl) MarkApplyAsRead(ctx context.Context, req *dto.MarkAp
 	_, err := s.userClient.MarkApplyAsRead(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -274,8 +200,6 @@ func (s *FriendServiceImpl) MarkApplyAsRead(ctx context.Context, req *dto.MarkAp
 
 // GetFriendList 获取好友列表
 func (s *FriendServiceImpl) GetFriendList(ctx context.Context, req *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := &userpb.GetFriendListRequest{
 		GroupTag: req.GroupTag,
@@ -287,16 +211,6 @@ func (s *FriendServiceImpl) GetFriendList(ctx context.Context, req *dto.GetFrien
 	grpcResp, err := s.userClient.GetFriendList(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -341,8 +255,6 @@ func (s *FriendServiceImpl) GetFriendList(ctx context.Context, req *dto.GetFrien
 
 // SyncFriendList 好友增量同步
 func (s *FriendServiceImpl) SyncFriendList(ctx context.Context, req *dto.SyncFriendListRequest) (*dto.SyncFriendListResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := &userpb.SyncFriendListRequest{
 		Version: req.Version,
@@ -353,16 +265,6 @@ func (s *FriendServiceImpl) SyncFriendList(ctx context.Context, req *dto.SyncFri
 	grpcResp, err := s.userClient.SyncFriendList(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -408,8 +310,6 @@ func (s *FriendServiceImpl) SyncFriendList(ctx context.Context, req *dto.SyncFri
 
 // DeleteFriend 删除好友
 func (s *FriendServiceImpl) DeleteFriend(ctx context.Context, req *dto.DeleteFriendRequest) (*dto.DeleteFriendResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoDeleteFriendRequest(req)
 
@@ -417,16 +317,6 @@ func (s *FriendServiceImpl) DeleteFriend(ctx context.Context, req *dto.DeleteFri
 	_, err := s.userClient.DeleteFriend(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -437,8 +327,6 @@ func (s *FriendServiceImpl) DeleteFriend(ctx context.Context, req *dto.DeleteFri
 
 // SetFriendRemark 设置好友备注
 func (s *FriendServiceImpl) SetFriendRemark(ctx context.Context, req *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoSetFriendRemarkRequest(req)
 
@@ -446,16 +334,6 @@ func (s *FriendServiceImpl) SetFriendRemark(ctx context.Context, req *dto.SetFri
 	_, err := s.userClient.SetFriendRemark(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -466,8 +344,6 @@ func (s *FriendServiceImpl) SetFriendRemark(ctx context.Context, req *dto.SetFri
 
 // SetFriendTag 设置好友标签
 func (s *FriendServiceImpl) SetFriendTag(ctx context.Context, req *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoSetFriendTagRequest(req)
 
@@ -475,16 +351,6 @@ func (s *FriendServiceImpl) SetFriendTag(ctx context.Context, req *dto.SetFriend
 	_, err := s.userClient.SetFriendTag(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -495,22 +361,10 @@ func (s *FriendServiceImpl) SetFriendTag(ctx context.Context, req *dto.SetFriend
 
 // GetTagList 获取标签列表
 func (s *FriendServiceImpl) GetTagList(ctx context.Context, req *dto.GetTagListRequest) (*dto.GetTagListResponse, error) {
-	startTime := time.Now()
-
 	// 1. 调用用户服务获取标签列表(gRPC)
 	grpcResp, err := s.userClient.GetTagList(ctx, &userpb.GetTagListRequest{})
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -521,8 +375,6 @@ func (s *FriendServiceImpl) GetTagList(ctx context.Context, req *dto.GetTagListR
 
 // CheckIsFriend 判断是否好友
 func (s *FriendServiceImpl) CheckIsFriend(ctx context.Context, req *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoCheckIsFriendRequest(req)
 
@@ -530,16 +382,6 @@ func (s *FriendServiceImpl) CheckIsFriend(ctx context.Context, req *dto.CheckIsF
 	grpcResp, err := s.userClient.CheckIsFriend(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
@@ -550,8 +392,6 @@ func (s *FriendServiceImpl) CheckIsFriend(ctx context.Context, req *dto.CheckIsF
 
 // GetRelationStatus 获取关系状态
 func (s *FriendServiceImpl) GetRelationStatus(ctx context.Context, req *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoGetRelationStatusRequest(req)
 
@@ -559,16 +399,6 @@ func (s *FriendServiceImpl) GetRelationStatus(ctx context.Context, req *dto.GetR
 	grpcResp, err := s.userClient.GetRelationStatus(ctx, grpcReq)
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}

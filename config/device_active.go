@@ -1,7 +1,7 @@
 package config
 
 import (
-	"ChatServer/pkg/deviceactive"
+	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"time"
 )
 

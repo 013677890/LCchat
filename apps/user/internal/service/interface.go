@@ -1,7 +1,7 @@
 package service
 
 import (
-	pb "ChatServer/apps/user/pb"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"context"
 )
 
@@ -148,6 +148,11 @@ type IBlacklistService interface {
 
 // ==================== 设备会话服务接口 ====================
 
+type IGroupService interface {
+	// GetGroupMembers 获取群组有效成员列表。
+	GetGroupMembers(ctx context.Context, req *pb.GetGroupMembersRequest) (*pb.GetGroupMembersResponse, error)
+}
+
 // IDeviceService 设备会话服务接口
 // 职责：设备列表、踢出设备、在线状态查询
 type IDeviceService interface {
@@ -185,6 +190,9 @@ type FriendService = IFriendService
 
 // BlacklistService 别名 IBlacklistService
 type BlacklistService = IBlacklistService
+
+// GroupService 别名 IGroupService
+type GroupService = IGroupService
 
 // DeviceService 别名 IDeviceService
 type DeviceService = IDeviceService

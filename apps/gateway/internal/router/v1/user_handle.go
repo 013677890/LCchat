@@ -1,18 +1,19 @@
 package v1
 
 import (
-	"ChatServer/apps/gateway/internal/dto"
-	"ChatServer/apps/gateway/internal/middleware"
-	"ChatServer/apps/gateway/internal/service"
-	"ChatServer/apps/gateway/internal/utils"
-	"ChatServer/consts"
-	"ChatServer/pkg/logger"
-	pkgminio "ChatServer/pkg/minio"
-	"ChatServer/pkg/result"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
+	"github.com/013677890/LCchat-Backend/consts"
+	pkgminio "github.com/013677890/LCchat-Backend/pkg/minio"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,11 +52,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取个人信息服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -97,11 +94,7 @@ func (h *UserHandler) GetOtherProfile(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取他人信息服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -160,11 +153,7 @@ func (h *UserHandler) SearchUser(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "搜索用户服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -202,11 +191,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "修改密码服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -250,11 +235,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "更新基本信息服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -292,11 +273,7 @@ func (h *UserHandler) ChangeEmail(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "换绑邮箱服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -319,9 +296,6 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 	// 1. 解析上传的文件
 	file, header, err := c.Request.FormFile("avatar")
 	if err != nil {
-		logger.Warn(ctx, "无法读取上传的文件",
-			logger.ErrorField("error", err),
-		)
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}
@@ -330,10 +304,6 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 	// 2. 验证文件大小（最大 2MB）
 	const maxSize = 2 * 1024 * 1024 // 2MB
 	if header.Size > maxSize {
-		logger.Warn(ctx, "文件大小超过限制",
-			logger.Int64("size", header.Size),
-			logger.Int64("max_size", maxSize),
-		)
 		result.Fail(c, nil, consts.CodeBodyTooLarge)
 		return
 	}
@@ -342,9 +312,6 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 	contentType := header.Header.Get("Content-Type")
 	if !strings.HasPrefix(contentType, "image/") ||
 		(contentType != "image/jpeg" && contentType != "image/png") {
-		logger.Warn(ctx, "不支持的文件类型",
-			logger.String("content_type", contentType),
-		)
 		result.Fail(c, nil, consts.CodeFileFormatNotSupport)
 		return
 	}
@@ -352,8 +319,7 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 	// 4. 获取 MinIO 客户端
 	minioClient := pkgminio.Client()
 	if minioClient == nil {
-		logger.Error(ctx, "MinIO 客户端未初始化")
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, errors.New("MinIO 客户端未初始化"), consts.CodeInternalError)
 		return
 	}
 
@@ -361,7 +327,6 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 	// 格式: avatars/{user_uuid}/{timestamp}.{ext}
 	userUUID, exists := middleware.GetUserUUID(c)
 	if !exists || userUUID == "" {
-		logger.Error(ctx, "无法获取用户UUID")
 		result.Fail(c, nil, consts.CodeUnauthorized)
 		return
 	}
@@ -386,21 +351,9 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 		ContentType: contentType,
 	})
 	if err != nil {
-		logger.Error(ctx, "上传文件到 MinIO 失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("file_name", header.Filename),
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeFileUploadFail)
+		result.FailServer(c, err, consts.CodeFileUploadFail)
 		return
 	}
-
-	logger.Info(ctx, "文件上传到 MinIO 成功",
-		logger.String("user_uuid", userUUID),
-		logger.String("object_name", uploadResult.ObjectName),
-		logger.String("url", uploadResult.URL),
-		logger.Int64("size", uploadResult.Size),
-	)
 
 	// 7. 调用服务层更新数据库
 	avatarURL, err := h.userService.UploadAvatar(ctx, uploadResult.URL)
@@ -412,12 +365,7 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "更新头像服务内部错误",
-			logger.String("avatar_url", uploadResult.URL),
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -454,9 +402,6 @@ func (h *UserHandler) BatchGetProfile(c *gin.Context) {
 	}
 
 	if len(req.UserUUIDs) > 100 {
-		logger.Warn(ctx, "批量获取用户信息超过最大限制",
-			logger.Int("count", len(req.UserUUIDs)),
-		)
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}
@@ -471,12 +416,7 @@ func (h *UserHandler) BatchGetProfile(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "批量获取用户信息服务内部错误",
-			logger.Int("count", len(req.UserUUIDs)),
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -505,11 +445,7 @@ func (h *UserHandler) GetQRCode(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "获取用户二维码服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -547,11 +483,7 @@ func (h *UserHandler) ParseQRCode(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "解析二维码服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 
@@ -589,11 +521,7 @@ func (h *UserHandler) DeleteAccount(c *gin.Context) {
 			return
 		}
 
-		// 其他内部错误
-		logger.Error(ctx, "注销账号服务内部错误",
-			logger.ErrorField("error", err),
-		)
-		result.Fail(c, nil, consts.CodeInternalError)
+		result.FailServer(c, err, consts.CodeInternalError)
 		return
 	}
 

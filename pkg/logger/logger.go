@@ -1,19 +1,19 @@
 package logger
 
 import (
-	"ChatServer/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"context"
 	"os"
 	"strings"
 	"time"
 
-	"ChatServer/config"
+	"github.com/013677890/LCchat-Backend/config"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-var global *zap.Logger
+var global = zap.NewNop()
 
 // L 返回全局 logger（未初始化时为 nil）。
 // 使用场景：在包内无需显式传递 logger 时，直接 logger.L().Info(...)

@@ -2,57 +2,54 @@ syntax = "proto3";
 
 package connect;
 
-option go_package = "ChatServer/apps/connect/pb";
+option go_package = "github.com/013677890/LCchat-Backend/apps/connect/pb";
 
 import "validate/validate.proto";
 
-// ConnectService 定义 connect 对内部服务暴露的 RPC 能力。
-// 使用场景：
-// 1. msg 服务将消息下发到在线连接；
-// 2. user 服务在“踢设备”后主动断开连接；
-// 3. 其他业务服务做系统通知/广播推送；
-// 4. 业务层查询用户“物理在线”状态。
+// ConnectService 定义 connect 对外暴露的 gRPC 能力。
+//
+// 架构定位：Connect 是纯粹的"最后一公里"管道。
+// 它不直接对接 Kafka，也不做任何业务判断（读扩散/写扩散/路由查询等）。
+// 上游的 Push-Job（Kafka 消费者）在查完 Redis 路由表、拆分完群成员之后，
+// 会通过 gRPC 精确地告诉 Connect："把这条消息发给你节点上的张三"。
+//
+// 调用方：
+// 1. push-job（Kafka 消费者） — 消息下发、撤回通知、已读同步
+// 2. user-service            — 踢线（封号/异地登录）
+// 3. 运维/管理后台           — 全服广播
 service ConnectService {
 	// PushToDevice 向指定用户的指定设备投递消息。
 	// 典型场景：单设备回执、仅当前设备可见的安全提示。
 	rpc PushToDevice(PushToDeviceRequest) returns (PushToDeviceResponse);
 
-	// PushToUser 向用户所有在线设备广播。
-	// 典型场景：新消息多端同步、账号状态变更通知。
+	// PushToUser 向用户在本节点上的所有在线设备广播。
+	// 典型场景：push-job 查到用户在此节点，直接推全设备。
 	rpc PushToUser(PushToUserRequest) returns (PushToUserResponse);
 
 	// BroadcastToUsers 批量向多个用户广播相同的消息。
-	// 典型场景：运营活动推送、系统维护通知、群聊多人下发。
+	// 典型场景：全服维护公告（管理后台遍历所有 Connect 节点调用）。
 	// 限制：单次最多 1000 个用户，超出应分批调用。
 	rpc BroadcastToUsers(BroadcastToUsersRequest) returns (BroadcastToUsersResponse);
 
 	// KickConnection 主动断开指定设备连接。
-	// 典型场景：用户在“设备管理”中踢掉某个历史设备。
+	// 典型场景：user-service 封禁账号 / 异地登录时精确踢线。
+	// 注意：调用方（user-service）需先查 Redis 路由表获取目标所在 Connect 节点地址，
+	// 才能将 gRPC 请求打到正确的节点。
 	rpc KickConnection(KickConnectionRequest) returns (KickConnectionResponse);
-
-	// GetOnlineStatus 获取单个用户的在线设备列表。
-	// 返回的是 Connect 层的“物理在线”状态，比 Redis 缓存更准确。
-	// 典型场景：发消息前判断走在线推送还是离线存储。
-	rpc GetOnlineStatus(GetOnlineStatusRequest) returns (GetOnlineStatusResponse);
-
-	// BatchGetOnlineStatus 批量获取多个用户的在线状态。
-	// 典型场景：好友列表/群成员列表展示在线指示灯。
-	// 限制：单次最多 200 个用户。
-	rpc BatchGetOnlineStatus(BatchGetOnlineStatusRequest) returns (BatchGetOnlineStatusResponse);
 }
 
-// ==================== 消息封装 ====================
+// ==================== 消息封装（WebSocket 下行协议） ====================
 
 // MessageEnvelope 为 WebSocket 下行消息统一封装格式。
-// 建议业务层将真实 payload 放在 data 字段，type 用于客户端分发。
+// 业务方将真实 payload 放在 data 字段，type 用于客户端路由分发。
 message MessageEnvelope {
-	// type: 消息类型（如 message/notice/kickout）。
+	// type: 消息类型路由键（如 MSG_PUSH / MSG_RECALL / MSG_MARK_READ / KICKOUT）。
 	string type = 1 [(validate.rules).string = {min_len: 1, max_len: 64}];
-	// data: 业务负载。
+	// data: 业务负载（如 MsgItem / RecallNotice 序列化后的 bytes）。
 	bytes data = 2;
 	// seq: 消息序列号，客户端用来去重/排序。
 	int64 seq = 3;
-	// server_ts: 服务端生成时间戳（毫秒/秒由调用方约定一致）。
+	// server_ts: 服务端事件时间戳（unix 毫秒）。
 	int64 server_ts = 4;
 	// trace_id: 链路追踪 ID，便于跨服务排障。
 	string trace_id = 5;
@@ -79,7 +76,7 @@ message PushToDeviceResponse {
 message PushToUserRequest {
 	// user_uuid: 目标用户 UUID。
 	string user_uuid = 1 [(validate.rules).string.min_len = 1];
-	// message: 待广播消息体。
+	// message: 待广播消息体（推送到该用户在本节点的所有在线设备）。
 	MessageEnvelope message = 2 [(validate.rules).message.required = true];
 }
 
@@ -111,43 +108,11 @@ message KickConnectionRequest {
 	string user_uuid = 1 [(validate.rules).string.min_len = 1];
 	// device_id: 目标设备 ID。
 	string device_id = 2 [(validate.rules).string.min_len = 1];
-	// reason: 踢线原因，可用于客户端提示。
+	// reason: 踢线原因，可用于客户端提示（如"账号在其他设备登录"）。
 	string reason = 3;
 }
 
 message KickConnectionResponse {
 	// success: true 表示目标连接存在且已断开；false 表示目标原本不在线。
 	bool success = 1;
-}
-
-// ==================== 在线状态查询 ====================
-
-message GetOnlineStatusRequest {
-	// user_uuid: 目标用户 UUID。
-	string user_uuid = 1 [(validate.rules).string.min_len = 1];
-}
-
-message GetOnlineStatusResponse {
-	// is_online: 用户是否有任何在线设备。
-	bool is_online = 1;
-	// online_devices: 当前在线的设备 ID 列表。
-	repeated string online_devices = 2;
-}
-
-message BatchGetOnlineStatusRequest {
-	// user_uuids: 目标用户 UUID 列表，单次上限 200。
-	repeated string user_uuids = 1 [(validate.rules).repeated = {min_items: 1, max_items: 200}];
-}
-
-message BatchGetOnlineStatusResponse {
-	// items: 每个用户的在线状态。
-	repeated UserOnlineStatus items = 1;
-}
-
-// UserOnlineStatus 单个用户的在线状态摘要。
-message UserOnlineStatus {
-	string user_uuid = 1;
-	bool is_online = 2;
-	// online_devices: 在线设备 ID 列表（空列表 = 离线）。
-	repeated string online_devices = 3;
 }

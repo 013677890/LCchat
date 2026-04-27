@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"ChatServer/config"
-	"ChatServer/pkg/logger"
+	"github.com/013677890/LCchat-Backend/config"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"go.uber.org/zap"
 	gmysql "gorm.io/driver/mysql"

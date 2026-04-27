@@ -10,7 +10,7 @@ type UserInfo struct {
 	Id        int64          `gorm:"column:id;primaryKey;comment:自增id"`
 	Uuid      string         `gorm:"column:uuid;uniqueIndex;type:char(20);comment:用户唯一id"`
 	Nickname  string         `gorm:"column:nickname;type:varchar(20);not null;comment:昵称"`
-	Telephone string         `gorm:"column:telephone;uniqueIndex;not null;type:varchar(20);comment:电话"`
+	Telephone string         `gorm:"column:telephone;uniqueIndex;type:varchar(20);default:null;comment:电话"`
 	Email     string         `gorm:"column:email;type:varchar(100);comment:邮箱"`
 	Avatar    string         `gorm:"column:avatar;type:varchar(255);default:'';not null;comment:头像"`
 	Gender    int8           `gorm:"column:gender;comment:性别,1.男 2.女 3.未知"`

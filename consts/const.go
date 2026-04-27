@@ -140,6 +140,12 @@ const (
 	CodeMessageRevoked = 13007 // 消息已撤回
 	// 消息已删除
 	CodeMessageDeleted = 13008 // 消息已删除
+	// 撤回超时（超过2分钟撤回窗口）
+	CodeRecallTimeout = 13009 // 撤回超时
+	// 撤回无权限（非发送者且非群管理员）
+	CodeRecallNoPermission = 13010 // 撤回无权限
+	// 消息重复（幂等命中，返回首次结果）
+	CodeMessageDuplicate = 13011 // 消息重复
 )
 
 // 群组模块错误 (14xxx)
@@ -305,6 +311,9 @@ var CodeMessage = map[int]string{
 	CodeMessageTooLong:        "消息内容过长",
 	CodeMessageRevoked:        "消息已撤回",
 	CodeMessageDeleted:        "消息已删除",
+	CodeRecallTimeout:         "撤回超时",
+	CodeRecallNoPermission:    "撤回无权限",
+	CodeMessageDuplicate:      "消息重复",
 
 	// 群组模块
 	CodeGroupNotFound:       "群组不存在",

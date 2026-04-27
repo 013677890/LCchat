@@ -10,17 +10,14 @@ import (
 	"sync"
 	"testing"
 
-	"ChatServer/apps/gateway/internal/dto"
-	"ChatServer/apps/gateway/internal/service"
-	"ChatServer/consts"
-	"ChatServer/pkg/logger"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeFriendHTTPService struct {
@@ -148,7 +145,6 @@ var gatewayFriendHandlerLoggerOnce sync.Once
 
 func initGatewayFriendHandlerLogger() {
 	gatewayFriendHandlerLoggerOnce.Do(func() {
-		logger.ReplaceGlobal(zap.NewNop())
 		gin.SetMode(gin.TestMode)
 	})
 }
@@ -207,7 +203,7 @@ func TestFriendHandlerSendFriendApply(t *testing.T) {
 			setupSvc: func(s *fakeFriendHTTPService, called *bool) {
 				s.sendApplyFn = func(_ context.Context, _ *dto.SendFriendApplyRequest) (*dto.SendFriendApplyResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeFriendRequestSent), "biz")
+					return nil, apperr.New(consts.CodeFriendRequestSent)
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -386,7 +382,7 @@ func TestFriendHandlerHandleAndMarkApply(t *testing.T) {
 		h := NewFriendHandler(&fakeFriendHTTPService{
 			handleApplyFn: func(_ context.Context, req *dto.HandleFriendApplyRequest) (*dto.HandleFriendApplyResponse, error) {
 				require.Equal(t, int64(1), req.ApplyID)
-				return nil, status.Error(codes.Code(consts.CodeNoPermission), "biz")
+				return nil, apperr.New(consts.CodeNoPermission)
 			},
 		})
 		w := httptest.NewRecorder()
@@ -514,7 +510,7 @@ func TestFriendHandlerSimpleMethods(t *testing.T) {
 			invoke: func(h *FriendHandler, c *gin.Context) { h.GetTagList(c) },
 			setupSvc: func(s *fakeFriendHTTPService) {
 				s.getTagListFn = func(_ context.Context, _ *dto.GetTagListRequest) (*dto.GetTagListResponse, error) {
-					return nil, status.Error(codes.Code(consts.CodeNoPermission), "biz")
+					return nil, apperr.New(consts.CodeNoPermission)
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -589,7 +585,7 @@ func TestFriendHandlerSimpleMethods(t *testing.T) {
 			invoke: func(h *FriendHandler, c *gin.Context) { h.GetRelationStatus(c) },
 			setupSvc: func(s *fakeFriendHTTPService) {
 				s.getRelationFn = func(_ context.Context, _ *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error) {
-					return nil, status.Error(codes.Code(consts.CodeParamError), "biz")
+					return nil, apperr.New(consts.CodeParamError)
 				}
 			},
 			wantStatus: http.StatusOK,

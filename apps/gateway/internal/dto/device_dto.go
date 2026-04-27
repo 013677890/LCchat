@@ -1,8 +1,8 @@
 package dto
 
 import (
-	userpb "ChatServer/apps/user/pb"
-	"ChatServer/pkg/util"
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
 // ==================== 设备服务相关 DTO ====================

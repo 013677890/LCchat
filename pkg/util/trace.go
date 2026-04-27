@@ -1,7 +1,7 @@
 package util
 
 import (
-	"ChatServer/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"

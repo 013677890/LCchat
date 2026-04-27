@@ -31,9 +31,9 @@ protoc `
   -I "$PGV" `
   --experimental_allow_proto3_optional `
   --go_out=. `
-  --go_opt=module=ChatServer `
+  --go_opt=module=github.com/013677890/LCchat-Backend `
   --go-grpc_out=. `
-  --go-grpc_opt=module=ChatServer `
+  --go-grpc_opt=module=github.com/013677890/LCchat-Backend `
   proto/user/common.proto `
   proto/user/auth_service.proto `
   proto/user/user_service.proto `
@@ -42,12 +42,13 @@ protoc `
   proto/user/blacklist_service.proto `
   proto/connect/connect.proto `
   proto/msg/msg_common.proto `
+  proto/msg/msg_push_event.proto `
   proto/msg/msg_service.proto
 ```
 
 说明：
 
-- `module=ChatServer` 用于按 `go_package` 生成到 `apps/*/pb`，不会输出到 `proto/` 目录。
+- `module=github.com/013677890/LCchat-Backend` 用于按 `go_package` 生成到 `apps/*/pb`，不会输出到 `proto/` 目录。
 - 上面命令生成 `*.pb.go` 和 `*_grpc.pb.go`。
 
 ## 4. 生成 validate 代码（可选）
@@ -59,15 +60,16 @@ protoc `
   -I . `
   -I "$PGV" `
   --experimental_allow_proto3_optional `
-  --validate_out=lang=go,module=ChatServer:. `
+  --validate_out=lang=go,module=github.com/013677890/LCchat-Backend:. `
   proto/user/common.proto `
   proto/user/auth_service.proto `
   proto/user/user_service.proto `
   proto/user/device_service.proto `
   proto/user/friend_service.proto `
   proto/user/blacklist_service.proto `
-  proto/connect/connect.proto `
+  proto/connect/connect.proto ` 
   proto/msg/msg_common.proto `
+  proto/msg/msg_push_event.proto `
   proto/msg/msg_service.proto
 ```
 
@@ -86,9 +88,9 @@ protoc \
   -I "$PGV" \
   --experimental_allow_proto3_optional \
   --go_out=. \
-  --go_opt=module=ChatServer \
+  --go_opt=module=github.com/013677890/LCchat-Backend \
   --go-grpc_out=. \
-  --go-grpc_opt=module=ChatServer \
+  --go-grpc_opt=module=github.com/013677890/LCchat-Backend \
   proto/user/common.proto \
   proto/user/auth_service.proto \
   proto/user/user_service.proto \
@@ -97,6 +99,7 @@ protoc \
   proto/user/blacklist_service.proto \
   proto/connect/connect.proto \
   proto/msg/msg_common.proto \
+  proto/msg/msg_push_event.proto \
   proto/msg/msg_service.proto
 ```
 
@@ -109,7 +112,7 @@ protoc \
   -I . \
   -I "$PGV" \
   --experimental_allow_proto3_optional \
-  --validate_out=lang=go,module=ChatServer:. \
+  --validate_out=lang=go,module=github.com/013677890/LCchat-Backend:. \
   proto/user/common.proto \
   proto/user/auth_service.proto \
   proto/user/user_service.proto \
@@ -118,5 +121,6 @@ protoc \
   proto/user/blacklist_service.proto \
   proto/connect/connect.proto \
   proto/msg/msg_common.proto \
+  proto/msg/msg_push_event.proto \
   proto/msg/msg_service.proto
 ```

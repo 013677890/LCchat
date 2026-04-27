@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"ChatServer/consts/redisKey"
-	"ChatServer/pkg/logger"
-	pkgredis "ChatServer/pkg/redis"
+	"github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"context"
 	"errors"
 	"net/http"

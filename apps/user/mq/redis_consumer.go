@@ -1,7 +1,7 @@
 package mq
 
 import (
-	"ChatServer/pkg/kafka"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"context"
 	"encoding/json"
 	"fmt"

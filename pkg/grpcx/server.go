@@ -2,18 +2,8 @@ package grpcx
 
 import (
 	"context"
-	"net"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-
-	"ChatServer/pkg/logger"
-
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/reflection"
 )
 
 // ServerOptions 定义 gRPC Server 的启动参数。
@@ -53,129 +43,21 @@ type ServerResult struct {
 	Metrics *Metrics
 }
 
-// Start 创建并启动 gRPC Server。
-// register 回调中完成业务服务的注册。
-// 返回 ServerResult 供调用方获取 Metrics Handler 等组件。
-// 此函数会阻塞直到服务停止。
+// Start 保留向后兼容入口，内部委托到可被 Wire 管理的构造与运行接口。
 func Start(ctx context.Context, opts ServerOptions, register func(s *grpc.Server, health healthgrpc.HealthServer)) (*ServerResult, error) {
-	// 构建 Metrics
-	metricsCfg := DefaultMetricsConfig()
-	metricsCfg.Namespace = opts.Namespace
-	if opts.MetricsConfig != nil {
-		metricsCfg = *opts.MetricsConfig
-		if metricsCfg.Namespace == "" {
-			metricsCfg.Namespace = opts.Namespace
-		}
-	}
-	metrics := NewMetrics(metricsCfg)
-
-	result := &ServerResult{Metrics: metrics}
-
-	// 构建拦截器链
-	// 执行顺序：Recovery(最外层) → Metadata → RateLimit → Metrics → Logging(最内层)
-	var rateLimitCfg RateLimitConfig
-	if opts.RateLimit != nil {
-		rateLimitCfg = *opts.RateLimit
-	} else {
-		rateLimitCfg = DefaultRateLimitConfig()
-	}
-
-	var loggingCfg LoggingConfig
-	if opts.Logging != nil {
-		loggingCfg = *opts.Logging
-	} else {
-		loggingCfg = DefaultLoggingConfig()
-	}
-
-	unaryInters := []grpc.UnaryServerInterceptor{
-		RecoveryUnaryInterceptor(),
-		MetadataUnaryInterceptor(),
-		RateLimitUnaryInterceptor(rateLimitCfg),
-		metrics.UnaryInterceptor(),
-		LoggingUnaryInterceptor(loggingCfg),
-	}
-	unaryInters = append(unaryInters, opts.ExtraUnaryInterceptors...)
-
-	// 构建 grpc.ServerOption
-	var serverOpts []grpc.ServerOption
-	if opts.MaxRecvMsgSize > 0 {
-		serverOpts = append(serverOpts, grpc.MaxRecvMsgSize(opts.MaxRecvMsgSize))
-	}
-	if opts.MaxSendMsgSize > 0 {
-		serverOpts = append(serverOpts, grpc.MaxSendMsgSize(opts.MaxSendMsgSize))
-	}
-	serverOpts = append(serverOpts, grpc.ChainUnaryInterceptor(unaryInters...))
-	if len(opts.ExtraStreamInterceptors) > 0 {
-		serverOpts = append(serverOpts, grpc.ChainStreamInterceptor(opts.ExtraStreamInterceptors...))
-	}
-
-	s := grpc.NewServer(serverOpts...)
-
-	// 健康检查
-	var healthServer healthgrpc.HealthServer
-	if opts.EnableHealth {
-		healthServer = newHealthServer()
-		healthgrpc.RegisterHealthServer(s, healthServer)
-	}
-
-	// 业务注册
-	register(s, healthServer)
-
-	// 反射
-	if opts.EnableReflection {
-		reflection.Register(s)
-	}
-
-	// 监听
-	lis, err := net.Listen("tcp", opts.Address)
+	built, err := NewServer(opts, register)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 
-	// 优雅停机
-	go gracefulStop(ctx, s)
-
-	logger.Info(ctx, "gRPC server start", logger.String("addr", opts.Address))
-	if err := s.Serve(lis); err != nil {
-		return result, err
+	lis, err := NewListener(opts.Address)
+	if err != nil {
+		return &ServerResult{Metrics: built.Metrics}, err
 	}
-	return result, nil
-}
+	defer func() { _ = lis.Close() }()
 
-// gracefulStop 监听 SIGINT/SIGTERM 或 ctx 取消，执行优雅停机。
-func gracefulStop(ctx context.Context, s *grpc.Server) {
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	select {
-	case sig := <-sigCh:
-		logger.Warn(ctx, "received signal, graceful stop",
-			logger.String("signal", sig.String()),
-		)
-	case <-ctx.Done():
-		logger.Warn(ctx, "context canceled, graceful stop",
-			logger.Any("err", ctx.Err()),
-		)
+	if err := Run(ctx, built.Server, lis); err != nil {
+		return &ServerResult{Metrics: built.Metrics}, err
 	}
-
-	stopDone := make(chan struct{})
-	go func() {
-		s.GracefulStop()
-		close(stopDone)
-	}()
-
-	select {
-	case <-stopDone:
-		logger.Info(ctx, "grpc server stopped gracefully")
-	case <-time.After(10 * time.Second):
-		logger.Warn(ctx, "graceful stop timeout, force stop")
-		s.Stop()
-	}
-}
-
-// newHealthServer 创建健康检查服务，初始状态为 SERVING。
-func newHealthServer() healthgrpc.HealthServer {
-	hs := health.NewServer()
-	hs.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
-	return hs
+	return &ServerResult{Metrics: built.Metrics}, nil
 }

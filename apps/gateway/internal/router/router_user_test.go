@@ -10,19 +10,18 @@ import (
 	"sync"
 	"testing"
 
-	"ChatServer/apps/gateway/internal/dto"
-	v1 "ChatServer/apps/gateway/internal/router/v1"
-	"ChatServer/apps/gateway/internal/service"
-	"ChatServer/consts"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/util"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeRouterUserService struct {
@@ -168,7 +167,7 @@ func buildRouterUserTestRouter(userSvc service.UserService) *gin.Engine {
 	friendHandler := v1.NewFriendHandler(nil)
 	blacklistHandler := v1.NewBlacklistHandler(nil)
 	deviceHandler := v1.NewDeviceHandler(nil)
-	return InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler)
+	return InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, nil)
 }
 
 func TestRouterUserUnauthorized(t *testing.T) {
@@ -428,7 +427,7 @@ func TestRouterUserErrorMapping(t *testing.T) {
 	t.Run("business_error_passthrough", func(t *testing.T) {
 		r := buildRouterUserTestRouter(&fakeRouterUserService{
 			getProfileFn: func(_ context.Context) (*dto.GetProfileResponse, error) {
-				return nil, status.Error(codes.Code(consts.CodeUserNotFound), "biz")
+				return nil, apperr.ToStatus(apperr.New(consts.CodeUserNotFound))
 			},
 		})
 

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"ChatServer/config"
-	"ChatServer/pkg/logger"
+	"github.com/013677890/LCchat-Backend/config"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"github.com/panjf2000/ants/v2"
 )

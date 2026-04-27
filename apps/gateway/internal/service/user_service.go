@@ -1,21 +1,22 @@
 package service
 
 import (
-	"ChatServer/apps/gateway/internal/dto"
-	"ChatServer/apps/gateway/internal/pb"
-	"ChatServer/apps/gateway/internal/utils"
-	userpb "ChatServer/apps/user/pb"
-	"ChatServer/consts"
-	"ChatServer/pkg/async"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/util"
 	"context"
-	"errors"
-	"strconv"
+
 	"time"
+
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
-// UserServiceImpl 用户服务实现
+// UserServiceImpl 用户服务实现。
 type UserServiceImpl struct {
 	userClient pb.UserServiceClient
 }
@@ -23,43 +24,22 @@ type UserServiceImpl struct {
 // NewUserService 创建用户服务实例
 // userClient: 用户服务 gRPC 客户端
 func NewUserService(userClient pb.UserServiceClient) UserService {
-	return &UserServiceImpl{
-		userClient: userClient,
-	}
+	return &UserServiceImpl{userClient: userClient}
 }
 
 // GetProfile 获取个人信息
 // ctx: 请求上下文
 // 返回: 个人信息响应
 func (s *UserServiceImpl) GetProfile(ctx context.Context) (*dto.GetProfileResponse, error) {
-	startTime := time.Now()
-
 	// 1. 调用用户服务获取个人信息(gRPC)
-	grpcReq := &userpb.GetProfileRequest{}
-	grpcResp, err := s.userClient.GetProfile(ctx, grpcReq)
+	grpcResp, err := s.userClient.GetProfile(ctx, &userpb.GetProfileRequest{})
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
-
-	// 2. gRPC 调用成功，检查响应数据
+	// 2. 检查用户信息是否为空
 	if grpcResp.UserInfo == nil {
-		// 成功返回但 UserInfo 为空，属于非预期的异常情况
-		logger.Error(ctx, "gRPC 成功响应但用户信息为空")
-		return nil, errors.New(strconv.Itoa(consts.CodeInternalError))
+		return nil, apperr.New(consts.CodeInternalError)
 	}
-
 	return dto.ConvertGetProfileResponseFromProto(grpcResp), nil
 }
 
@@ -68,20 +48,16 @@ func (s *UserServiceImpl) GetProfile(ctx context.Context) (*dto.GetProfileRespon
 // req: 获取他人信息请求
 // 返回: 他人信息响应
 func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOtherProfileRequest) (*dto.GetOtherProfileResponse, error) {
-	startTime := time.Now()
-
-	// 1. 从context中获取当前用户UUID
+	// 1. 调用用户服务获取个人信息(gRPC)
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
-		logger.Error(ctx, "获取用户UUID失败")
-		return nil, errors.New(strconv.Itoa(consts.CodeUnauthorized))
+		return nil, apperr.New(consts.CodeUnauthorized)
 	}
+	// 2. 调用用户服务获取他人信息(gRPC)
 
-	// 2. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoGetOtherProfileRequest(req)
-
-	// 3. 并发调用用户服务和好友服务获取信息
-	// 使用goroutine并发调用两个服务
+	// 3.并发调用用户服务和好友服务获取信息
+	//使用goroutine并发调用用户服务和好友服务获取信息
 	type userResult struct {
 		resp *userpb.GetOtherProfileResponse
 		err  error
@@ -116,50 +92,36 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 
 	// 4. 检查用户服务调用结果
 	if userRes.err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(userRes.err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", userRes.err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, userRes.err
 	}
-
-	// 5. gRPC 调用成功，检查响应数据
-	if userRes.resp.UserInfo == nil {
-		// 成功返回但 UserInfo 为空，属于非预期的异常情况
-		logger.Error(ctx, "gRPC 成功响应但用户信息为空")
-		return nil, errors.New(strconv.Itoa(consts.CodeInternalError))
+	// 5. 检查用户服务返回的用户信息是否为空
+	if userRes.resp == nil || userRes.resp.UserInfo == nil {
+		return nil, apperr.New(consts.CodeInternalError)
 	}
 
-	// 6. 检查好友服务调用结果（非关键错误，只记录日志）
+	// 6. 检查好友服务调用结果
 	isFriend := false
 	if friendRes.err != nil {
-		logger.Warn(ctx, "调用好友服务失败",
+		logger.Warn(ctx, "查询好友关系失败，按非好友降级",
+			logger.String("target_user_uuid", req.UserUUID),
 			logger.ErrorField("error", friendRes.err),
 		)
+		// 3. 检查好友服务调用结果是否为空
 	} else if friendRes.resp != nil {
 		isFriend = friendRes.resp.IsFriend
 	}
+	//7.非好友时脱敏
 
-	// 7. 非好友时脱敏邮箱和手机号
 	userInfo := userRes.resp.UserInfo
 	if !isFriend && userInfo.Email != "" {
-		// 脱敏邮箱：只显示前3位和@domain部分
+		//脱敏邮箱
 		userInfo.Email = utils.MaskEmail(userInfo.Email)
 	}
 	if !isFriend && userInfo.Telephone != "" {
-		// 脱敏手机号：只显示前3位和后4位
+		//脱敏手机号
 		userInfo.Telephone = utils.MaskTelephone(userInfo.Telephone)
 	}
-
-	// 8. 返回用户信息
+	//8.返回响应
 	return dto.ConvertGetOtherProfileResponseFromProto(userRes.resp, isFriend), nil
 }
 
@@ -168,29 +130,12 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 // req: 搜索用户请求
 // 返回: 搜索用户响应
 func (s *UserServiceImpl) SearchUser(ctx context.Context, req *dto.SearchUserRequest) (*dto.SearchUserResponse, error) {
-	startTime := time.Now()
-
-	// 1. 转换 DTO 为 Protobuf 请求
-	grpcReq := dto.ConvertToProtoSearchUserRequest(req)
-
-	// 2. 调用用户服务搜索用户(gRPC)
-	grpcResp, err := s.userClient.SearchUser(ctx, grpcReq)
+	//1.调用用户服务搜索用户(gRPC)
+	grpcResp, err := s.userClient.SearchUser(ctx, dto.ConvertToProtoSearchUserRequest(req))
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
-
+	//2.转换响应
 	resp := dto.ConvertSearchUserResponseFromProto(grpcResp)
 	if resp == nil || len(resp.Items) == 0 {
 		return resp, nil
@@ -211,14 +156,10 @@ func (s *UserServiceImpl) SearchUser(ctx context.Context, req *dto.SearchUserReq
 			seen[item.UUID] = struct{}{}
 			peerUUIDs = append(peerUUIDs, item.UUID)
 		}
-
 		if len(peerUUIDs) > 0 {
-			batchResp, err := s.userClient.BatchCheckIsFriend(ctx, &userpb.BatchCheckIsFriendRequest{
-				UserUuid:  currentUserUUID,
-				PeerUuids: peerUUIDs,
-			})
+			batchResp, err := s.userClient.BatchCheckIsFriend(ctx, &userpb.BatchCheckIsFriendRequest{UserUuid: currentUserUUID, PeerUuids: peerUUIDs})
 			if err != nil {
-				logger.Warn(ctx, "批量判断是否好友失败，降级返回",
+				logger.Warn(ctx, "批量判断好友关系失败，按普通搜索结果返回",
 					logger.Int("count", len(peerUUIDs)),
 					logger.ErrorField("error", err),
 				)
@@ -239,14 +180,6 @@ func (s *UserServiceImpl) SearchUser(ctx context.Context, req *dto.SearchUserReq
 			}
 		}
 	}
-
-	logger.Info(ctx, "搜索用户成功",
-		logger.String("keyword", req.Keyword),
-		logger.Int32("page", req.Page),
-		logger.Int32("page_size", req.PageSize),
-		logger.Duration("duration", time.Since(startTime)),
-	)
-
 	return resp, nil
 }
 
@@ -255,7 +188,6 @@ func (s *UserServiceImpl) SearchUser(ctx context.Context, req *dto.SearchUserReq
 // req: 更新基本信息请求
 // 返回: 更新后的个人信息响应
 func (s *UserServiceImpl) UpdateProfile(ctx context.Context, req *dto.UpdateProfileRequest) (*dto.UpdateProfileResponse, error) {
-	startTime := time.Now()
 
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoUpdateProfileRequest(req)
@@ -263,223 +195,99 @@ func (s *UserServiceImpl) UpdateProfile(ctx context.Context, req *dto.UpdateProf
 	// 2. 调用用户服务更新基本信息(gRPC)
 	grpcResp, err := s.userClient.UpdateProfile(ctx, grpcReq)
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
-
-	// 3. gRPC 调用成功，检查响应数据
+	// 3. 检查用户服务返回的用户信息是否为空
 	if grpcResp.UserInfo == nil {
-		// 成功返回但 UserInfo 为空，属于非预期的异常情况
-		logger.Error(ctx, "gRPC 成功响应但用户信息为空")
-		return nil, errors.New(strconv.Itoa(consts.CodeInternalError))
+		// 如果用户信息为空，则返回内部错误
+		return nil, apperr.New(consts.CodeInternalError)
 	}
-
 	return dto.ConvertUpdateProfileResponseFromProto(grpcResp), nil
 }
 
 // ChangePassword 修改密码
 // ctx: 请求上下文
 // req: 修改密码请求
-// 返回: 错误
+// 返回: 修改密码响应
 func (s *UserServiceImpl) ChangePassword(ctx context.Context, req *dto.ChangePasswordRequest) error {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoChangePasswordRequest(req)
-
 	// 2. 调用用户服务修改密码(gRPC)
 	_, err := s.userClient.ChangePassword(ctx, grpcReq)
-	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
-		return err
-	}
-
-	return nil
+	return err
 }
 
-// ChangeEmail 绑定/换绑邮箱
+// ChangeEmail 换绑邮箱
 // ctx: 请求上下文
 // req: 换绑邮箱请求
 // 返回: 换绑邮箱响应
 func (s *UserServiceImpl) ChangeEmail(ctx context.Context, req *dto.ChangeEmailRequest) (*dto.ChangeEmailResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoChangeEmailRequest(req)
-
 	// 2. 调用用户服务换绑邮箱(gRPC)
 	grpcResp, err := s.userClient.ChangeEmail(ctx, grpcReq)
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
-
 	return dto.ConvertChangeEmailResponseFromProto(grpcResp), nil
 }
 
 // UploadAvatar 上传头像
 // ctx: 请求上下文
-// avatarURL: 头像URL（已上传到MinIO）
-// 返回: 头像URL
+// avatarURL: 头像URL
+// 返回: 上传头像响应
 func (s *UserServiceImpl) UploadAvatar(ctx context.Context, avatarURL string) (string, error) {
-	startTime := time.Now()
-
-	// 1. 构造 gRPC 请求
-	grpcReq := &userpb.UploadAvatarRequest{
-		AvatarUrl: avatarURL,
-	}
-
-	// 2. 调用用户服务更新头像(gRPC)
+	// 1. 转换 DTO 为 Protobuf 请求
+	grpcReq := &userpb.UploadAvatarRequest{AvatarUrl: avatarURL}
+	// 2. 调用用户服务上传头像(gRPC)
 	grpcResp, err := s.userClient.UploadAvatar(ctx, grpcReq)
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		logger.Error(ctx, "调用用户服务上传头像 gRPC 失败",
-			logger.String("avatar_url", avatarURL),
-			logger.ErrorField("error", err),
-			logger.Int("business_code", code),
-			logger.String("business_message", consts.GetMessage(code)),
-			logger.Duration("duration", time.Since(startTime)),
-		)
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return "", err
 	}
-
-	logger.Info(ctx, "上传头像成功",
-		logger.String("avatar_url", grpcResp.AvatarUrl),
-		logger.Duration("duration", time.Since(startTime)),
-	)
-
 	return grpcResp.AvatarUrl, nil
 }
 
 // BatchGetProfile 批量获取用户信息
 // ctx: 请求上下文
 // req: 批量获取用户信息请求
-// 返回: 用户信息列表
+// 返回: 批量获取用户信息响应
 func (s *UserServiceImpl) BatchGetProfile(ctx context.Context, req *dto.BatchGetProfileRequest) (*dto.BatchGetProfileResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoBatchGetProfileRequest(req)
-
 	// 2. 调用用户服务批量获取用户信息(gRPC)
 	grpcResp, err := s.userClient.BatchGetProfile(ctx, grpcReq)
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		logger.Error(ctx, "调用用户服务批量获取用户信息 gRPC 失败",
-			logger.Int("count", len(req.UserUUIDs)),
-			logger.ErrorField("error", err),
-			logger.Int("business_code", code),
-			logger.String("business_message", consts.GetMessage(code)),
-			logger.Duration("duration", time.Since(startTime)),
-		)
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
-
-	logger.Info(ctx, "批量获取用户信息成功",
-		logger.Int("requested", len(req.UserUUIDs)),
-		logger.Int("found", len(grpcResp.Users)),
-		logger.Duration("duration", time.Since(startTime)),
-	)
-
 	return dto.ConvertBatchGetProfileResponseFromProto(grpcResp), nil
 }
 
 // GetQRCode 获取用户二维码
 // ctx: 请求上下文
-// 返回: 二维码响应
+// 返回: 获取用户二维码响应
 func (s *UserServiceImpl) GetQRCode(ctx context.Context) (*dto.GetQRCodeResponse, error) {
-	startTime := time.Now()
-
-	// 1. 调用用户服务获取二维码(gRPC)
+	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := &userpb.GetQRCodeRequest{}
+	// 2. 调用用户服务获取用户二维码(gRPC)
 	grpcResp, err := s.userClient.GetQRCode(ctx, grpcReq)
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
-
 	return dto.ConvertGetQRCodeResponseFromProto(grpcResp), nil
 }
 
 // ParseQRCode 解析二维码
 // ctx: 请求上下文
 // req: 解析二维码请求
-// 返回: 解析结果
+// 返回: 解析二维码响应
 func (s *UserServiceImpl) ParseQRCode(ctx context.Context, req *dto.ParseQRCodeRequest) (*dto.ParseQRCodeResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoParseQRCodeRequest(req)
-
 	// 2. 调用用户服务解析二维码(gRPC)
 	grpcResp, err := s.userClient.ParseQRCode(ctx, grpcReq)
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.String("token", req.Token),
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
-
 	return dto.ConvertParseQRCodeResponseFromProto(grpcResp), nil
 }
 
@@ -488,28 +296,12 @@ func (s *UserServiceImpl) ParseQRCode(ctx context.Context, req *dto.ParseQRCodeR
 // req: 注销账号请求
 // 返回: 注销账号响应
 func (s *UserServiceImpl) DeleteAccount(ctx context.Context, req *dto.DeleteAccountRequest) (*dto.DeleteAccountResponse, error) {
-	startTime := time.Now()
-
 	// 1. 转换 DTO 为 Protobuf 请求
 	grpcReq := dto.ConvertToProtoDeleteAccountRequest(req)
-
 	// 2. 调用用户服务注销账号(gRPC)
 	grpcResp, err := s.userClient.DeleteAccount(ctx, grpcReq)
 	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		code := utils.ExtractErrorCode(err)
-		// 记录错误日志
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
 		return nil, err
 	}
-
 	return dto.ConvertDeleteAccountResponseFromProto(grpcResp), nil
 }

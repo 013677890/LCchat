@@ -1,10 +1,10 @@
 package server
 
 import (
-	"ChatServer/apps/connect/internal/handler"
-	"ChatServer/apps/connect/internal/manager"
-	"ChatServer/apps/connect/internal/middleware"
-	"ChatServer/pkg/util"
+	"github.com/013677890/LCchat-Backend/apps/connect/internal/handler"
+	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
+	"github.com/013677890/LCchat-Backend/apps/connect/internal/middleware"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"context"
 	"fmt"
 	"net/http"
@@ -106,4 +106,12 @@ func (s *Server) Start() error {
 // 调用方需要传入带超时的 ctx，以防止无限等待。
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
+}
+
+// Addr 返回 HTTP 监听地址，便于启动日志复用。
+func (s *Server) Addr() string {
+	if s == nil || s.httpServer == nil {
+		return ""
+	}
+	return s.httpServer.Addr
 }

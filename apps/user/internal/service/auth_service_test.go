@@ -3,17 +3,17 @@ package service
 import (
 	"context"
 	"errors"
-	"strconv"
-	"sync"
+		"sync"
 	"testing"
 	"time"
 
-	"ChatServer/apps/user/internal/repository"
-	pb "ChatServer/apps/user/pb"
-	"ChatServer/consts"
-	"ChatServer/model"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/util"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,15 +173,15 @@ func (f *fakeAuthDeviceRepo) UpdateOnlineStatus(ctx context.Context, userUUID, d
 	return f.updateOnlineStatusFn(ctx, userUUID, deviceID, status)
 }
 
-func requireAuthStatusCode(t *testing.T, err error, wantCode codes.Code, wantBizCode int) {
+func requireAuthStatusCode(t *testing.T, err error, _ codes.Code, wantBizCode int) {
 	t.Helper()
 	require.Error(t, err)
-	st, ok := status.FromError(err)
+	require.Equal(t, wantBizCode, apperr.Code(err))
+	stErr := apperr.ToStatus(err)
+	st, ok := status.FromError(stErr)
 	require.True(t, ok)
-	require.Equal(t, wantCode, st.Code())
-	gotBizCode, convErr := strconv.Atoi(st.Message())
-	require.NoError(t, convErr)
-	require.Equal(t, wantBizCode, gotBizCode)
+	require.Equal(t, wantBizCode, apperr.Code(apperr.FromStatus(stErr)))
+	require.NotEmpty(t, st.Message())
 }
 
 func mustHashPassword(t *testing.T, raw string) string {
@@ -297,6 +297,37 @@ func TestUserAuthServiceRegister(t *testing.T) {
 		require.NotNil(t, resp)
 		assert.Equal(t, "u1", resp.UserUuid)
 		assert.Equal(t, "n1", resp.Nickname)
+	})
+
+	t.Run("success_without_telephone", func(t *testing.T) {
+		repo := &fakeAuthRepo{
+			verifyVerifyCodeFn: func(_ context.Context, _, _ string, codeType int32) (bool, error) {
+				require.Equal(t, int32(1), codeType)
+				return true, nil
+			},
+			createFn: func(_ context.Context, user *model.UserInfo) (*model.UserInfo, error) {
+				require.Equal(t, "a@test.com", user.Email)
+				require.NotEmpty(t, user.Password)
+				require.Equal(t, "", user.Telephone)
+				return &model.UserInfo{
+					Uuid:      user.Uuid,
+					Email:     user.Email,
+					Nickname:  "n1",
+					Telephone: user.Telephone,
+				}, nil
+			},
+		}
+		svc := NewAuthService(repo, &fakeAuthDeviceRepo{})
+
+		resp, err := svc.Register(context.Background(), &pb.RegisterRequest{
+			Email:      "a@test.com",
+			Password:   "pass123",
+			VerifyCode: "123456",
+			Nickname:   "n1",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Equal(t, "", resp.Telephone)
 	})
 }
 

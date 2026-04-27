@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"ChatServer/config"
+	"github.com/013677890/LCchat-Backend/config"
 
 	goredis "github.com/redis/go-redis/v9"
 )

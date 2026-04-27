@@ -24,12 +24,30 @@ const (
 )
 
 // MessageHandler 定义上行消息回调。
-// 参数 raw 为客户端原始二进制载荷（通常是 JSON 编码后的字节）。
-type MessageHandler func(raw []byte)
+// messageType 为 gorilla/websocket 帧类型；raw 为客户端原始载荷。
+type MessageHandler func(messageType int, raw []byte)
 
 // CloseHandler 定义连接关闭回调。
 // 用于在 read/write 循环退出后执行清理逻辑（例如从 manager 注销）。
 type CloseHandler func()
+
+type outboundFrame struct {
+	messageType int
+	payload     []byte
+	delivery    DeliveryMetadata
+}
+
+// DeliveryMetadata describes the ACK-able downlink watermark carried by a
+// WebSocket frame. It is recorded only after the frame is written successfully.
+type DeliveryMetadata struct {
+	ConvID      string
+	Seq         int64
+	AckRequired bool
+}
+
+func (m DeliveryMetadata) recordable() bool {
+	return m.AckRequired && m.ConvID != "" && m.Seq > 0
+}
 
 // Client 封装单条 WebSocket 连接。
 // 设计要点：
@@ -37,22 +55,25 @@ type CloseHandler func()
 // - done 用于统一关闭信号，读写循环都监听该信号退出；
 // - once 保证 Close 幂等，避免重复 close channel/panic。
 type Client struct {
-	conn     *websocket.Conn
-	userUUID string
-	deviceID string
-	send     chan []byte
-	done     chan struct{}
-	once     sync.Once
+	conn                  *websocket.Conn
+	userUUID              string
+	deviceID              string
+	send                  chan outboundFrame
+	done                  chan struct{}
+	once                  sync.Once
+	deliveredMu           sync.RWMutex
+	maxDeliveredSeqByConv map[string]int64
 }
 
 // NewClient 创建连接包装对象。
 func NewClient(conn *websocket.Conn, userUUID, deviceID string) *Client {
 	return &Client{
-		conn:     conn,
-		userUUID: userUUID,
-		deviceID: deviceID,
-		send:     make(chan []byte, defaultSendQueueSize),
-		done:     make(chan struct{}),
+		conn:                  conn,
+		userUUID:              userUUID,
+		deviceID:              deviceID,
+		send:                  make(chan outboundFrame, defaultSendQueueSize),
+		done:                  make(chan struct{}),
+		maxDeliveredSeqByConv: make(map[string]int64),
 	}
 }
 
@@ -70,19 +91,69 @@ func (c *Client) Done() <-chan struct{} {
 	return c.done
 }
 
-// Enqueue 将待发送消息投递到写队列。
+// RecordDeliveredSeq records the max ACK-able sequence written to this concrete
+// connection. ACK validation uses this per-connection watermark to reject ACKs
+// for messages that were never delivered to this socket.
+func (c *Client) RecordDeliveredSeq(convID string, seq int64) {
+	if c == nil || convID == "" || seq <= 0 {
+		return
+	}
+
+	c.deliveredMu.Lock()
+	if c.maxDeliveredSeqByConv == nil {
+		c.maxDeliveredSeqByConv = make(map[string]int64)
+	}
+	if c.maxDeliveredSeqByConv[convID] < seq {
+		c.maxDeliveredSeqByConv[convID] = seq
+	}
+	c.deliveredMu.Unlock()
+}
+
+// MaxDeliveredSeq returns the max ACK-able sequence that this connection has
+// successfully written for the specified conversation.
+func (c *Client) MaxDeliveredSeq(convID string) int64 {
+	if c == nil || convID == "" {
+		return 0
+	}
+
+	c.deliveredMu.RLock()
+	seq := c.maxDeliveredSeqByConv[convID]
+	c.deliveredMu.RUnlock()
+	return seq
+}
+
+// Enqueue 将文本帧投递到写队列。
 // 返回值语义：
 // - true：已成功入队；
-// - false：连接已关闭或队列已满（调用方可选择断开连接或丢弃消息）。
+// - false：连接已关闭或队列已满。
 func (c *Client) Enqueue(msg []byte) bool {
+	return c.enqueue(websocket.TextMessage, msg, DeliveryMetadata{})
+}
+
+// EnqueueBinary 将二进制帧投递到写队列。
+func (c *Client) EnqueueBinary(msg []byte) bool {
+	return c.enqueue(websocket.BinaryMessage, msg, DeliveryMetadata{})
+}
+
+// EnqueueBinaryWithDelivery 将二进制业务帧投递到写队列，并携带 ACK 水位。
+// 水位只会在帧成功写入 WebSocket 后记录，避免客户端 ACK 未实际下发的 seq。
+func (c *Client) EnqueueBinaryWithDelivery(msg []byte, delivery DeliveryMetadata) bool {
+	return c.enqueue(websocket.BinaryMessage, msg, delivery)
+}
+
+func (c *Client) enqueue(messageType int, msg []byte, delivery DeliveryMetadata) bool {
 	if len(msg) == 0 {
 		return true
 	}
-	cloned := append([]byte(nil), msg...)
+	frame := outboundFrame{
+		messageType: messageType,
+		payload:     append([]byte(nil), msg...),
+		delivery:    delivery,
+	}
 	select {
 	case <-c.done:
 		return false
-	case c.send <- cloned:
+	case c.send <- frame:
 		return true
 	default:
 		return false
@@ -138,13 +209,13 @@ func (c *Client) CloseGracefully() {
 // 退出依赖连接关闭（Close）或网络读错误。
 func (c *Client) readLoop(onMessage MessageHandler) {
 	for {
-		_, raw, err := c.conn.ReadMessage()
+		messageType, raw, err := c.conn.ReadMessage()
 		if err != nil {
 			return
 		}
 
 		if onMessage != nil {
-			onMessage(raw)
+			onMessage(messageType, raw)
 		}
 	}
 }
@@ -163,8 +234,8 @@ func (c *Client) writeLoop(ctx context.Context) {
 			return
 		case <-c.done:
 			return
-		case msg := <-c.send:
-			if err := c.writeBatch(msg); err != nil {
+		case frame := <-c.send:
+			if err := c.writeBatch(frame); err != nil {
 				c.Close()
 				return
 			}
@@ -179,15 +250,15 @@ func (c *Client) writeLoop(ctx context.Context) {
 
 // writeBatch 先发送当前消息，再尽量清空队列中已积压的消息。
 // 说明：每条业务消息仍保持独立 WebSocket 帧语义，避免破坏上层协议解析。
-func (c *Client) writeBatch(first []byte) error {
+func (c *Client) writeBatch(first outboundFrame) error {
 	if err := c.writeFrame(first); err != nil {
 		return err
 	}
 
 	for i := 0; i < wsBatchDrainLimit; i++ {
 		select {
-		case msg := <-c.send:
-			if err := c.writeFrame(msg); err != nil {
+		case frame := <-c.send:
+			if err := c.writeFrame(frame); err != nil {
 				return err
 			}
 		default:
@@ -197,19 +268,24 @@ func (c *Client) writeBatch(first []byte) error {
 	return nil
 }
 
-// writeFrame 使用 NextWriter 发送单条文本帧。
-// 与直接 WriteMessage 相比，可为后续更细粒度写优化保留扩展点。
-func (c *Client) writeFrame(msg []byte) error {
+// writeFrame 使用 NextWriter 发送单条帧。
+func (c *Client) writeFrame(frame outboundFrame) error {
 	_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-	writer, err := c.conn.NextWriter(websocket.TextMessage)
+	writer, err := c.conn.NextWriter(frame.messageType)
 	if err != nil {
 		return err
 	}
-	if _, err = writer.Write(msg); err != nil {
+	if _, err = writer.Write(frame.payload); err != nil {
 		_ = writer.Close()
 		return err
 	}
-	return writer.Close()
+	if err = writer.Close(); err != nil {
+		return err
+	}
+	if frame.delivery.recordable() {
+		c.RecordDeliveredSeq(frame.delivery.ConvID, frame.delivery.Seq)
+	}
+	return nil
 }
 
 // writePing 发送协议层 Ping 保活包。

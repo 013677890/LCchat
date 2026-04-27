@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"ChatServer/apps/user/internal/repository"
-	pb "ChatServer/apps/user/pb"
-	"ChatServer/consts"
-	"ChatServer/model"
-	"ChatServer/pkg/logger"
-	"ChatServer/pkg/util"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,12 +45,14 @@ func withDeviceContext(userUUID, deviceID string) context.Context {
 func requireDeviceStatusCode(t *testing.T, err error, wantGRPCCode codes.Code, wantBizCode int) {
 	t.Helper()
 	require.Error(t, err)
-	st, ok := status.FromError(err)
+	require.Equal(t, wantBizCode, apperr.Code(err))
+
+	stErr := apperr.ToStatus(err)
+	converted := apperr.FromStatus(stErr)
+	require.Equal(t, wantBizCode, apperr.Code(converted))
+	st, ok := status.FromError(stErr)
 	require.True(t, ok)
 	require.Equal(t, wantGRPCCode, st.Code())
-	gotBizCode, convErr := strconv.Atoi(st.Message())
-	require.NoError(t, convErr)
-	require.Equal(t, wantBizCode, gotBizCode)
 }
 
 type fakeDeviceRepository struct {

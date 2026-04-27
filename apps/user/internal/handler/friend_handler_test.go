@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"ChatServer/apps/user/internal/service"
-	pb "ChatServer/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/service"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

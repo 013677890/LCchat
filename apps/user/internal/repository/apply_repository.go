@@ -5,10 +5,10 @@ import (
 	"strconv"
 	"time"
 
-	"ChatServer/consts/redisKey"
-	"ChatServer/model"
-	"ChatServer/pkg/async"
-	"ChatServer/pkg/logger"
+	"github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"

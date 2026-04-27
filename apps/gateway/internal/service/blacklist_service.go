@@ -1,14 +1,12 @@
 package service
 
 import (
-	"ChatServer/apps/gateway/internal/dto"
-	"ChatServer/apps/gateway/internal/pb"
-	"ChatServer/apps/gateway/internal/utils"
-	userpb "ChatServer/apps/user/pb"
-	"ChatServer/consts"
-	"ChatServer/pkg/logger"
 	"context"
-	"time"
+
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
 // BlacklistServiceImpl 黑名单服务实现
@@ -26,20 +24,10 @@ func NewBlacklistService(userClient pb.UserServiceClient) BlacklistService {
 
 // AddBlacklist 拉黑用户
 func (s *BlacklistServiceImpl) AddBlacklist(ctx context.Context, req *dto.AddBlacklistRequest) (*dto.AddBlacklistResponse, error) {
-	startTime := time.Now()
 
 	grpcReq := dto.ConvertToProtoAddBlacklistRequest(req)
 	grpcResp, err := s.userClient.AddBlacklist(ctx, grpcReq)
 	if err != nil {
-		code := utils.ExtractErrorCode(err)
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		return nil, err
 	}
 
@@ -48,20 +36,10 @@ func (s *BlacklistServiceImpl) AddBlacklist(ctx context.Context, req *dto.AddBla
 
 // RemoveBlacklist 取消拉黑
 func (s *BlacklistServiceImpl) RemoveBlacklist(ctx context.Context, req *dto.RemoveBlacklistRequest) (*dto.RemoveBlacklistResponse, error) {
-	startTime := time.Now()
 
 	grpcReq := dto.ConvertToProtoRemoveBlacklistRequest(req)
 	grpcResp, err := s.userClient.RemoveBlacklist(ctx, grpcReq)
 	if err != nil {
-		code := utils.ExtractErrorCode(err)
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		return nil, err
 	}
 
@@ -70,7 +48,6 @@ func (s *BlacklistServiceImpl) RemoveBlacklist(ctx context.Context, req *dto.Rem
 
 // GetBlacklistList 获取黑名单列表
 func (s *BlacklistServiceImpl) GetBlacklistList(ctx context.Context, req *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
-	startTime := time.Now()
 
 	grpcReq := &userpb.GetBlacklistListRequest{
 		Page:     req.Page,
@@ -78,15 +55,6 @@ func (s *BlacklistServiceImpl) GetBlacklistList(ctx context.Context, req *dto.Ge
 	}
 	grpcResp, err := s.userClient.GetBlacklistList(ctx, grpcReq)
 	if err != nil {
-		code := utils.ExtractErrorCode(err)
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		return nil, err
 	}
 
@@ -172,20 +140,10 @@ func (s *BlacklistServiceImpl) batchGetSimpleUserInfo(ctx context.Context, uuids
 
 // CheckIsBlacklist 判断是否拉黑
 func (s *BlacklistServiceImpl) CheckIsBlacklist(ctx context.Context, req *dto.CheckIsBlacklistRequest) (*dto.CheckIsBlacklistResponse, error) {
-	startTime := time.Now()
 
 	grpcReq := dto.ConvertToProtoCheckIsBlacklistRequest(req)
 	grpcResp, err := s.userClient.CheckIsBlacklist(ctx, grpcReq)
 	if err != nil {
-		code := utils.ExtractErrorCode(err)
-		if code >= 30000 {
-			logger.Error(ctx, "调用用户服务 gRPC 失败",
-				logger.ErrorField("error", err),
-				logger.Int("business_code", code),
-				logger.String("business_message", consts.GetMessage(code)),
-				logger.Duration("duration", time.Since(startTime)),
-			)
-		}
 		return nil, err
 	}
 

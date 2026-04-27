@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"ChatServer/apps/user/internal/service"
-	pb "ChatServer/apps/user/pb"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/service"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"context"
 )
 

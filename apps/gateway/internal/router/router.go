@@ -1,10 +1,10 @@
 package router
 
 import (
-	"ChatServer/apps/gateway/internal/middleware"
-	v1 "ChatServer/apps/gateway/internal/router/v1"
-	"ChatServer/consts/redisKey"
-	"ChatServer/pkg/util"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
+	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
+	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -16,7 +16,8 @@ import (
 // friendHandler: 好友处理器（依赖注入）
 // blacklistHandler: 黑名单处理器（依赖注入）
 // deviceHandler: 设备处理器（依赖注入）
-func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friendHandler *v1.FriendHandler, blacklistHandler *v1.BlacklistHandler, deviceHandler *v1.DeviceHandler) *gin.Engine {
+// msgHandler: 消息处理器（依赖注入）
+func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friendHandler *v1.FriendHandler, blacklistHandler *v1.BlacklistHandler, deviceHandler *v1.DeviceHandler, msgHandler *v1.MsgHandler) *gin.Engine {
 	r := gin.New()
 
 	// 恢复中间件
@@ -137,7 +138,22 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				blacklist.POST("", blacklistHandler.AddBlacklist)
 				blacklist.GET("", blacklistHandler.GetBlacklistList)
 				blacklist.DELETE("/:userUuid", blacklistHandler.RemoveBlacklist)
-				blacklist.POST("/check", blacklistHandler.CheckIsBlacklist)
+				// /check 接口存在越权查询风险（GATEWAY-001），暂不对外暴露。
+				// 如需判断黑名单关系，调用方应通过内部 gRPC 接口。
+			}
+			messages := auth.Group("/messages")
+			{
+				messages.POST("/send", msgHandler.SendMessage)
+				messages.GET("/pull", msgHandler.PullMessages)
+				messages.POST("/get-by-ids", msgHandler.GetMessagesByIds)
+				messages.POST("/recall", msgHandler.RecallMessage)
+			}
+			conversations := auth.Group("/conversations")
+			{
+				conversations.GET("", msgHandler.GetConversations)
+				conversations.POST("/mark-read", msgHandler.MarkRead)
+				conversations.DELETE("/:convId", msgHandler.DeleteConversation)
+				conversations.PATCH("/settings", msgHandler.UpdateConversationSettings)
 			}
 		}
 	}

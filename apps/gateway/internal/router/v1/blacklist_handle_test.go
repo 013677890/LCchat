@@ -10,16 +10,13 @@ import (
 	"sync"
 	"testing"
 
-	"ChatServer/apps/gateway/internal/dto"
-	"ChatServer/consts"
-	"ChatServer/pkg/logger"
+	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type fakeBlacklistHTTPService struct {
@@ -65,7 +62,6 @@ var gatewayBlacklistHandlerLoggerOnce sync.Once
 
 func initGatewayBlacklistHandlerLogger() {
 	gatewayBlacklistHandlerLoggerOnce.Do(func() {
-		logger.ReplaceGlobal(zap.NewNop())
 		gin.SetMode(gin.TestMode)
 	})
 }
@@ -117,7 +113,7 @@ func TestBlacklistHandlerAddBlacklist(t *testing.T) {
 			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
 				svc.addFn = func(_ context.Context, _ *dto.AddBlacklistRequest) (*dto.AddBlacklistResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeCannotBlacklistSelf), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeCannotBlacklistSelf))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -213,7 +209,7 @@ func TestBlacklistHandlerRemoveBlacklist(t *testing.T) {
 			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
 				svc.removeFn = func(_ context.Context, _ *dto.RemoveBlacklistRequest) (*dto.RemoveBlacklistResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeNotInBlacklist), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeNotInBlacklist))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -323,7 +319,7 @@ func TestBlacklistHandlerGetBlacklistList(t *testing.T) {
 			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
 				svc.listFn = func(_ context.Context, _ *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeParamError), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeParamError))
 				}
 			},
 			wantStatus: http.StatusOK,
@@ -415,7 +411,7 @@ func TestBlacklistHandlerCheckIsBlacklist(t *testing.T) {
 			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
 				svc.checkFn = func(_ context.Context, _ *dto.CheckIsBlacklistRequest) (*dto.CheckIsBlacklistResponse, error) {
 					*called = true
-					return nil, status.Error(codes.Code(consts.CodeParamError), "biz")
+					return nil, apperr.ToStatus(apperr.New(consts.CodeParamError))
 				}
 			},
 			wantStatus: http.StatusOK,

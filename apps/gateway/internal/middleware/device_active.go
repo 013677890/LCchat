@@ -1,8 +1,8 @@
 package middleware
 
 import (
-	"ChatServer/config"
-	"ChatServer/pkg/deviceactive"
+	"github.com/013677890/LCchat-Backend/config"
+	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"sync"
 	"time"
 )
