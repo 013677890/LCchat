@@ -201,7 +201,7 @@ func (h *WSHandler) handleMessageAck(ctx context.Context, client *manager.Client
 	}
 
 	maxDeliveredSeq := client.MaxDeliveredSeq(ackData.ConvID)
-	if ackData.Seq <= 0 || ackData.Seq > maxDeliveredSeq {
+	if !messageAckSeqWithinDelivered(ackData.Seq, maxDeliveredSeq) {
 		logger.Warn(ctx, "消息 ACK 超过当前连接已下发位点，拒绝写入",
 			logger.String("user_uuid", session.UserUUID),
 			logger.String("device_id", session.DeviceID),
@@ -238,6 +238,10 @@ func (h *WSHandler) handleMessageAck(ctx context.Context, client *manager.Client
 	if !client.EnqueueBinary(ack) {
 		client.Close()
 	}
+}
+
+func messageAckSeqWithinDelivered(ackSeq, maxDeliveredSeq int64) bool {
+	return ackSeq > 0 && ackSeq <= maxDeliveredSeq
 }
 
 // sendErrorFrame 发送 ws 协议层错误帧。

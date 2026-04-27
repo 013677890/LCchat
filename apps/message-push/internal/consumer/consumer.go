@@ -33,11 +33,24 @@ var handleBackoffs = []time.Duration{
 	800 * time.Millisecond,
 }
 
+type routeRepository interface {
+	ListUserRoutes(ctx context.Context, userUUID string) ([]route.DeviceRoute, error)
+	ListUsersRoutes(ctx context.Context, userUUIDs []string) (map[string][]route.DeviceRoute, error)
+}
+
+type deviceSender interface {
+	PushToDevice(ctx context.Context, connectAddr, userUUID, deviceID string, envelope *connectpb.MessageEnvelope) error
+}
+
+type groupMemberFetcher interface {
+	GetGroupMembers(ctx context.Context, groupUUID string) ([]string, error)
+}
+
 // EventHandler 处理 Kafka 中的 MsgPushEvent。
 type EventHandler struct {
-	routes *route.RedisRepository
-	sender *connectcli.Sender
-	groups *groupcli.Client
+	routes routeRepository
+	sender deviceSender
+	groups groupMemberFetcher
 }
 
 // NewEventHandler 创建事件处理器。
