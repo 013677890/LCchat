@@ -55,9 +55,17 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 		loggingCfg = DefaultLoggingConfig()
 	}
 
+	var timeoutCfg TimeoutConfig
+	if opts.Timeout != nil {
+		timeoutCfg = *opts.Timeout
+	}
+
 	unaryInters := []grpc.UnaryServerInterceptor{
 		RecoveryUnaryInterceptor(),
 		MetadataUnaryInterceptor(),
+		// timeout 要尽早生效，这样后续 validate / rate-limit / metrics / 业务处理
+		// 看到的都是同一个被收紧后的请求级 deadline。
+		TimeoutUnaryInterceptor(timeoutCfg),
 		ValidateUnaryInterceptor(),
 		RateLimitUnaryInterceptor(rateLimitCfg),
 		metrics.UnaryInterceptor(),

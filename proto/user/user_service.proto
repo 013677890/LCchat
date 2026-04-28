@@ -15,39 +15,63 @@ import "validate/validate.proto";
 
 service UserService {
 	// GetProfile 获取个人信息
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
 	
 	// GetOtherProfile 获取他人信息
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc GetOtherProfile(GetOtherProfileRequest) returns (GetOtherProfileResponse);
 	
 	// SearchUser 搜索用户
+	// 建议调用超时：800ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc SearchUser(SearchUserRequest) returns (SearchUserResponse);
 	
 	// UpdateProfile 更新基本信息
+	// 建议调用超时：500ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
 	
 	// UploadAvatar 上传头像
+	// 建议调用超时：500ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc UploadAvatar(UploadAvatarRequest) returns (UploadAvatarResponse);
 	
 	// ChangePassword 修改密码
+	// 建议调用超时：500ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
 	
 	// ChangeEmail 绑定/换绑邮箱
+	// 建议调用超时：500ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc ChangeEmail(ChangeEmailRequest) returns (ChangeEmailResponse);
 	
 	// ChangeTelephone 绑定/换绑手机
+	// 建议调用超时：500ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc ChangeTelephone(ChangeTelephoneRequest) returns (ChangeTelephoneResponse);
 	
 	// GetQRCode 获取用户二维码
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc GetQRCode(GetQRCodeRequest) returns (GetQRCodeResponse);
 	
 	// ParseQRCode 解析二维码
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc ParseQRCode(ParseQRCodeRequest) returns (ParseQRCodeResponse);
 	
 	// DeleteAccount 注销账号
+	// 建议调用超时：1000ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
 	
 	// BatchGetProfile 批量获取用户信息
+	// 建议调用超时：800ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc BatchGetProfile(BatchGetProfileRequest) returns (BatchGetProfileResponse);
 }
 

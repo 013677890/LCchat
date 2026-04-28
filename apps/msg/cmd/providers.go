@@ -38,6 +38,8 @@ type msgUserGRPCAddress string
 type msgAsyncReleaseTimeout time.Duration
 type msgGRPCShutdownTimeout time.Duration
 
+const msgGRPCDefaultTimeout = 500 * time.Millisecond
+
 func provideLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideAsyncConfig() config.AsyncConfig   { return config.DefaultAsyncConfig() }
 func provideMySQLConfig() config.MySQLConfig   { return config.DefaultMySQLConfig() }
@@ -78,7 +80,13 @@ func provideMsgUserGRPCAddress() msgUserGRPCAddress {
 }
 
 func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (*grpc.ClientConn, error) {
-	conn, err := grpc.NewClient(string(addr), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		string(addr),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
+		),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("msg 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
 	}
@@ -132,7 +140,13 @@ func provideMsgRegistration(msgHandler *handler.MsgHandler) grpcx.RegistrationFu
 }
 
 func provideMsgGRPCServer(register grpcx.RegistrationFunc, addr grpcAddress) (*grpcx.BuiltServer, error) {
-	opts := grpcx.ServerOptions{Address: string(addr), Namespace: "msg", EnableHealth: true, EnableReflection: true}
+	opts := grpcx.ServerOptions{
+		Address:          string(addr),
+		Namespace:        "msg",
+		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: msgGRPCDefaultTimeout},
+		EnableHealth:     true,
+		EnableReflection: true,
+	}
 	return grpcx.NewServer(opts, register)
 }
 

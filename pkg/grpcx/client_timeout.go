@@ -1,0 +1,116 @@
+package grpcx
+
+import (
+	"context"
+	"time"
+
+	"google.golang.org/grpc"
+)
+
+// ClientTimeoutConfig 定义 gRPC 客户端按方法收紧 deadline 的策略。
+// 这里先以内存 map 维护推荐值，后续可平滑演进到配置中心下发。
+type ClientTimeoutConfig struct {
+	// MethodTimeouts 按 full method 指定超时，例如 /user.AuthService/Login。
+	MethodTimeouts map[string]time.Duration
+}
+
+// ClientTimeoutUnaryInterceptor 为上游调用方补齐下游方法级 deadline。
+// 规则：实际生效 deadline = min(父 deadline, 方法推荐 timeout)。
+func ClientTimeoutUnaryInterceptor(cfg ClientTimeoutConfig) grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		timeout := resolveClientTimeout(method, cfg)
+		if timeout <= 0 {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
+
+		callCtx, cancel, _ := newGRPCTimeoutContext(ctx, timeout)
+		defer cancel()
+
+		return invoker(callCtx, method, req, reply, cc, opts...)
+	}
+}
+
+func resolveClientTimeout(fullMethod string, cfg ClientTimeoutConfig) time.Duration {
+	if cfg.MethodTimeouts == nil {
+		return 0
+	}
+	return cfg.MethodTimeouts[fullMethod]
+}
+
+// DefaultClientMethodTimeouts 返回当前内置的下游方法推荐超时。
+// 调用方拿到的是副本，可按需增删而不影响全局默认值。
+func DefaultClientMethodTimeouts() map[string]time.Duration {
+	return cloneDurationMap(defaultClientMethodTimeouts)
+}
+
+func cloneDurationMap(src map[string]time.Duration) map[string]time.Duration {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]time.Duration, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+var defaultClientMethodTimeouts = map[string]time.Duration{
+	"/user.AuthService/Register":           500 * time.Millisecond,
+	"/user.AuthService/Login":              500 * time.Millisecond,
+	"/user.AuthService/LoginByCode":        500 * time.Millisecond,
+	"/user.AuthService/SendVerifyCode":     500 * time.Millisecond,
+	"/user.AuthService/VerifyCode":         500 * time.Millisecond,
+	"/user.AuthService/RefreshToken":       300 * time.Millisecond,
+	"/user.AuthService/Logout":             1000 * time.Millisecond,
+	"/user.AuthService/ResetPassword":      500 * time.Millisecond,
+	"/user.UserService/GetProfile":         300 * time.Millisecond,
+	"/user.UserService/GetOtherProfile":    300 * time.Millisecond,
+	"/user.UserService/SearchUser":         800 * time.Millisecond,
+	"/user.UserService/UpdateProfile":      500 * time.Millisecond,
+	"/user.UserService/UploadAvatar":       500 * time.Millisecond,
+	"/user.UserService/ChangePassword":     500 * time.Millisecond,
+	"/user.UserService/ChangeEmail":        500 * time.Millisecond,
+	"/user.UserService/ChangeTelephone":    500 * time.Millisecond,
+	"/user.UserService/GetQRCode":          300 * time.Millisecond,
+	"/user.UserService/ParseQRCode":        300 * time.Millisecond,
+	"/user.UserService/DeleteAccount":      1000 * time.Millisecond,
+	"/user.UserService/BatchGetProfile":    800 * time.Millisecond,
+	"/user.FriendService/SendFriendApply":  500 * time.Millisecond,
+	"/user.FriendService/GetFriendApplyList": 300 * time.Millisecond,
+	"/user.FriendService/GetSentApplyList":    300 * time.Millisecond,
+	"/user.FriendService/HandleFriendApply":   500 * time.Millisecond,
+	"/user.FriendService/GetUnreadApplyCount": 300 * time.Millisecond,
+	"/user.FriendService/MarkApplyAsRead":     300 * time.Millisecond,
+	"/user.FriendService/GetFriendList":       300 * time.Millisecond,
+	"/user.FriendService/SyncFriendList":      800 * time.Millisecond,
+	"/user.FriendService/DeleteFriend":        500 * time.Millisecond,
+	"/user.FriendService/SetFriendRemark":     500 * time.Millisecond,
+	"/user.FriendService/SetFriendTag":        500 * time.Millisecond,
+	"/user.FriendService/GetTagList":          300 * time.Millisecond,
+	"/user.FriendService/CheckIsFriend":       300 * time.Millisecond,
+	"/user.FriendService/BatchCheckIsFriend":  800 * time.Millisecond,
+	"/user.FriendService/GetRelationStatus":   300 * time.Millisecond,
+	"/user.BlacklistService/AddBlacklist":     500 * time.Millisecond,
+	"/user.BlacklistService/RemoveBlacklist":  500 * time.Millisecond,
+	"/user.BlacklistService/GetBlacklistList": 300 * time.Millisecond,
+	"/user.BlacklistService/CheckIsBlacklist": 300 * time.Millisecond,
+	"/user.DeviceService/GetDeviceList":       300 * time.Millisecond,
+	"/user.DeviceService/KickDevice":          500 * time.Millisecond,
+	"/user.DeviceService/GetOnlineStatus":     300 * time.Millisecond,
+	"/user.DeviceService/BatchGetOnlineStatus": 800 * time.Millisecond,
+	"/user.DeviceService/UpdateDeviceActive":    800 * time.Millisecond,
+	"/user.DeviceService/UpdateDeviceStatus":    500 * time.Millisecond,
+	"/user.GroupService/GetGroupMembers":        800 * time.Millisecond,
+	"/msg.MsgService/SendMessage":               1000 * time.Millisecond,
+	"/msg.MsgService/PullMessages":              500 * time.Millisecond,
+	"/msg.MsgService/GetMessagesByIds":          500 * time.Millisecond,
+	"/msg.MsgService/RecallMessage":             500 * time.Millisecond,
+	"/msg.MsgService/GetConversations":          800 * time.Millisecond,
+	"/msg.MsgService/MarkRead":                  500 * time.Millisecond,
+	"/msg.MsgService/DeleteConversation":        500 * time.Millisecond,
+	"/msg.MsgService/UpdateConversationSettings": 500 * time.Millisecond,
+	"/connect.ConnectService/PushToDevice":        300 * time.Millisecond,
+	"/connect.ConnectService/PushToUser":          300 * time.Millisecond,
+	"/connect.ConnectService/BroadcastToUsers":    500 * time.Millisecond,
+	"/connect.ConnectService/KickConnection":      300 * time.Millisecond,
+}

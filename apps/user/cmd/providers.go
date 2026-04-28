@@ -37,6 +37,8 @@ type userAsyncReleaseTimeout time.Duration
 
 type userGRPCShutdownTimeout time.Duration
 
+const userGRPCDefaultTimeout = 300 * time.Millisecond
+
 func provideUserLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideUserAsyncConfig() config.AsyncConfig { return config.DefaultAsyncConfig() }
 func provideUserMySQLConfig() config.MySQLConfig { return config.DefaultMySQLConfig() }
@@ -153,6 +155,7 @@ func provideUserGRPCServer(register grpcx.RegistrationFunc, addr userGRPCAddress
 	return grpcx.NewServer(grpcx.ServerOptions{
 		Address:          string(addr),
 		Namespace:        "user",
+		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: userGRPCDefaultTimeout},
 		EnableHealth:     true,
 		EnableReflection: true,
 	}, register)

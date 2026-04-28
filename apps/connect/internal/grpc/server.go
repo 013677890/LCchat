@@ -17,6 +17,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const connectGRPCDefaultTimeout = 300 * time.Millisecond
+
 // Server 封装 connect gRPC 服务的启动与停机。
 type Server struct {
 	pb.UnimplementedConnectServiceServer
@@ -33,8 +35,9 @@ func NewServer(addr string, connManager *manager.ConnectionManager) *Server {
 		addr:        addr,
 	}
 
-	// 构建拦截器链：Recovery → Metadata → RateLimit → Metrics → Logging
-	// connect 的 RPS 阈值高于 user 服务（大量推送调用）。
+	// 构建拦截器链：Recovery → Metadata → Timeout → RateLimit → Metrics → Logging
+	// connect 的 RPS 阈值高于 user 服务（大量推送调用），
+	// 但服务端预算仍应保持在 300ms 级别，避免内部 hop 拉长整体推送尾延迟。
 	rateLimitCfg := grpcx.RateLimitConfig{
 		RequestsPerSecond: 5000,
 		Burst:             8000,
@@ -45,6 +48,7 @@ func NewServer(addr string, connManager *manager.ConnectionManager) *Server {
 	unaryInters := []grpc.UnaryServerInterceptor{
 		grpcx.RecoveryUnaryInterceptor(),
 		grpcx.MetadataUnaryInterceptor(),
+		grpcx.TimeoutUnaryInterceptor(grpcx.TimeoutConfig{DefaultTimeout: connectGRPCDefaultTimeout}),
 		grpcx.ValidateUnaryInterceptor(),
 		grpcx.RateLimitUnaryInterceptor(rateLimitCfg),
 		metrics.UnaryInterceptor(),

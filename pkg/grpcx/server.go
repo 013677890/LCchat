@@ -2,6 +2,7 @@ package grpcx
 
 import (
 	"context"
+
 	"google.golang.org/grpc"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 )
@@ -18,6 +19,8 @@ type ServerOptions struct {
 	RateLimit *RateLimitConfig
 	// Logging 日志参数，nil 时使用 DefaultLoggingConfig()。
 	Logging *LoggingConfig
+	// Timeout 请求级兜底 deadline，nil 或 DefaultTimeout<=0 时不启用服务端兜底。
+	Timeout *TimeoutConfig
 	// MetricsConfig 指标参数，nil 时使用 DefaultMetricsConfig() + Namespace。
 	MetricsConfig *MetricsConfig
 

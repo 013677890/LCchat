@@ -12,6 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
 	mpserver "github.com/013677890/LCchat-Backend/apps/message-push/internal/server"
 	"github.com/013677890/LCchat-Backend/config"
+	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"github.com/google/wire"
@@ -117,7 +118,13 @@ func provideMessagePushUserGRPCAddress() messagePushUserGRPCAddress {
 
 // 群聊扩散依赖 user-service 提供群成员列表，因此该连接是启动必需依赖。
 func provideMessagePushUserGRPCConn(_ *zap.Logger, addr messagePushUserGRPCAddress) (*googlegrpc.ClientConn, error) {
-	conn, err := googlegrpc.NewClient(string(addr), googlegrpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := googlegrpc.NewClient(
+		string(addr),
+		googlegrpc.WithTransportCredentials(insecure.NewCredentials()),
+		googlegrpc.WithChainUnaryInterceptor(
+			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
+		),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("message-push 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
 	}

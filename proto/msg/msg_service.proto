@@ -15,18 +15,24 @@ service MsgService {
   // SendMessage 发送一条消息（单聊/群聊统一入口）。
   // 幂等保证：同一 (from_uuid, device_id, client_msg_id) 不会重复持久化。
   // 内部流程：校验 → 幂等检查 → 持久化 → 分配 seq → 写 Kafka → 返回。
+  // 建议调用超时：1000ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
 
   // ==================== 消息拉取 ====================
 
   // PullMessages 按会话增量拉取历史消息（基于 seq）。
   // 客户端记录锚点 seq，按方向拉取前后消息。
+  // 建议调用超时：500ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc PullMessages(PullMessagesRequest) returns (PullMessagesResponse);
 
   // GetMessagesByIds 批量获取指定消息。
   // 典型场景：
   // - 用户点击引用/回复区域，需要跳转到原始消息；
   // - 推送通知只携带 msg_id，客户端需要反查详情。
+  // 建议调用超时：500ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc GetMessagesByIds(GetMessagesByIdsRequest) returns (GetMessagesByIdsResponse);
 
   // ==================== 消息操作 ====================
@@ -35,6 +41,8 @@ service MsgService {
   // 权限：发送者本人可在 2 分钟内撤回；群管理员/群主可撤回群内任意成员消息（不受时间限制）。
   // 撤回后 status 置为 1，content 被改写为系统提示 JSON（含 operator），
   // 同时对所有在线终端推送撤回通知。
+  // 建议调用超时：500ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc RecallMessage(RecallMessageRequest) returns (RecallMessageResponse);
 
   // ==================== 会话管理 ====================
@@ -43,20 +51,28 @@ service MsgService {
   // 支持两种模式：
   // - 全量：首次登录，拉取所有活跃会话（按 updated_at 倒序分页）；
   // - 增量：传入 updated_since，只返回该时间点之后有变更的会话。
+  // 建议调用超时：800ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc GetConversations(GetConversationsRequest) returns (GetConversationsResponse);
 
   // MarkRead 标记会话已读（基于已读位点 read_seq）。
   // 多端同步：服务端更新 read_seq 后，会向该用户在线设备推送 MarkRead 通知，
   // 各端据此同步清除红点。
+  // 建议调用超时：500ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
 
   // DeleteConversation 删除（关闭）会话。
   // 逻辑删除：status 置为 1，同时记录 clear_seq = 当前 max_seq。
   // 后续 PullMessages 时增加 seq > clear_seq 过滤，防止被删除的消息"幽灵复活"。
   // read_seq 同步设为 max_seq（未读数归零）。
+  // 建议调用超时：500ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc DeleteConversation(DeleteConversationRequest) returns (DeleteConversationResponse);
 
   // UpdateConversationSettings 更新会话设置（免打扰/置顶）。
+  // 建议调用超时：500ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc UpdateConversationSettings(UpdateConvSettingsRequest) returns (UpdateConvSettingsResponse);
 }
 

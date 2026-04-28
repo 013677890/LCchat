@@ -11,6 +11,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/svc"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/config"
+	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"github.com/google/wire"
@@ -65,7 +66,13 @@ func provideConnectGRPCAddress() connectGRPCAddress {
 
 // user-service gRPC 连接失败时允许降级运行，因此这里返回 nil 连接和 nil 错误。
 func provideUserGRPCConn(log *zap.Logger, addr connectUserGRPCAddress) (*googlegrpc.ClientConn, error) {
-	conn, err := googlegrpc.NewClient(string(addr), googlegrpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := googlegrpc.NewClient(
+		string(addr),
+		googlegrpc.WithTransportCredentials(insecure.NewCredentials()),
+		googlegrpc.WithChainUnaryInterceptor(
+			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
+		),
+	)
 	if err != nil {
 		logger.Warn(context.Background(), "user-service gRPC 连接创建失败，降级为无设备状态同步模式",
 			logger.String("addr", string(addr)),

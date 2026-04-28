@@ -15,15 +15,23 @@ import "validate/validate.proto";
 
 service BlacklistService {
 	// AddBlacklist 拉黑用户
+	// 建议调用超时：500ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc AddBlacklist(AddBlacklistRequest) returns (AddBlacklistResponse);
 	
 	// RemoveBlacklist 取消拉黑
+	// 建议调用超时：500ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc RemoveBlacklist(RemoveBlacklistRequest) returns (RemoveBlacklistResponse);
 	
 	// GetBlacklistList 获取黑名单列表
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc GetBlacklistList(GetBlacklistListRequest) returns (GetBlacklistListResponse);
 	
 	// CheckIsBlacklist 判断是否拉黑
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc CheckIsBlacklist(CheckIsBlacklistRequest) returns (CheckIsBlacklistResponse);
 }
 

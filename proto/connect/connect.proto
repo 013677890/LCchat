@@ -20,21 +20,29 @@ import "validate/validate.proto";
 service ConnectService {
 	// PushToDevice 向指定用户的指定设备投递消息。
 	// 典型场景：单设备回执、仅当前设备可见的安全提示。
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc PushToDevice(PushToDeviceRequest) returns (PushToDeviceResponse);
 
 	// PushToUser 向用户在本节点上的所有在线设备广播。
 	// 典型场景：push-job 查到用户在此节点，直接推全设备。
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc PushToUser(PushToUserRequest) returns (PushToUserResponse);
 
 	// BroadcastToUsers 批量向多个用户广播相同的消息。
 	// 典型场景：全服维护公告（管理后台遍历所有 Connect 节点调用）。
 	// 限制：单次最多 1000 个用户，超出应分批调用。
+	// 建议调用超时：500ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc BroadcastToUsers(BroadcastToUsersRequest) returns (BroadcastToUsersResponse);
 
 	// KickConnection 主动断开指定设备连接。
 	// 典型场景：user-service 封禁账号 / 异地登录时精确踢线。
 	// 注意：调用方（user-service）需先查 Redis 路由表获取目标所在 Connect 节点地址，
 	// 才能将 gRPC 请求打到正确的节点。
+	// 建议调用超时：300ms。
+	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc KickConnection(KickConnectionRequest) returns (KickConnectionResponse);
 }
 
