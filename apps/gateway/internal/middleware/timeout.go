@@ -1,80 +1,89 @@
 package middleware
 
 import (
-	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/result"
 	"context"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/gin-gonic/gin"
 )
 
-// TimeoutMiddleware 请求超时控制中间件
-// 安全版本：不开启 Goroutine，依赖下游 Context 感知
+// TimeoutMiddleware 请求超时控制中间件。
+// 它基于父请求 ctx 派生 deadline：若父 ctx 已经更短，则自动保留更短的那个。
 func TimeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
+	return TimeoutMiddlewareWithPath(nil, timeout)
+}
+
+// TimeoutMiddlewareWithPath 为不同路由提供超时覆盖。
+// 路由匹配优先使用 gin 的 FullPath（如 /users/:id），取不到时再回退到 URL.Path。
+func TimeoutMiddlewareWithPath(pathTimeouts map[string]time.Duration, defaultTimeout time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. 创建带超时的 context
-		// 注意：这里基于 c.Request.Context() 派生
-		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+		timeout := resolveRequestTimeout(c, pathTimeouts, defaultTimeout)
+		if timeout <= 0 {
+			c.Next()
+			return
+		}
+
+		ctx, cancel, effectiveTimeout := newRequestTimeoutContext(c.Request.Context(), timeout)
 		defer cancel()
 
-		// 2. 替换请求的 context
-		// 这样后续的 Handler、gRPC 调用都能拿到这个有时间限制的 ctx
 		c.Request = c.Request.WithContext(ctx)
-
-		// 3. 直接在当前协程执行
-		// 假如 handler 里面调用了 gRPC，gRPC 客户端发现 ctx 超时会自动返回 deadline exceeded
 		c.Next()
 
-		// 4. 后置检查：检查处理过程中是否发生了超时
-		// 注意：如果 c.Next() 里已经处理了超时并返回了响应（比如我们在 Handler 里做了错误处理），
-		// 这里就需要判断是否还需要写入。
-		
-		// 这里的逻辑稍微有点绕：
-		// 情况 A: 下游 gRPC 即使超时了，Handler 捕获了错误并正常返回了 JSON (code=500)。
-		//         此时 c.Writer.Written() 为 true。我们啥都不用做。
-		// 情况 B: 下游处理得太慢，甚至没来得及写 Response，ctx 就过期了。
-		
-		if ctx.Err() == context.DeadlineExceeded {
-			// 只有当 Response 还没写出去的时候，中间件才介入兜底
-			if !c.Writer.Written() {
-				logCtx := NewContextWithGin(c)
-				logger.Warn(logCtx, "网关层强制超时断开",
-					logger.String("path", c.Request.URL.Path),
-					logger.Duration("timeout", timeout),
-				)
-				
-				// 强制返回 500 Gateway Timeout
-				result.Fail(c, nil, consts.CodeTimeoutError)
-
-			}
+		if ctx.Err() != context.DeadlineExceeded || c.Writer.Written() {
+			return
 		}
+
+		logCtx := NewContextWithGin(c)
+		logger.Warn(logCtx, "网关层强制超时断开",
+			logger.String("path", requestRouteKey(c)),
+			logger.Duration("timeout", effectiveTimeout),
+		)
+		result.Fail(c, nil, consts.CodeTimeoutError)
 	}
 }
 
-// TimeoutMiddlewareWithPath 同样修改为安全版本
-func TimeoutMiddlewareWithPath(pathTimeouts map[string]time.Duration, defaultTimeout time.Duration) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		timeout := defaultTimeout
-		if t, exists := pathTimeouts[c.Request.URL.Path]; exists {
-			timeout = t
+func newRequestTimeoutContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc, time.Duration) {
+	if deadline, ok := parent.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining < 0 {
+			remaining = 0
 		}
-
-		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
-		defer cancel()
-
-		c.Request = c.Request.WithContext(ctx)
-		c.Next()
-
-		// 兜底超时处理
-		if ctx.Err() == context.DeadlineExceeded {
-			if !c.Writer.Written() {
-				logger.Warn(context.Background(), "请求超时",
-					logger.String("path", c.Request.URL.Path),
-				)
-				result.Fail(c, nil, consts.CodeTimeoutError)
-			}
+		if remaining <= timeout {
+			ctx, cancel := context.WithCancel(parent)
+			return ctx, cancel, remaining
 		}
 	}
+
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	return ctx, cancel, timeout
+}
+
+func resolveRequestTimeout(c *gin.Context, pathTimeouts map[string]time.Duration, defaultTimeout time.Duration) time.Duration {
+	if len(pathTimeouts) == 0 {
+		return defaultTimeout
+	}
+
+	if routeKey := requestRouteKey(c); routeKey != "" {
+		if timeout, exists := pathTimeouts[routeKey]; exists {
+			return timeout
+		}
+	}
+
+	return defaultTimeout
+}
+
+func requestRouteKey(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	if fullPath := c.FullPath(); fullPath != "" {
+		return fullPath
+	}
+	if c.Request.URL != nil {
+		return c.Request.URL.Path
+	}
+	return ""
 }

@@ -1,6 +1,8 @@
 package router
 
 import (
+	"time"
+
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
@@ -9,6 +11,81 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+const gatewayDefaultRequestTimeout = 2 * time.Second
+
+// gatewayRequestTimeouts 按接口语义显式配置预算。
+// 第一批先把 gateway 现有接口都列出来，范围先收敛在 1-3s：
+//   - 1s: 轻量读、探活类
+//   - 2s: 常规写 / 常规聚合
+//   - 3s: 搜索、批量、发送、上传等相对更重的接口
+// 未命中的新接口仍会回退到 gatewayDefaultRequestTimeout，避免漏配后完全失去保护。
+var gatewayRequestTimeouts = map[string]time.Duration{
+	"/health":  0,
+	"/metrics": 0,
+
+	// public user
+	"/api/v1/public/user/login":            2 * time.Second,
+	"/api/v1/public/user/login-by-code":    2 * time.Second,
+	"/api/v1/public/user/register":         2 * time.Second,
+	"/api/v1/public/user/send-verify-code": 2 * time.Second,
+	"/api/v1/public/user/reset-password":   2 * time.Second,
+	"/api/v1/public/user/refresh-token":    2 * time.Second,
+	"/api/v1/public/user/verify-code":      2 * time.Second,
+	"/api/v1/public/user/parse-qrcode":     1 * time.Second,
+
+	// auth user
+	"/api/v1/auth/user/profile":                 1 * time.Second,
+	"/api/v1/auth/user/profile/:userUuid":       2 * time.Second,
+	"/api/v1/auth/user/search":                  3 * time.Second,
+	"/api/v1/auth/user/avatar":                  3 * time.Second,
+	"/api/v1/auth/user/qrcode":                  1 * time.Second,
+	"/api/v1/auth/user/batch-profile":           3 * time.Second,
+	"/api/v1/auth/user/devices":                 1 * time.Second,
+	"/api/v1/auth/user/devices/:deviceId":       2 * time.Second,
+	"/api/v1/auth/user/online-status/:userUuid": 1 * time.Second,
+	"/api/v1/auth/user/batch-online-status":     2 * time.Second,
+	"/api/v1/auth/user/change-password":         2 * time.Second,
+	"/api/v1/auth/user/change-email":            2 * time.Second,
+	"/api/v1/auth/user/delete-account":          3 * time.Second,
+	"/api/v1/auth/user/logout":                  1 * time.Second,
+
+	// auth friend
+	"/api/v1/auth/friend/apply":        2 * time.Second,
+	"/api/v1/auth/friend/apply-list":   1 * time.Second,
+	"/api/v1/auth/friend/apply/sent":   1 * time.Second,
+	"/api/v1/auth/friend/apply/handle": 2 * time.Second,
+	"/api/v1/auth/friend/apply/unread": 1 * time.Second,
+	"/api/v1/auth/friend/apply/read":   1 * time.Second,
+	"/api/v1/auth/friend/list":         2 * time.Second,
+	"/api/v1/auth/friend/sync":         2 * time.Second,
+	"/api/v1/auth/friend/delete":       2 * time.Second,
+	"/api/v1/auth/friend/remark":       2 * time.Second,
+	"/api/v1/auth/friend/tag":          2 * time.Second,
+	"/api/v1/auth/friend/tags":         1 * time.Second,
+	"/api/v1/auth/friend/check":        1 * time.Second,
+	"/api/v1/auth/friend/relation":     1 * time.Second,
+
+	// auth blacklist
+	"/api/v1/auth/blacklist":           2 * time.Second,
+	"/api/v1/auth/blacklist/:userUuid": 2 * time.Second,
+
+	// auth messages
+	"/api/v1/auth/messages/send":       3 * time.Second,
+	"/api/v1/auth/messages/pull":       2 * time.Second,
+	"/api/v1/auth/messages/get-by-ids": 2 * time.Second,
+	"/api/v1/auth/messages/recall":     2 * time.Second,
+
+	// auth conversations
+	"/api/v1/auth/conversations":           2 * time.Second,
+	"/api/v1/auth/conversations/mark-read": 2 * time.Second,
+	"/api/v1/auth/conversations/:convId":   2 * time.Second,
+	"/api/v1/auth/conversations/settings":  2 * time.Second,
+}
+
+func gatewayTimeoutMiddleware() gin.HandlerFunc {
+	return middleware.TimeoutMiddlewareWithPath(gatewayRequestTimeouts, gatewayDefaultRequestTimeout)
+}
 
 // InitRouter 初始化路由
 // authHandler: 认证处理器（依赖注入）
@@ -34,6 +111,11 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 
 	// Prometheus 监控中间件
 	r.Use(middleware.PrometheusMiddleware())
+
+	// 全局请求级超时控制：探活/指标接口跳过，其余路由统一纳入 timeout budget。
+	// 放在日志/监控中间件之后，确保超时兜底写回的最终响应能被完整观测到；
+	// 同时放在业务 handler 之前，保证后续所有下游调用都能继承同一个请求级 deadline。
+	r.Use(gatewayTimeoutMiddleware())
 
 	// 跨域中间件
 	r.Use(middleware.CorsMiddleware())
