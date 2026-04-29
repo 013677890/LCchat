@@ -54,13 +54,12 @@ func ConvertUserInfoFromProto(pb *userpb.UserInfo) *UserInfo {
 	return &UserInfo{
 		UUID:      pb.Uuid,
 		Nickname:  pb.Nickname,
-		Telephone: pb.Telephone,
-		Email:     pb.Email,
 		Avatar:    pb.Avatar,
 		Gender:    int8(pb.Gender),
 		Signature: pb.Signature,
 		Birthday:  pb.Birthday,
-		Status:    int8(pb.Status),
+		// Telephone, Email, Status 已从 UserInfo proto 移除（属于 user_account）
+		// 这些 DTO 字段保留以兼容旧 API 响应格式，待 gateway 迁移后删除
 	}
 }
 

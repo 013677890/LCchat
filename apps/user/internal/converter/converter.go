@@ -19,13 +19,10 @@ func ModelToProtoUserInfo(user *model.UserInfo) *pb.UserInfo {
 	return &pb.UserInfo{
 		Uuid:      user.Uuid,
 		Nickname:  user.Nickname,
-		Telephone: user.Telephone,
-		Email:     user.Email,
 		Avatar:    user.Avatar,
 		Gender:    int32(user.Gender),
 		Signature: user.Signature,
 		Birthday:  formatBirthday(user.Birthday),
-		Status:    int32(user.Status),
 	}
 }
 

@@ -6,33 +6,9 @@ option go_package = "github.com/013677890/LCchat-Backend/apps/user/pb";
 
 import "validate/validate.proto";
 
-// ==================== 通用数据模型 ====================
-// 本文件定义所有服务共用的数据结构
-// 避免循环依赖和不合理的依赖方向
-
-// ==================== 用户信息 ====================
-
-// UserInfo 用户完整信息
-message UserInfo {
-	string uuid = 1;
-	string nickname = 2;
-	string telephone = 3;
-	string email = 4;
-	string avatar = 5;
-	int32 gender = 6;
-	string signature = 7;
-	string birthday = 8;
-	int32 status = 9;
-}
-
-// SimpleUserInfo 简化用户信息（用于批量查询、好友列表拼装等）
-message SimpleUserInfo {
-	string uuid = 1;
-	string nickname = 2;
-	string avatar = 3;
-	int32 gender = 4;
-	string signature = 5;
-}
+// ==================== 通用数据模型（旧版兼容，Phase 3 后删除）====================
+// UserInfo / SimpleUserInfo / SimpleUserItem / PaginationInfo 已迁移到 user_service.proto
+// 此文件仅保留 DeviceInfo / OnlineStatus / TagItem 等 auth/device/friend 依赖的类型
 
 // ==================== 设备信息 ====================
 
@@ -77,16 +53,4 @@ message OnlineStatusItem {
 	string user_uuid = 1;
 	bool is_online = 2;
 	int64 last_seen_at = 3;
-}
-
-// ==================== 好友相关 ====================
-
-// SimpleUserItem 简化用户信息（搜索结果，不包含 email）
-message SimpleUserItem {
-	string uuid = 1;
-	string nickname = 2;
-	reserved 3; // email 已移除
-	string avatar = 4;
-	string signature = 5;
-	bool is_friend = 6;
 }

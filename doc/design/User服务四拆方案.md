@@ -787,14 +787,14 @@ grpcClientFactory(serviceName string, addr string) (*grpc.ClientConn, Breaker, R
 
 ## 九、建议拆分顺序（评审后版本）
 
-| 阶段 | 内容 | 理由 | 上线前置 |
-|---|---|---|---|
-| **第 1 阶段** | 新 proto package（`auth` / `relation` / `user` / `group`）生成 + 同进程内注册 4 个 gRPC service 到当前 `apps/user` 进程 | 只做代码结构调整，对外仍是单进程、单端口，零运行时风险 | proto/pb 全部产出、单测全通过 |
-| **第 2 阶段** | 拆表：`user_info` → `user_account` + `user_profile`；引入 `login_nickname` / `login_avatar` 冗余字段 | 数据边界先于进程边界；同进程下双 repository 可独立回退 | 双写演练、差异对账、备份 |
-| **第 3 阶段** | 拆出 `relation-service`（friend + blacklist + apply） | 业务最独立、跨域最少、风险最低；第一次真正意义上的进程拆分，积累经验 | gateway 新增 `RELATION_SERVICE_ADDR`、relation 独立 Wire / metrics / healthcheck |
-| **第 4 阶段** | 拆出 `auth-service`，同时迁移 `DeviceService` 与新增 `AccountService`；落地 `InternalAuthService`、`account.deleted` Kafka topic | 依赖最多、最敏感，放在相对独立的 relation 完成后 | outbox 表、Kafka topic、幂等消费表、压测 DeviceService QPS |
-| **第 5 阶段** | 新建 `group-service`（新增域） | 不阻塞任何旧路径，新域最后做反而最稳 | proto 定义、新表 DDL |
-| **第 6 阶段** | Gateway / Connect / Msg 全量切换到最终地址；移除 `apps/user` 内已迁移的代码；停写旧表；删旧 proto | 每阶段已分别切换过客户端，这里是收口 | 所有旧路径流量为 0、旧表观察期已满 |
+| 阶段 | 内容 | 理由 | 上线前置 | 状态 |
+|---|---|---|---|---|
+| **第 1 阶段** | 新 proto package（`auth` / `relation` / `user` / `group`）生成 + 同进程内注册 4 个 gRPC service 到当前 `apps/user` 进程 | 只做代码结构调整，对外仍是单进程、单端口，零运行时风险 | proto/pb 全部产出、单测全通过 | ✅ 已完成 |
+| **第 2 阶段** | 拆表：`user_info` → `user_account` + `user_profile`；引入 `login_nickname` / `login_avatar` 冗余字段，引入 Outbox 表 | 数据边界先于进程边界；同进程下双 repository 可独立回退 | 双写演练、差异对账、备份 | ✅ 已完成 (DDL及Outbox代码就位) |
+| **第 3 阶段** | 拆出 `relation-service`（friend + blacklist + apply） | 业务最独立、跨域最少、风险最低；第一次真正意义上的进程拆分，积累经验 | gateway 新增 `RELATION_SERVICE_ADDR`、relation 独立 Wire / metrics / healthcheck | 🚧 进行中 (已完成服务骨架与兼容层，待迁移具体业务逻辑) |
+| **第 4 阶段** | 拆出 `auth-service`，同时迁移 `DeviceService` 与新增 `AccountService`；落地 `InternalAuthService`、`account.deleted` Kafka topic | 依赖最多、最敏感，放在相对独立的 relation 完成后 | outbox 表、Kafka topic、幂等消费表、压测 DeviceService QPS | ⏳ 待处理 |
+| **第 5 阶段** | 新建 `group-service`（新增域） | 不阻塞任何旧路径，新域最后做反而最稳 | proto 定义、新表 DDL | ⏳ 待处理 |
+| **第 6 阶段** | Gateway / Connect / Msg 全量切换到最终地址；移除 `apps/user` 内已迁移的代码；停写旧表；删旧 proto | 每阶段已分别切换过客户端，这里是收口 | 所有旧路径流量为 0、旧表观察期已满 | ⏳ 待处理 |
 
 ### 每阶段通用验收
 - 🟢 CI 全绿 + 新加 RPC 接口单测覆盖率 ≥ 85%

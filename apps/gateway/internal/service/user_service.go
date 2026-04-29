@@ -7,7 +7,6 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
@@ -113,16 +112,9 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 		isFriend = friendResp.IsFriend
 	}
 	// 6. 非好友时脱敏
+	// NOTE: Email/Telephone 已从 UserInfo 移除（属于 user_account），
+	// 脱敏逻辑待 gateway 迁移到 auth.AccountService 后重新实现。
 
-	userInfo := userResp.UserInfo
-	if !isFriend && userInfo.Email != "" {
-		//脱敏邮箱
-		userInfo.Email = utils.MaskEmail(userInfo.Email)
-	}
-	if !isFriend && userInfo.Telephone != "" {
-		//脱敏手机号
-		userInfo.Telephone = utils.MaskTelephone(userInfo.Telephone)
-	}
 	// 7. 返回响应
 	return dto.ConvertGetOtherProfileResponseFromProto(userResp, isFriend), nil
 }
