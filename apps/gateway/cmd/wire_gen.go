@@ -60,6 +60,7 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	if err != nil {
 		return nil, err
 	}
+	mainGatewayAsyncReleaseTimeout := provideGatewayAsyncReleaseTimeout(asyncConfig)
 	redisConfig := provideGatewayRedisConfig()
 	client, err := provideGatewayRedisClient(context, logger, redisConfig)
 	if err != nil {
@@ -71,7 +72,7 @@ func initializeGatewayApp() (*GatewayApp, error) {
 		return nil, err
 	}
 	deviceActiveConfig := provideGatewayDeviceActiveConfig()
-	gatewayApp, err := NewGatewayApp(logger, server, pool, client, mainGatewayUserConn, mainGatewayMsgConn, minIOClient, deviceActiveConfig)
+	gatewayApp, err := NewGatewayApp(logger, server, pool, mainGatewayAsyncReleaseTimeout, client, mainGatewayUserConn, mainGatewayMsgConn, minIOClient, deviceActiveConfig)
 	if err != nil {
 		return nil, err
 	}

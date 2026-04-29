@@ -31,6 +31,8 @@ type gatewayMsgServiceAddr string
 
 type gatewayHTTPAddr string
 
+type gatewayAsyncReleaseTimeout time.Duration
+
 type gatewayUserBreaker struct{ value *gobreaker.CircuitBreaker }
 
 type gatewayMsgBreaker struct{ value *gobreaker.CircuitBreaker }
@@ -86,6 +88,10 @@ func provideGatewayRedisClient(ctx context.Context, log *zap.Logger, cfg config.
 // provideGatewayAsyncPool 构建异步协程池（全局注册在 GatewayApp.Run）。
 func provideGatewayAsyncPool(_ context.Context, cfg config.AsyncConfig) (*ants.Pool, error) {
 	return async.Build(cfg)
+}
+
+func provideGatewayAsyncReleaseTimeout(cfg config.AsyncConfig) gatewayAsyncReleaseTimeout {
+	return gatewayAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
 
 // provideGatewayMinIOClient 初始化 MinIO 客户端。
@@ -216,6 +222,7 @@ var gatewayInfraProviderSet = wire.NewSet(
 	provideGatewayLogger,
 	provideGatewayRedisClient,
 	provideGatewayAsyncPool,
+	provideGatewayAsyncReleaseTimeout,
 	provideGatewayMinIOClient,
 	provideGatewayUserServiceAddr,
 	provideGatewayMsgServiceAddr,

@@ -135,6 +135,17 @@ func (a *UserApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 Redis 重试消费者失败: %w", err))
 		}
 	}
+	if a.asyncPool != nil {
+		var err error
+		if async.Pool() == a.asyncPool {
+			err = async.Release()
+		} else {
+			err = async.ReleasePool(a.asyncPool, a.asyncReleaseTimeout)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("释放 Async 协程池失败: %w", err))
+		}
+	}
 	if a.kafkaProducer != nil {
 		if err := a.kafkaProducer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Kafka Producer 失败: %w", err))
@@ -151,15 +162,6 @@ func (a *UserApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("获取 MySQL 原生连接失败: %w", err))
 		} else if err := sqlDB.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 MySQL 连接失败: %w", err))
-		}
-	}
-	if a.asyncPool != nil {
-		if a.asyncReleaseTimeout > 0 {
-			if err := a.asyncPool.ReleaseTimeout(a.asyncReleaseTimeout); err != nil {
-				errs = append(errs, fmt.Errorf("释放 Async 协程池失败: %w", err))
-			}
-		} else {
-			a.asyncPool.Release()
 		}
 	}
 	if a.logger != nil {
@@ -183,7 +185,7 @@ func (a *UserApp) installProcessGlobals(ctx context.Context) {
 	async.SetContextPropagator(func(parent context.Context) context.Context {
 		return ctxmeta.CopyKnownFromParent(parent)
 	})
-	async.ReplaceGlobal(a.asyncPool)
+	async.ReplaceGlobalWithReleaseTimeout(a.asyncPool, a.asyncReleaseTimeout)
 	_ = util.InitSnowflake(1)
 	util.SetEmailConfig(util.EmailConfig{
 		SMTPHost:     userGetEnv("EMAIL_SMTP_HOST", "smtp.qq.com"),

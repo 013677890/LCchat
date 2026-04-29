@@ -12,7 +12,6 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
 const (
@@ -142,79 +141,41 @@ func (s *Service) GetConversations(ctx context.Context, ownerUuid string, update
 		}
 	}
 
-	// 2. 使用 RunSafe + channel 并发拉取数据 (各拉 pageSize + 1 条用于判断 hasMore)
-	//
-	// RunSafe 优势：Context 传播 + panic recover + 独立超时控制
-	// 协调策略：channel 通知完成，context.WithTimeout 兜底防止协程池提交失败导致永久阻塞
-	type convResult struct {
-		convs []*model.Conversation
-		err   error
-	}
-
+	// 2. 使用请求内协程池并发拉取数据，继承父请求取消和超时语义。
 	fetchSize := pageSize + 1
-	p2pCh := make(chan convResult, 1)
-	groupCh := make(chan convResult, 1)
-
 	const asyncTimeout = 5 * time.Second
-
-	async.RunSafe(ctx, func(taskCtx context.Context) {
-		convs, err := s.repo.ListP2P(taskCtx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
-		p2pCh <- convResult{convs, err}
-	}, asyncTimeout)
-
-	async.RunSafe(ctx, func(taskCtx context.Context) {
-		convs, err := s.repo.ListGroup(taskCtx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
-		groupCh <- convResult{convs, err}
-	}, asyncTimeout)
-
-	// 收集结果：使用「优先级 Select」模式避免 Go select 伪随机问题。
-	//
-	// ⚠️ 普通 select 的陷阱：当 waitCtx 已超时且 dataCh 也有数据时，两个 case
-	// 同时就绪，Go 会随机选择，有 50% 概率丢弃已有数据并触发多余的同步回退。
-	//
-	// 修复策略：外层 select 先阻塞等待（数据 OR 超时），超时后再用内层非阻塞
-	// select（default 分支）抢读一次 channel，确保「有数据一定优先取数据」。
-	waitCtx, waitCancel := context.WithTimeout(ctx, asyncTimeout)
-	defer waitCancel()
+	group := async.NewGroup(ctx, asyncTimeout)
 
 	var p2pConvs []*model.Conversation
 	var groupConvs []*model.Conversation
-	var err1, err2 error
 
-	// 优先级 Select — P2P
-	select {
-	case r := <-p2pCh:
-		p2pConvs, err1 = r.convs, r.err
-	case <-waitCtx.Done():
-		// 超时触发：但先尝试非阻塞读，防止数据在超时瞬间同时到达被随机丢弃
-		select {
-		case r := <-p2pCh:
-			p2pConvs, err1 = r.convs, r.err
-		default:
-			logger.Warn(ctx, "获取会话列表：P2P 异步超时")
-			p2pConvs, err1 = s.repo.ListP2P(ctx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+	if err := group.Go(func(taskCtx context.Context) error {
+		convs, err := s.repo.ListP2P(taskCtx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+		if err != nil {
+			return fmt.Errorf("获取会话列表 P2P 查询失败: %w", err)
 		}
+		p2pConvs = convs
+		return nil
+	}); err != nil {
+		return nil, false, "", err
 	}
 
-	// 优先级 Select — Group
-	select {
-	case r := <-groupCh:
-		groupConvs, err2 = r.convs, r.err
-	case <-waitCtx.Done():
-		select {
-		case r := <-groupCh:
-			groupConvs, err2 = r.convs, r.err
-		default:
-			logger.Warn(ctx, "获取会话列表：Group 异步超时")
-			groupConvs, err2 = s.repo.ListGroup(ctx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+	if err := group.Go(func(taskCtx context.Context) error {
+		convs, err := s.repo.ListGroup(taskCtx, ownerUuid, updatedSince, cursorTimeMs, cursorId, fetchSize)
+		if err != nil {
+			return fmt.Errorf("获取会话列表 Group 查询失败: %w", err)
 		}
+		groupConvs = convs
+		return nil
+	}); err != nil {
+		if waitErr := group.Wait(); waitErr != nil {
+			return nil, false, "", waitErr
+		}
+		return nil, false, "", err
 	}
 
-	if err1 != nil {
-		return nil, false, "", fmt.Errorf("获取会话列表 P2P 查询失败: %w", err1)
-	}
-	if err2 != nil {
-		return nil, false, "", fmt.Errorf("获取会话列表 Group 查询失败: %w", err2)
+	if err := group.Wait(); err != nil {
+		return nil, false, "", err
 	}
 
 	// 3. 内存合并数据

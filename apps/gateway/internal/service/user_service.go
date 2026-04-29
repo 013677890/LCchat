@@ -56,63 +56,65 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 	// 2. 调用用户服务获取他人信息(gRPC)
 
 	grpcReq := dto.ConvertToProtoGetOtherProfileRequest(req)
-	// 3.并发调用用户服务和好友服务获取信息
-	//使用goroutine并发调用用户服务和好友服务获取信息
-	type userResult struct {
-		resp *userpb.GetOtherProfileResponse
-		err  error
+	// 3. 请求内 fan-out 仍走协程池，但必须继承父请求取消和超时语义。
+	group := async.NewGroup(ctx, 5*time.Second)
+
+	var userResp *userpb.GetOtherProfileResponse
+	var friendResp *userpb.CheckIsFriendResponse
+	var friendErr error
+
+	if err := group.Go(func(asyncCtx context.Context) error {
+		resp, err := s.userClient.GetOtherProfile(asyncCtx, grpcReq)
+		if err != nil {
+			return err
+		}
+		userResp = resp
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	type friendResult struct {
-		resp *userpb.CheckIsFriendResponse
-		err  error
-	}
 
-	userChan := make(chan userResult, 1)
-	friendChan := make(chan friendResult, 1)
-
-	// 并发调用用户服务（使用协程池，使用 RunSafe 确保 Context 不会被父请求取消）
-	async.RunSafe(ctx, func(asyncCtx context.Context) {
-		grpcResp, err := s.userClient.GetOtherProfile(asyncCtx, grpcReq)
-		userChan <- userResult{resp: grpcResp, err: err}
-	}, 5*time.Second)
-
-	// 并发调用好友服务判断是否为好友（使用协程池）
-	async.RunSafe(ctx, func(asyncCtx context.Context) {
+	if err := group.Go(func(asyncCtx context.Context) error {
 		friendReq := &userpb.CheckIsFriendRequest{
 			UserUuid: currentUserUUID,
 			PeerUuid: req.UserUUID,
 		}
-		friendResp, err := s.userClient.CheckIsFriend(asyncCtx, friendReq)
-		friendChan <- friendResult{resp: friendResp, err: err}
-	}, 5*time.Second)
-
-	// 等待两个服务调用完成
-	userRes := <-userChan
-	friendRes := <-friendChan
-
-	// 4. 检查用户服务调用结果
-	if userRes.err != nil {
-		return nil, userRes.err
+		resp, err := s.userClient.CheckIsFriend(asyncCtx, friendReq)
+		if err != nil {
+			friendErr = err
+			return nil
+		}
+		friendResp = resp
+		return nil
+	}); err != nil {
+		if waitErr := group.Wait(); waitErr != nil {
+			return nil, waitErr
+		}
+		return nil, err
 	}
-	// 5. 检查用户服务返回的用户信息是否为空
-	if userRes.resp == nil || userRes.resp.UserInfo == nil {
+
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	// 4. 检查用户服务返回的用户信息是否为空
+	if userResp == nil || userResp.UserInfo == nil {
 		return nil, apperr.New(consts.CodeInternalError)
 	}
 
-	// 6. 检查好友服务调用结果
+	// 5. 检查好友服务调用结果
 	isFriend := false
-	if friendRes.err != nil {
+	if friendErr != nil {
 		logger.Warn(ctx, "查询好友关系失败，按非好友降级",
 			logger.String("target_user_uuid", req.UserUUID),
-			logger.ErrorField("error", friendRes.err),
+			logger.ErrorField("error", friendErr),
 		)
-		// 3. 检查好友服务调用结果是否为空
-	} else if friendRes.resp != nil {
-		isFriend = friendRes.resp.IsFriend
+	} else if friendResp != nil {
+		isFriend = friendResp.IsFriend
 	}
-	//7.非好友时脱敏
+	// 6. 非好友时脱敏
 
-	userInfo := userRes.resp.UserInfo
+	userInfo := userResp.UserInfo
 	if !isFriend && userInfo.Email != "" {
 		//脱敏邮箱
 		userInfo.Email = utils.MaskEmail(userInfo.Email)
@@ -121,8 +123,8 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 		//脱敏手机号
 		userInfo.Telephone = utils.MaskTelephone(userInfo.Telephone)
 	}
-	//8.返回响应
-	return dto.ConvertGetOtherProfileResponseFromProto(userRes.resp, isFriend), nil
+	// 7. 返回响应
+	return dto.ConvertGetOtherProfileResponseFromProto(userResp, isFriend), nil
 }
 
 // SearchUser 搜索用户
