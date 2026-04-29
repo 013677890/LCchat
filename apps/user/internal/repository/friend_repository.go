@@ -668,7 +668,7 @@ func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, u
 				LogRedisError(runCtx, err)
 			}
 		}
-	}, 0)
+	}, async.AsyncRedisTimeout)
 }
 
 // removeFriendCacheAsync 异步删除好友缓存（单向）
@@ -694,7 +694,7 @@ func (r *friendRepositoryImpl) removeFriendCacheAsync(ctx context.Context, userU
 			}
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisTimeout)
 }
 
 // rebuildFriendCacheAsync 异步重建好友关系缓存（Hash）
@@ -733,7 +733,7 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 			}
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisPipelineTimeout)
 }
 
 // updateFriendMetaCacheAsync 异步更新好友元数据缓存（单向）
@@ -764,7 +764,7 @@ func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, u
 			}
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisTimeout)
 }
 
 // updateFriendRemarkCacheAsync 异步更新好友备注缓存（单向）
@@ -839,7 +839,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 		}
 
 		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
-	}, 0)
+	}, async.AsyncRedisPipelineTimeout)
 }
 
 // updateFriendTagCacheAsync 异步更新好友标签缓存（单向）
@@ -914,5 +914,5 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 		}
 
 		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
-	}, 0)
+	}, async.AsyncRedisPipelineTimeout)
 }

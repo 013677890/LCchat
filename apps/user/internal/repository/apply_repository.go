@@ -269,7 +269,7 @@ func (r *applyRepositoryImpl) rebuildPendingCacheAsync(ctx context.Context, targ
 		if _, err := pipe.Exec(runCtx); err != nil {
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisPipelineTimeout)
 }
 
 // GetSentList 获取发出的好友申请列表
@@ -490,7 +490,7 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 				logger.Error(runCtx, "Redis 脚本执行失败", logger.ErrorField("error", err))
 			}
 		}
-	}, 0)
+	}, async.AsyncRedisTimeout)
 }
 
 // MarkAsRead 标记申请已读（同步）
@@ -536,7 +536,7 @@ func (r *applyRepositoryImpl) MarkAsReadAsync(ctx context.Context, ids []int64) 
 			// 异步更新失败只记录日志，不影响主流程
 			logger.Error(runCtx, "异步标记申请已读失败", logger.ErrorField("error", err))
 		}
-	}, 0) // timeout=0 使用默认 1 分钟超时
+	}, async.AsyncDBTimeout)
 }
 
 // GetUnreadCount 获取未读申请数量
@@ -652,7 +652,7 @@ func (r *applyRepositoryImpl) ExistsPendingRequest(ctx context.Context, applican
 		if _, err := pipe.Exec(runCtx); err != nil {
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisPipelineTimeout)
 
 	// ==================== 4. 根据回源结果判断 ====================
 	for _, apply := range applies {

@@ -7,12 +7,34 @@ import (
 	"log"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"github.com/panjf2000/ants/v2"
+)
+
+// ======================== 异步任务超时常量 ========================
+//
+// 调用 RunSafe 时应使用以下常量而非传 0。
+// timeout <= 0 将回退到 DefaultAsyncTimeout，但显式传常量更易于 code review。
+const (
+	// AsyncRedisTimeout 单次 Redis 操作（SET / DEL / Lua 脚本等）。
+	AsyncRedisTimeout = 5 * time.Second
+
+	// AsyncRedisPipelineTimeout Redis Pipeline 批量操作。
+	AsyncRedisPipelineTimeout = 10 * time.Second
+
+	// AsyncDBTimeout 单次数据库查询或写入。
+	AsyncDBTimeout = 10 * time.Second
+
+	// AsyncRetryTimeout 含重试逻辑的补偿任务。
+	AsyncRetryTimeout = 30 * time.Second
+
+	// DefaultAsyncTimeout RunSafe timeout <= 0 时的兜底值。
+	DefaultAsyncTimeout = 10 * time.Second
 )
 
 var (
@@ -22,6 +44,9 @@ var (
 
 	contextPropagator   func(parent context.Context) context.Context
 	contextPropagatorMu sync.RWMutex
+
+	// submitRejected 记录因池满而被丢弃的任务计数，便于监控和告警。
+	submitRejected atomic.Int64
 )
 
 // SetContextPropagator 设置上下文传递器（建议在 main 初始化时调用）。
@@ -55,6 +80,12 @@ var ErrTaskPanic = errors.New("async task panic")
 
 // ErrInvalidPoolSize 表示协程池容量配置非法。
 var ErrInvalidPoolSize = errors.New("async pool size must be positive")
+
+// SubmitRejectedTotal 返回因池满（NonBlocking 模式）而被丢弃的累计任务数。
+// 可供 Prometheus Collector 或健康检查接口采集。
+func SubmitRejectedTotal() int64 {
+	return submitRejected.Load()
+}
 
 // Pool 返回全局协程池（未初始化时为 nil）。
 func Pool() *ants.Pool {
@@ -285,13 +316,13 @@ func RunSafe(ctx context.Context, task func(ctx context.Context), timeout time.D
 	}
 
 	if timeout <= 0 {
-		timeout = time.Minute
+		timeout = DefaultAsyncTimeout
 	}
 
 	baseCtx := context.Background()
 	if propagator := getContextPropagator(); propagator != nil && ctx != nil {
 		if propagated := propagator(ctx); propagated != nil {
-			baseCtx = context.WithoutCancel(propagated)
+			baseCtx = propagated
 		}
 	}
 
@@ -321,7 +352,8 @@ func RunSafe(ctx context.Context, task func(ctx context.Context), timeout time.D
 
 	if err := Submit(wrap); err != nil {
 		cancel()
-		logSubmitFailed(baseCtx, err, timeout)
+		rejected := submitRejected.Add(1)
+		logSubmitFailed(baseCtx, err, timeout, rejected)
 	}
 }
 
@@ -353,13 +385,14 @@ func logTimeout(ctx context.Context, timeout time.Duration) {
 	log.Printf("async task timeout: %s", timeout)
 }
 
-func logSubmitFailed(ctx context.Context, err error, timeout time.Duration) {
+func logSubmitFailed(ctx context.Context, err error, timeout time.Duration, rejectedTotal int64) {
 	if logger.L() != nil {
 		logger.Error(ctx, "async submit failed",
 			logger.ErrorField("error", err),
 			logger.Duration("timeout", timeout),
+			logger.Int64("rejected_total", rejectedTotal),
 		)
 		return
 	}
-	log.Printf("async submit failed: %v, timeout=%s", err, timeout)
+	log.Printf("async submit failed: %v, timeout=%s, rejected_total=%d", err, timeout, rejectedTotal)
 }

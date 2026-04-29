@@ -250,7 +250,7 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 			}
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisPipelineTimeout)
 
 	return relations, total, nil
 }
@@ -322,7 +322,7 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 				if _, err := pipe.Exec(runCtx); err != nil {
 					LogRedisError(runCtx, err)
 				}
-			}, 0)
+			}, async.AsyncRedisPipelineTimeout)
 
 			return false, nil
 		}
@@ -344,7 +344,7 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 		if _, err := pipe.Exec(runCtx); err != nil {
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisPipelineTimeout)
 
 	return true, nil
 }
@@ -379,7 +379,7 @@ func (r *blacklistRepositoryImpl) updateBlacklistCacheAsync(ctx context.Context,
 			}
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisTimeout)
 }
 
 // removeBlacklistCacheAsync 异步移除黑名单缓存（单向）
@@ -406,7 +406,7 @@ func (r *blacklistRepositoryImpl) removeBlacklistCacheAsync(ctx context.Context,
 			}
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisTimeout)
 }
 
 // removeFriendCacheAsync 异步删除好友缓存（单向）
@@ -435,5 +435,5 @@ func (r *blacklistRepositoryImpl) removeFriendCacheAsync(ctx context.Context, us
 			}
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisTimeout)
 }

@@ -58,7 +58,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 				if err := r.redisClient.Set(runCtx, cacheKey, "{}", randomDuration).Err(); err != nil {
 					LogRedisError(runCtx, err)
 				}
-			}, 0)
+			}, async.AsyncRedisTimeout)
 			return nil, nil
 		} else {
 			return nil, WrapDBError(err)
@@ -81,7 +81,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 		if err := r.redisClient.Set(runCtx, cacheKey, userJSON, ttl).Err(); err != nil {
 			LogRedisError(runCtx, err)
 		}
-	}, 0)
+	}, async.AsyncRedisTimeout)
 
 	return &user, nil
 }
@@ -210,7 +210,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 			if _, err := pipe.Exec(runCtx); err != nil {
 				LogRedisError(runCtx, err)
 			}
-		}, 0)
+		}, async.AsyncRedisPipelineTimeout)
 	}
 
 	// ==================== 4. 按原始 uuids 顺序构建结果 ====================
