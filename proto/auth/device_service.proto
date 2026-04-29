@@ -1,0 +1,139 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "github.com/013677890/LCchat-Backend/apps/auth/pb";
+
+import "validate/validate.proto";
+
+// ==================== 设备会话服务接口 ====================
+// 服务名：DeviceService
+// 职责：设备列表、踢出设备、在线状态查询
+
+service DeviceService {
+	// GetDeviceList 获取设备列表
+	// 建议调用超时：300ms。
+	rpc GetDeviceList(GetDeviceListRequest) returns (GetDeviceListResponse);
+	
+	// KickDevice 踢出设备
+	// 建议调用超时：500ms。
+	rpc KickDevice(KickDeviceRequest) returns (KickDeviceResponse);
+	
+	// GetOnlineStatus 获取用户在线状态
+	// 建议调用超时：300ms。
+	rpc GetOnlineStatus(GetOnlineStatusRequest) returns (GetOnlineStatusResponse);
+	
+	// BatchGetOnlineStatus 批量获取在线状态
+	// 建议调用超时：800ms。
+	rpc BatchGetOnlineStatus(BatchGetOnlineStatusRequest) returns (BatchGetOnlineStatusResponse);
+
+	// UpdateDeviceActive 批量更新设备活跃时间（内部调用）。
+	// 由 gateway/connect 在本地节流命中后调用，仅更新 Redis 活跃时间，不修改设备在线状态。
+	// 建议调用超时：800ms。
+	rpc UpdateDeviceActive(UpdateDeviceActiveRequest) returns (UpdateDeviceActiveResponse);
+
+	// UpdateDeviceStatus 更新设备在线状态（内部调用）。
+	// 由 connect 服务在 WebSocket 连接建立/断开时调用，
+	// 将设备状态同步到 DB 和 Redis 缓存。
+	// 幂等语义：设备不存在时视为成功。
+	// 建议调用超时：500ms。
+	rpc UpdateDeviceStatus(UpdateDeviceStatusRequest) returns (UpdateDeviceStatusResponse);
+}
+
+// ==================== 在线状态类型 ====================
+
+// OnlineStatus 在线状态
+message OnlineStatus {
+	string user_uuid = 1;
+	bool is_online = 2;
+	int64 last_seen_at = 3;
+	repeated string online_platforms = 4;
+}
+
+// OnlineStatusItem 在线状态项（批量）
+message OnlineStatusItem {
+	string user_uuid = 1;
+	bool is_online = 2;
+	int64 last_seen_at = 3;
+}
+
+// ==================== 设备列表 ====================
+
+// GetDeviceListRequest 获取设备列表请求
+message GetDeviceListRequest {}
+
+// DeviceItem 设备项
+message DeviceItem {
+	string device_id = 1;
+	string device_name = 2;
+	string platform = 3;
+	string app_version = 4;
+	bool is_current_device = 5;
+	int32 status = 6;
+	int64 last_seen_at = 7;
+}
+
+// GetDeviceListResponse 获取设备列表响应
+message GetDeviceListResponse {
+	repeated DeviceItem devices = 1;
+}
+
+// ==================== 踢出设备 ====================
+
+// KickDeviceRequest 踢出设备请求
+message KickDeviceRequest {
+	string device_id = 1 [(validate.rules).string.min_len = 1];
+}
+
+// KickDeviceResponse 踢出设备响应
+message KickDeviceResponse {}
+
+// ==================== 在线状态 ====================
+
+// GetOnlineStatusRequest 获取在线状态请求
+message GetOnlineStatusRequest {
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+}
+
+// GetOnlineStatusResponse 获取在线状态响应
+message GetOnlineStatusResponse {
+	OnlineStatus status = 1;
+}
+
+// ==================== 批量在线状态 ====================
+
+// BatchGetOnlineStatusRequest 批量获取在线状态请求
+message BatchGetOnlineStatusRequest {
+	repeated string user_uuids = 1 [(validate.rules).repeated.max_items = 100];
+}
+
+// BatchGetOnlineStatusResponse 批量获取在线状态响应
+message BatchGetOnlineStatusResponse {
+	repeated OnlineStatusItem users = 1;
+}
+
+// ==================== 更新设备状态（内部调用） ====================
+
+// UpdateDeviceActiveItem 设备活跃时间更新项
+message UpdateDeviceActiveItem {
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	string device_id = 2 [(validate.rules).string.min_len = 1];
+}
+
+// UpdateDeviceActiveRequest 批量更新设备活跃时间请求
+message UpdateDeviceActiveRequest {
+	repeated UpdateDeviceActiveItem items = 1 [(validate.rules).repeated = {min_items: 1, max_items: 10000}];
+}
+
+// UpdateDeviceActiveResponse 更新设备活跃时间响应
+message UpdateDeviceActiveResponse {}
+
+// UpdateDeviceStatusRequest 更新设备在线状态请求
+message UpdateDeviceStatusRequest {
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	string device_id = 2 [(validate.rules).string.min_len = 1];
+	int32 status = 3 [(validate.rules).int32 = {in: [0, 1]}];
+}
+
+// UpdateDeviceStatusResponse 更新设备在线状态响应
+message UpdateDeviceStatusResponse {}

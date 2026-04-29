@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "github.com/013677890/LCchat-Backend/apps/auth/pb";
+
+import "validate/validate.proto";
+
+// ==================== 内部认证服务接口 ====================
+// 服务名：InternalAuthService
+// 职责：面向其他内部服务的账号查询与状态更新接口
+// 鉴权：所有方法必须通过 x-internal-caller metadata 校验（见 pkg/grpcx/internal_caller.go）
+
+service InternalAuthService {
+	// FindAccountByEmail 按邮箱查找账号
+	// Gateway 聚合 SearchUser 时使用
+	// 建议调用超时：300ms。
+	rpc FindAccountByEmail(FindAccountByEmailRequest) returns (FindAccountByEmailResponse);
+
+	// FindAccountByTelephone 按手机号查找账号（保留扩展）
+	// 建议调用超时：300ms。
+	rpc FindAccountByTelephone(FindAccountByTelephoneRequest) returns (FindAccountByTelephoneResponse);
+
+	// UpdateLoginDisplay user-service 异步回写登录冗余字段（nickname/avatar）
+	// 必须幂等：以 user_uuid + updated_at 做乐观锁
+	// 建议调用超时：300ms。
+	rpc UpdateLoginDisplay(UpdateLoginDisplayRequest) returns (UpdateLoginDisplayResponse);
+
+	// BatchCheckAccountStatus 批量检查账号是否可见/已注销
+	// 供 relation-service、group-service 使用
+	// 建议调用超时：500ms。
+	rpc BatchCheckAccountStatus(BatchCheckAccountStatusRequest) returns (BatchCheckAccountStatusResponse);
+}
+
+// ==================== FindAccountByEmail ====================
+
+message FindAccountByEmailRequest {
+	string email = 1 [(validate.rules).string.email = true];
+}
+
+message FindAccountByEmailResponse {
+	string user_uuid = 1;   // 找不到时为空字符串
+	int32 status = 2;        // 账号状态：0=正常 1=已注销
+	bool found = 3;          // 是否找到
+}
+
+// ==================== FindAccountByTelephone ====================
+
+message FindAccountByTelephoneRequest {
+	string telephone = 1 [(validate.rules).string.len = 11];
+}
+
+message FindAccountByTelephoneResponse {
+	string user_uuid = 1;
+	int32 status = 2;
+	bool found = 3;
+}
+
+// ==================== UpdateLoginDisplay ====================
+
+message UpdateLoginDisplayRequest {
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	string nickname = 2;
+	string avatar = 3;
+	int64 updated_at = 4;   // 乐观锁：user_profile 的更新时间戳（毫秒），旧版本丢弃
+}
+
+message UpdateLoginDisplayResponse {}
+
+// ==================== BatchCheckAccountStatus ====================
+
+message BatchCheckAccountStatusRequest {
+	repeated string user_uuids = 1 [(validate.rules).repeated = {min_items: 1, max_items: 100}];
+}
+
+message AccountStatusItem {
+	string user_uuid = 1;
+	int32 status = 2;        // 0=正常 1=已注销
+	bool exists = 3;
+}
+
+message BatchCheckAccountStatusResponse {
+	repeated AccountStatusItem items = 1;
+}

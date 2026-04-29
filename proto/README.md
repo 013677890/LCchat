@@ -3,11 +3,19 @@
 ## 1. 目录约定
 
 - Proto 源文件统一放在仓库根目录 `proto/` 下：
-  - `proto/user/*.proto`
+  - `proto/common/common.proto` — 跨服务共享类型（PaginationInfo）
+  - `proto/auth/*.proto` — 认证、设备、账号安全、内部认证接口
+  - `proto/relation/*.proto` — 好友、黑名单
+  - `proto/user/*.proto` — 用户资料、内部资料接口
+  - `proto/group/*.proto` — 群组
   - `proto/connect/connect.proto`
   - `proto/msg/*.proto`
 - 生成代码输出到各服务目录：
+  - `pkg/commonpb/*.pb.go`
+  - `apps/auth/pb/*.pb.go`
+  - `apps/relation/pb/*.pb.go`
   - `apps/user/pb/*.pb.go`
+  - `apps/group/pb/*.pb.go`
   - `apps/connect/pb/*.pb.go`
   - `apps/msg/pb/*.pb.go`
 
@@ -34,26 +42,23 @@ protoc `
   --go_opt=module=github.com/013677890/LCchat-Backend `
   --go-grpc_out=. `
   --go-grpc_opt=module=github.com/013677890/LCchat-Backend `
-  proto/user/common.proto `
-  proto/user/auth_service.proto `
+  proto/common/common.proto `
+  proto/auth/auth_service.proto `
+  proto/auth/device_service.proto `
+  proto/auth/account_service.proto `
+  proto/auth/internal_auth_service.proto `
+  proto/relation/friend_service.proto `
+  proto/relation/blacklist_service.proto `
   proto/user/user_service.proto `
-  proto/user/device_service.proto `
-  proto/user/friend_service.proto `
-  proto/user/blacklist_service.proto `
+  proto/user/internal_profile_service.proto `
+  proto/group/group_service.proto `
   proto/connect/connect.proto `
   proto/msg/msg_common.proto `
   proto/msg/msg_push_event.proto `
   proto/msg/msg_service.proto
 ```
 
-说明：
-
-- `module=github.com/013677890/LCchat-Backend` 用于按 `go_package` 生成到 `apps/*/pb`，不会输出到 `proto/` 目录。
-- 上面命令生成 `*.pb.go` 和 `*_grpc.pb.go`。
-
 ## 4. 生成 validate 代码（可选）
-
-若你本地安装了 `protoc-gen-validate`，可再执行：
 
 ```powershell
 protoc `
@@ -61,66 +66,36 @@ protoc `
   -I "$PGV" `
   --experimental_allow_proto3_optional `
   --validate_out=lang=go,module=github.com/013677890/LCchat-Backend:. `
-  proto/user/common.proto `
-  proto/user/auth_service.proto `
+  proto/common/common.proto `
+  proto/auth/auth_service.proto `
+  proto/auth/device_service.proto `
+  proto/auth/account_service.proto `
+  proto/auth/internal_auth_service.proto `
+  proto/relation/friend_service.proto `
+  proto/relation/blacklist_service.proto `
   proto/user/user_service.proto `
-  proto/user/device_service.proto `
-  proto/user/friend_service.proto `
-  proto/user/blacklist_service.proto `
-  proto/connect/connect.proto ` 
+  proto/user/internal_profile_service.proto `
+  proto/group/group_service.proto `
+  proto/connect/connect.proto `
   proto/msg/msg_common.proto `
   proto/msg/msg_push_event.proto `
   proto/msg/msg_service.proto
 ```
 
-如果你的 `protoc-gen-validate` 版本不支持 `module` 参数，请按你本地插件版本文档调整参数。
+## 5. Proto Package 映射
 
-## 5. 生成命令（Ubuntu / Bash）
+| 目录 | package | go_package | 归属服务 |
+|------|---------|------------|---------|
+| `proto/common/` | `common` | `pkg/commonpb` | 共享 |
+| `proto/auth/` | `auth` | `apps/auth/pb` | auth-service |
+| `proto/relation/` | `relation` | `apps/relation/pb` | relation-service |
+| `proto/user/` | `user` | `apps/user/pb` | user-service |
+| `proto/group/` | `group` | `apps/group/pb` | group-service |
+| `proto/connect/` | `connect` | `apps/connect/pb` | connect-service |
+| `proto/msg/` | `msg` | `apps/msg/pb` | msg-service |
 
-### 5.1 生成 Go + gRPC 代码
+## 6. 注意事项
 
-```bash
-# 仓库根目录执行
-PGV="$(go env GOPATH)/pkg/mod/github.com/envoyproxy/protoc-gen-validate@v1.3.0"
-
-protoc \
-  -I . \
-  -I "$PGV" \
-  --experimental_allow_proto3_optional \
-  --go_out=. \
-  --go_opt=module=github.com/013677890/LCchat-Backend \
-  --go-grpc_out=. \
-  --go-grpc_opt=module=github.com/013677890/LCchat-Backend \
-  proto/user/common.proto \
-  proto/user/auth_service.proto \
-  proto/user/user_service.proto \
-  proto/user/device_service.proto \
-  proto/user/friend_service.proto \
-  proto/user/blacklist_service.proto \
-  proto/connect/connect.proto \
-  proto/msg/msg_common.proto \
-  proto/msg/msg_push_event.proto \
-  proto/msg/msg_service.proto
-```
-
-### 5.2 生成 validate 代码（可选）
-
-```bash
-PGV="$(go env GOPATH)/pkg/mod/github.com/envoyproxy/protoc-gen-validate@v1.3.0"
-
-protoc \
-  -I . \
-  -I "$PGV" \
-  --experimental_allow_proto3_optional \
-  --validate_out=lang=go,module=github.com/013677890/LCchat-Backend:. \
-  proto/user/common.proto \
-  proto/user/auth_service.proto \
-  proto/user/user_service.proto \
-  proto/user/device_service.proto \
-  proto/user/friend_service.proto \
-  proto/user/blacklist_service.proto \
-  proto/connect/connect.proto \
-  proto/msg/msg_common.proto \
-  proto/msg/msg_push_event.proto \
-  proto/msg/msg_service.proto
-```
+- `module=github.com/013677890/LCchat-Backend` 用于按 `go_package` 生成到对应目录。
+- `InternalXxxService` proto 文件以 `internal_` 前缀命名，通过 `x-internal-caller` 拦截器鉴权。
+- 旧 `proto/user/` 下的 `common.proto`、`auth_service.proto`、`device_service.proto`、`friend_service.proto`、`blacklist_service.proto`、`group_service.proto` 在迁移完成后将被删除。

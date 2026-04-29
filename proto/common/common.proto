@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package common;
+
+option go_package = "github.com/013677890/LCchat-Backend/pkg/commonpb";
+
+import "validate/validate.proto";
+
+// ==================== 分页信息 ====================
+
+// PaginationInfo 分页信息（跨服务共享）
+message PaginationInfo {
+	int32 page = 1;
+	int32 page_size = 2;
+	int64 total = 3;
+	int32 total_pages = 4;
+}

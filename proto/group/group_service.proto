@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package group;
+
+option go_package = "github.com/013677890/LCchat-Backend/apps/group/pb";
+
+import "validate/validate.proto";
+
+// ==================== 群组服务接口 ====================
+// 服务名：GroupService
+// 职责：群资料、群成员、群角色、入群审批
+
+service GroupService {
+	rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse);
+	rpc DismissGroup(DismissGroupRequest) returns (DismissGroupResponse);
+	rpc GetGroupInfo(GetGroupInfoRequest) returns (GetGroupInfoResponse);
+	rpc UpdateGroupInfo(UpdateGroupInfoRequest) returns (UpdateGroupInfoResponse);
+	rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
+	rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
+	rpc GetMemberList(GetMemberListRequest) returns (GetMemberListResponse);
+	rpc GetGroupList(GetGroupListRequest) returns (GetGroupListResponse);
+	rpc GetGroupMemberIds(GetGroupMemberIdsRequest) returns (GetGroupMemberIdsResponse);
+}
+
+message CreateGroupRequest {
+	string name = 1 [(validate.rules).string = {min_len: 1, max_len: 64}];
+	string avatar = 2;
+	repeated string member_uuids = 3;
+}
+message CreateGroupResponse { string group_uuid = 1; }
+
+message DismissGroupRequest { string group_uuid = 1 [(validate.rules).string.min_len = 1]; }
+message DismissGroupResponse {}
+
+message GetGroupInfoRequest { string group_uuid = 1 [(validate.rules).string.min_len = 1]; }
+message GetGroupInfoResponse {
+	string group_uuid = 1;
+	string name = 2;
+	string avatar = 3;
+	string owner_uuid = 4;
+	int32 member_count = 5;
+}
+
+message UpdateGroupInfoRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string name = 2;
+	string avatar = 3;
+}
+message UpdateGroupInfoResponse {}
+
+message AddMemberRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	repeated string user_uuids = 2;
+}
+message AddMemberResponse {}
+
+message RemoveMemberRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string user_uuid = 2 [(validate.rules).string.min_len = 1];
+}
+message RemoveMemberResponse {}
+
+message GroupMemberItem {
+	string user_uuid = 1;
+	int32 role = 2;
+	string nickname = 3;
+	string avatar = 4;
+}
+
+message GetMemberListRequest { string group_uuid = 1 [(validate.rules).string.min_len = 1]; }
+message GetMemberListResponse { repeated GroupMemberItem members = 1; }
+
+message GetGroupListRequest {}
+message GetGroupListResponse {
+	repeated GetGroupInfoResponse groups = 1;
+}
+
+message GetGroupMemberIdsRequest { string group_uuid = 1 [(validate.rules).string.min_len = 1]; }
+message GetGroupMemberIdsResponse { repeated string user_uuids = 1; }

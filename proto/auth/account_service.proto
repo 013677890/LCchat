@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "github.com/013677890/LCchat-Backend/apps/auth/pb";
+
+import "validate/validate.proto";
+
+// ==================== 账号安全服务接口 ====================
+// 服务名：AccountService
+// 职责：密码修改、邮箱/手机绑定、账号注销
+// 这些操作本质属于账号安全或账号生命周期，不属于资料域
+
+service AccountService {
+	// ChangePassword 修改密码
+	// 建议调用超时：500ms。
+	rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+	
+	// ChangeEmail 绑定/换绑邮箱
+	// 建议调用超时：500ms。
+	rpc ChangeEmail(ChangeEmailRequest) returns (ChangeEmailResponse);
+	
+	// ChangeTelephone 绑定/换绑手机
+	// 建议调用超时：500ms。
+	rpc ChangeTelephone(ChangeTelephoneRequest) returns (ChangeTelephoneResponse);
+	
+	// DeleteAccount 注销账号
+	// 同步只做标删 + 清 token，其余走 Kafka account.deleted 异步补偿
+	// 建议调用超时：1000ms。
+	rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
+}
+
+// ==================== 修改密码 ====================
+
+// ChangePasswordRequest 修改密码请求
+message ChangePasswordRequest {
+	string old_password = 1 [(validate.rules).string = {min_len: 6, max_len: 20}];
+	string new_password = 2 [(validate.rules).string = {min_len: 6, max_len: 20}];
+}
+
+// ChangePasswordResponse 修改密码响应
+message ChangePasswordResponse {}
+
+// ==================== 换绑邮箱 ====================
+
+// ChangeEmailRequest 换绑邮箱请求
+message ChangeEmailRequest {
+	string new_email = 1 [(validate.rules).string.email = true];
+	string verify_code = 2 [(validate.rules).string.len = 6];
+}
+
+// ChangeEmailResponse 换绑邮箱响应
+message ChangeEmailResponse {
+	string email = 1;
+}
+
+// ==================== 换绑手机 ====================
+
+// ChangeTelephoneRequest 换绑手机请求
+message ChangeTelephoneRequest {
+	string new_telephone = 1 [(validate.rules).string.len = 11];
+	string verify_code = 2 [(validate.rules).string.len = 6];
+}
+
+// ChangeTelephoneResponse 换绑手机响应
+message ChangeTelephoneResponse {
+	string telephone = 1;
+}
+
+// ==================== 注销账号 ====================
+
+// DeleteAccountRequest 注销账号请求
+message DeleteAccountRequest {
+	string password = 1 [(validate.rules).string = {min_len: 6, max_len: 20}];
+	string reason = 2 [(validate.rules).string.max_len = 255];
+}
+
+// DeleteAccountResponse 注销账号响应
+// 语义：已受理（同步完成标删+清token；下游清理按最终一致保证）
+message DeleteAccountResponse {
+	string delete_at = 1;
+	string recover_deadline = 2;
+}

@@ -4,75 +4,80 @@ package user;
 
 option go_package = "github.com/013677890/LCchat-Backend/apps/user/pb";
 
-// 导入通用数据模型
-import "proto/user/common.proto";
+import "proto/common/common.proto";
 
 import "validate/validate.proto";
 
-// ==================== 用户信息服务接口 ====================
+// ==================== 用户资料服务接口 ====================
 // 服务名：UserService
-// 职责：用户个人信息管理、搜索用户、头像、密码修改、账号设置、二维码、注销
+// 职责：用户资料管理、搜索用户、头像、二维码名片
+// 注意：密码/邮箱/手机绑定/注销 已迁移到 auth.AccountService
 
 service UserService {
 	// GetProfile 获取个人信息
 	// 建议调用超时：300ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
 	
 	// GetOtherProfile 获取他人信息
 	// 建议调用超时：300ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc GetOtherProfile(GetOtherProfileRequest) returns (GetOtherProfileResponse);
 	
 	// SearchUser 搜索用户
 	// 建议调用超时：800ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc SearchUser(SearchUserRequest) returns (SearchUserResponse);
 	
 	// UpdateProfile 更新基本信息
+	// 成功后异步回写 auth 冗余字段（见 InternalAuthService.UpdateLoginDisplay）
 	// 建议调用超时：500ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
 	
 	// UploadAvatar 上传头像
+	// 成功后异步回写 auth 冗余字段
 	// 建议调用超时：500ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc UploadAvatar(UploadAvatarRequest) returns (UploadAvatarResponse);
-	
-	// ChangePassword 修改密码
-	// 建议调用超时：500ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
-	rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
-	
-	// ChangeEmail 绑定/换绑邮箱
-	// 建议调用超时：500ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
-	rpc ChangeEmail(ChangeEmailRequest) returns (ChangeEmailResponse);
-	
-	// ChangeTelephone 绑定/换绑手机
-	// 建议调用超时：500ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
-	rpc ChangeTelephone(ChangeTelephoneRequest) returns (ChangeTelephoneResponse);
 	
 	// GetQRCode 获取用户二维码
 	// 建议调用超时：300ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc GetQRCode(GetQRCodeRequest) returns (GetQRCodeResponse);
 	
 	// ParseQRCode 解析二维码
 	// 建议调用超时：300ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc ParseQRCode(ParseQRCodeRequest) returns (ParseQRCodeResponse);
-	
-	// DeleteAccount 注销账号
-	// 建议调用超时：1000ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
-	rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
 	
 	// BatchGetProfile 批量获取用户信息
 	// 建议调用超时：800ms。
-	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc BatchGetProfile(BatchGetProfileRequest) returns (BatchGetProfileResponse);
+}
+
+// ==================== 通用用户类型 ====================
+
+// UserInfo 用户完整信息（来自 user_profile）
+message UserInfo {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+	int32 gender = 4;
+	string signature = 5;
+	string birthday = 6;
+}
+
+// SimpleUserInfo 简化用户信息（用于批量查询）
+message SimpleUserInfo {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+	int32 gender = 4;
+	string signature = 5;
+}
+
+// SimpleUserItem 搜索结果用户项
+message SimpleUserItem {
+	string uuid = 1;
+	string nickname = 2;
+	reserved 3; // email 已移除
+	string avatar = 4;
+	string signature = 5;
+	bool is_friend = 6;
 }
 
 // ==================== 获取个人信息 ====================
@@ -109,7 +114,7 @@ message SearchUserRequest {
 // SearchUserResponse 搜索用户响应
 message SearchUserResponse {
 	repeated SimpleUserItem items = 1;
-	PaginationInfo pagination = 2;
+	common.PaginationInfo pagination = 2;
 }
 
 // ==================== 更新基本信息 ====================
@@ -139,43 +144,6 @@ message UploadAvatarResponse {
 	string avatar_url = 1;
 }
 
-// ==================== 修改密码 ====================
-
-// ChangePasswordRequest 修改密码请求
-message ChangePasswordRequest {
-	string old_password = 1 [(validate.rules).string = {min_len: 6, max_len: 20}];
-	string new_password = 2 [(validate.rules).string = {min_len: 6, max_len: 20}];
-}
-
-// ChangePasswordResponse 修改密码响应
-message ChangePasswordResponse {}
-
-// ==================== 换绑邮箱 ====================
-
-// ChangeEmailRequest 换绑邮箱请求
-message ChangeEmailRequest {
-	string new_email = 1 [(validate.rules).string.email = true];
-	string verify_code = 2 [(validate.rules).string.len = 6];
-}
-
-// ChangeEmailResponse 换绑邮箱响应
-message ChangeEmailResponse {
-	string email = 1;
-}
-
-// ==================== 换绑手机 ====================
-
-// ChangeTelephoneRequest 换绑手机请求
-message ChangeTelephoneRequest {
-	string new_telephone = 1 [(validate.rules).string.len = 11];
-	string verify_code = 2 [(validate.rules).string.len = 6];
-}
-
-// ChangeTelephoneResponse 换绑手机响应
-message ChangeTelephoneResponse {
-	string telephone = 1;
-}
-
 // ==================== 二维码相关 ====================
 
 // GetQRCodeRequest 获取二维码请求
@@ -197,20 +165,6 @@ message ParseQRCodeResponse {
 	string user_uuid = 1;
 }
 
-// ==================== 注销账号 ====================
-
-// DeleteAccountRequest 注销账号请求
-message DeleteAccountRequest {
-	string password = 1 [(validate.rules).string = {min_len: 6, max_len: 20}];
-	string reason = 2 [(validate.rules).string.max_len = 255];
-}
-
-// DeleteAccountResponse 注销账号响应
-message DeleteAccountResponse {
-	string delete_at = 1;
-	string recover_deadline = 2;
-}
-
 // ==================== 批量获取用户信息 ====================
 
 // BatchGetProfileRequest 批量获取用户信息请求
@@ -221,17 +175,4 @@ message BatchGetProfileRequest {
 // BatchGetProfileResponse 批量获取用户信息响应
 message BatchGetProfileResponse {
 	repeated SimpleUserInfo users = 1;
-}
-
-// ==================== 批量获取用户信息（用于增量同步等）====================
-
-message SyncUserInfoRequest {
-	string uuid = 1;
-	string nickname = 2;
-	string avatar = 3;
-	int64 changed_at = 4;
-}
-
-message SyncUserInfoResponse {
-	repeated SyncUserInfoRequest users = 1;
 }

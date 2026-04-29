@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "github.com/013677890/LCchat-Backend/apps/user/pb";
+
+import "validate/validate.proto";
+
+// ==================== 内部资料服务接口 ====================
+// 服务名：InternalProfileService
+// 鉴权：x-internal-caller metadata 校验
+
+service InternalProfileService {
+	rpc CreateProfile(CreateProfileRequest) returns (CreateProfileResponse);
+	rpc BatchGetUserCard(BatchGetUserCardRequest) returns (BatchGetUserCardResponse);
+	rpc BatchGetPublicProfile(BatchGetPublicProfileRequest) returns (BatchGetPublicProfileResponse);
+}
+
+message CreateProfileRequest {
+	string user_uuid = 1 [(validate.rules).string.min_len = 1];
+	string nickname = 2;
+	string avatar = 3;
+}
+message CreateProfileResponse {}
+
+message BatchGetUserCardRequest {
+	repeated string user_uuids = 1 [(validate.rules).repeated = {min_items: 1, max_items: 200}];
+}
+message UserCard {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+}
+message BatchGetUserCardResponse {
+	repeated UserCard cards = 1;
+}
+
+message BatchGetPublicProfileRequest {
+	repeated string user_uuids = 1 [(validate.rules).repeated = {min_items: 1, max_items: 100}];
+}
+message PublicProfile {
+	string uuid = 1;
+	string nickname = 2;
+	string avatar = 3;
+	int32 gender = 4;
+	string signature = 5;
+}
+message BatchGetPublicProfileResponse {
+	repeated PublicProfile profiles = 1;
+}
