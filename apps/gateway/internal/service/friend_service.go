@@ -5,6 +5,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
@@ -42,7 +43,7 @@ func (s *FriendServiceImpl) SendFriendApply(ctx context.Context, req *dto.SendFr
 // GetFriendApplyList 获取好友申请列表
 func (s *FriendServiceImpl) GetFriendApplyList(ctx context.Context, req *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error) {
 	// 1. 转换 DTO 为 Protobuf 请求
-	grpcReq := &userpb.GetFriendApplyListRequest{
+	grpcReq := &relationpb.GetFriendApplyListRequest{
 		Status:   req.Status,
 		Page:     req.Page,
 		PageSize: req.PageSize,
@@ -95,7 +96,7 @@ func (s *FriendServiceImpl) GetFriendApplyList(ctx context.Context, req *dto.Get
 // GetSentApplyList 获取发出的申请列表
 func (s *FriendServiceImpl) GetSentApplyList(ctx context.Context, req *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error) {
 	// 1. 转换 DTO 为 Protobuf 请求
-	grpcReq := &userpb.GetSentApplyListRequest{
+	grpcReq := &relationpb.GetSentApplyListRequest{
 		Status:   req.Status,
 		Page:     req.Page,
 		PageSize: req.PageSize,
@@ -170,7 +171,7 @@ func (s *FriendServiceImpl) HandleFriendApply(ctx context.Context, req *dto.Hand
 // GetUnreadApplyCount 获取未读申请数量
 func (s *FriendServiceImpl) GetUnreadApplyCount(ctx context.Context, req *dto.GetUnreadApplyCountRequest) (*dto.GetUnreadApplyCountResponse, error) {
 	// 1. 调用用户服务获取未读申请数量(gRPC)
-	grpcResp, err := s.userClient.GetUnreadApplyCount(ctx, &userpb.GetUnreadApplyCountRequest{})
+	grpcResp, err := s.userClient.GetUnreadApplyCount(ctx, &relationpb.GetUnreadApplyCountRequest{})
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
@@ -201,7 +202,7 @@ func (s *FriendServiceImpl) MarkApplyAsRead(ctx context.Context, req *dto.MarkAp
 // GetFriendList 获取好友列表
 func (s *FriendServiceImpl) GetFriendList(ctx context.Context, req *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error) {
 	// 1. 转换 DTO 为 Protobuf 请求
-	grpcReq := &userpb.GetFriendListRequest{
+	grpcReq := &relationpb.GetFriendListRequest{
 		GroupTag: req.GroupTag,
 		Page:     req.Page,
 		PageSize: req.PageSize,
@@ -256,7 +257,7 @@ func (s *FriendServiceImpl) GetFriendList(ctx context.Context, req *dto.GetFrien
 // SyncFriendList 好友增量同步
 func (s *FriendServiceImpl) SyncFriendList(ctx context.Context, req *dto.SyncFriendListRequest) (*dto.SyncFriendListResponse, error) {
 	// 1. 转换 DTO 为 Protobuf 请求
-	grpcReq := &userpb.SyncFriendListRequest{
+	grpcReq := &relationpb.SyncFriendListRequest{
 		Version: req.Version,
 		Limit:   req.Limit,
 	}
@@ -362,7 +363,7 @@ func (s *FriendServiceImpl) SetFriendTag(ctx context.Context, req *dto.SetFriend
 // GetTagList 获取标签列表
 func (s *FriendServiceImpl) GetTagList(ctx context.Context, req *dto.GetTagListRequest) (*dto.GetTagListResponse, error) {
 	// 1. 调用用户服务获取标签列表(gRPC)
-	grpcResp, err := s.userClient.GetTagList(ctx, &userpb.GetTagListRequest{})
+	grpcResp, err := s.userClient.GetTagList(ctx, &relationpb.GetTagListRequest{})
 	if err != nil {
 		// gRPC 调用失败，提取业务错误码
 		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）

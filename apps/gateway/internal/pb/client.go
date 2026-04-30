@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
@@ -19,8 +20,8 @@ import (
 type userServiceClientImpl struct {
 	authClient      userpb.AuthServiceClient
 	userClient      userpb.UserServiceClient
-	friendClient    userpb.FriendServiceClient
-	blacklistClient userpb.BlacklistServiceClient
+	friendClient    relationpb.FriendServiceClient
+	blacklistClient relationpb.BlacklistServiceClient
 	deviceClient    userpb.DeviceServiceClient
 	breaker         *gobreaker.CircuitBreaker
 }
@@ -36,8 +37,8 @@ func NewUserServiceClient(authConn, userConn, friendConn, blacklistConn, deviceC
 	return &userServiceClientImpl{
 		authClient:      userpb.NewAuthServiceClient(authConn),
 		userClient:      userpb.NewUserServiceClient(userConn),
-		friendClient:    userpb.NewFriendServiceClient(friendConn),
-		blacklistClient: userpb.NewBlacklistServiceClient(blacklistConn),
+		friendClient:    relationpb.NewFriendServiceClient(friendConn),
+		blacklistClient: relationpb.NewBlacklistServiceClient(blacklistConn),
 		deviceClient:    userpb.NewDeviceServiceClient(deviceConn),
 		breaker:         breaker,
 	}
@@ -190,106 +191,106 @@ func (c *userServiceClientImpl) SearchUser(ctx context.Context, req *userpb.Sear
 }
 
 // SendFriendApply 发送好友申请
-func (c *userServiceClientImpl) SendFriendApply(ctx context.Context, req *userpb.SendFriendApplyRequest) (*userpb.SendFriendApplyResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "SendFriendApply", func() (*userpb.SendFriendApplyResponse, error) {
+func (c *userServiceClientImpl) SendFriendApply(ctx context.Context, req *relationpb.SendFriendApplyRequest) (*relationpb.SendFriendApplyResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "SendFriendApply", func() (*relationpb.SendFriendApplyResponse, error) {
 		return c.friendClient.SendFriendApply(ctx, req)
 	})
 }
 
 // GetFriendApplyList 获取好友申请列表
-func (c *userServiceClientImpl) GetFriendApplyList(ctx context.Context, req *userpb.GetFriendApplyListRequest) (*userpb.GetFriendApplyListResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "GetFriendApplyList", func() (*userpb.GetFriendApplyListResponse, error) {
+func (c *userServiceClientImpl) GetFriendApplyList(ctx context.Context, req *relationpb.GetFriendApplyListRequest) (*relationpb.GetFriendApplyListResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "GetFriendApplyList", func() (*relationpb.GetFriendApplyListResponse, error) {
 		return c.friendClient.GetFriendApplyList(ctx, req)
 	})
 }
 
 // GetSentApplyList 获取发出的申请列表
-func (c *userServiceClientImpl) GetSentApplyList(ctx context.Context, req *userpb.GetSentApplyListRequest) (*userpb.GetSentApplyListResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "GetSentApplyList", func() (*userpb.GetSentApplyListResponse, error) {
+func (c *userServiceClientImpl) GetSentApplyList(ctx context.Context, req *relationpb.GetSentApplyListRequest) (*relationpb.GetSentApplyListResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "GetSentApplyList", func() (*relationpb.GetSentApplyListResponse, error) {
 		return c.friendClient.GetSentApplyList(ctx, req)
 	})
 }
 
 // HandleFriendApply 处理好友申请
-func (c *userServiceClientImpl) HandleFriendApply(ctx context.Context, req *userpb.HandleFriendApplyRequest) (*userpb.HandleFriendApplyResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "HandleFriendApply", func() (*userpb.HandleFriendApplyResponse, error) {
+func (c *userServiceClientImpl) HandleFriendApply(ctx context.Context, req *relationpb.HandleFriendApplyRequest) (*relationpb.HandleFriendApplyResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "HandleFriendApply", func() (*relationpb.HandleFriendApplyResponse, error) {
 		return c.friendClient.HandleFriendApply(ctx, req)
 	})
 }
 
 // GetUnreadApplyCount 获取未读申请数量
-func (c *userServiceClientImpl) GetUnreadApplyCount(ctx context.Context, req *userpb.GetUnreadApplyCountRequest) (*userpb.GetUnreadApplyCountResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "GetUnreadApplyCount", func() (*userpb.GetUnreadApplyCountResponse, error) {
+func (c *userServiceClientImpl) GetUnreadApplyCount(ctx context.Context, req *relationpb.GetUnreadApplyCountRequest) (*relationpb.GetUnreadApplyCountResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "GetUnreadApplyCount", func() (*relationpb.GetUnreadApplyCountResponse, error) {
 		return c.friendClient.GetUnreadApplyCount(ctx, req)
 	})
 }
 
 // MarkApplyAsRead 标记申请已读
-func (c *userServiceClientImpl) MarkApplyAsRead(ctx context.Context, req *userpb.MarkApplyAsReadRequest) (*userpb.MarkApplyAsReadResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "MarkApplyAsRead", func() (*userpb.MarkApplyAsReadResponse, error) {
+func (c *userServiceClientImpl) MarkApplyAsRead(ctx context.Context, req *relationpb.MarkApplyAsReadRequest) (*relationpb.MarkApplyAsReadResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "MarkApplyAsRead", func() (*relationpb.MarkApplyAsReadResponse, error) {
 		return c.friendClient.MarkApplyAsRead(ctx, req)
 	})
 }
 
 // GetFriendList 获取好友列表
-func (c *userServiceClientImpl) GetFriendList(ctx context.Context, req *userpb.GetFriendListRequest) (*userpb.GetFriendListResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "GetFriendList", func() (*userpb.GetFriendListResponse, error) {
+func (c *userServiceClientImpl) GetFriendList(ctx context.Context, req *relationpb.GetFriendListRequest) (*relationpb.GetFriendListResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "GetFriendList", func() (*relationpb.GetFriendListResponse, error) {
 		return c.friendClient.GetFriendList(ctx, req)
 	})
 }
 
 // SyncFriendList 好友增量同步
-func (c *userServiceClientImpl) SyncFriendList(ctx context.Context, req *userpb.SyncFriendListRequest) (*userpb.SyncFriendListResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "SyncFriendList", func() (*userpb.SyncFriendListResponse, error) {
+func (c *userServiceClientImpl) SyncFriendList(ctx context.Context, req *relationpb.SyncFriendListRequest) (*relationpb.SyncFriendListResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "SyncFriendList", func() (*relationpb.SyncFriendListResponse, error) {
 		return c.friendClient.SyncFriendList(ctx, req)
 	})
 }
 
 // DeleteFriend 删除好友
-func (c *userServiceClientImpl) DeleteFriend(ctx context.Context, req *userpb.DeleteFriendRequest) (*userpb.DeleteFriendResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "DeleteFriend", func() (*userpb.DeleteFriendResponse, error) {
+func (c *userServiceClientImpl) DeleteFriend(ctx context.Context, req *relationpb.DeleteFriendRequest) (*relationpb.DeleteFriendResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "DeleteFriend", func() (*relationpb.DeleteFriendResponse, error) {
 		return c.friendClient.DeleteFriend(ctx, req)
 	})
 }
 
 // SetFriendRemark 设置好友备注
-func (c *userServiceClientImpl) SetFriendRemark(ctx context.Context, req *userpb.SetFriendRemarkRequest) (*userpb.SetFriendRemarkResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "SetFriendRemark", func() (*userpb.SetFriendRemarkResponse, error) {
+func (c *userServiceClientImpl) SetFriendRemark(ctx context.Context, req *relationpb.SetFriendRemarkRequest) (*relationpb.SetFriendRemarkResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "SetFriendRemark", func() (*relationpb.SetFriendRemarkResponse, error) {
 		return c.friendClient.SetFriendRemark(ctx, req)
 	})
 }
 
 // SetFriendTag 设置好友标签
-func (c *userServiceClientImpl) SetFriendTag(ctx context.Context, req *userpb.SetFriendTagRequest) (*userpb.SetFriendTagResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "SetFriendTag", func() (*userpb.SetFriendTagResponse, error) {
+func (c *userServiceClientImpl) SetFriendTag(ctx context.Context, req *relationpb.SetFriendTagRequest) (*relationpb.SetFriendTagResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "SetFriendTag", func() (*relationpb.SetFriendTagResponse, error) {
 		return c.friendClient.SetFriendTag(ctx, req)
 	})
 }
 
 // GetTagList 获取标签列表
-func (c *userServiceClientImpl) GetTagList(ctx context.Context, req *userpb.GetTagListRequest) (*userpb.GetTagListResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "GetTagList", func() (*userpb.GetTagListResponse, error) {
+func (c *userServiceClientImpl) GetTagList(ctx context.Context, req *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "GetTagList", func() (*relationpb.GetTagListResponse, error) {
 		return c.friendClient.GetTagList(ctx, req)
 	})
 }
 
 // CheckIsFriend 判断是否好友
-func (c *userServiceClientImpl) CheckIsFriend(ctx context.Context, req *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "CheckIsFriend", func() (*userpb.CheckIsFriendResponse, error) {
+func (c *userServiceClientImpl) CheckIsFriend(ctx context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "CheckIsFriend", func() (*relationpb.CheckIsFriendResponse, error) {
 		return c.friendClient.CheckIsFriend(ctx, req)
 	})
 }
 
 // BatchCheckIsFriend 批量判断是否好友
-func (c *userServiceClientImpl) BatchCheckIsFriend(ctx context.Context, req *userpb.BatchCheckIsFriendRequest) (*userpb.BatchCheckIsFriendResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "BatchCheckIsFriend", func() (*userpb.BatchCheckIsFriendResponse, error) {
+func (c *userServiceClientImpl) BatchCheckIsFriend(ctx context.Context, req *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "BatchCheckIsFriend", func() (*relationpb.BatchCheckIsFriendResponse, error) {
 		return c.friendClient.BatchCheckIsFriend(ctx, req)
 	})
 }
 
 // GetRelationStatus 获取关系状态
-func (c *userServiceClientImpl) GetRelationStatus(ctx context.Context, req *userpb.GetRelationStatusRequest) (*userpb.GetRelationStatusResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "GetRelationStatus", func() (*userpb.GetRelationStatusResponse, error) {
+func (c *userServiceClientImpl) GetRelationStatus(ctx context.Context, req *relationpb.GetRelationStatusRequest) (*relationpb.GetRelationStatusResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.FriendService", "GetRelationStatus", func() (*relationpb.GetRelationStatusResponse, error) {
 		return c.friendClient.GetRelationStatus(ctx, req)
 	})
 }
@@ -297,29 +298,29 @@ func (c *userServiceClientImpl) GetRelationStatus(ctx context.Context, req *user
 // ==================== 黑名单服务方法实现 ====================
 
 // AddBlacklist 拉黑用户
-func (c *userServiceClientImpl) AddBlacklist(ctx context.Context, req *userpb.AddBlacklistRequest) (*userpb.AddBlacklistResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "AddBlacklist", func() (*userpb.AddBlacklistResponse, error) {
+func (c *userServiceClientImpl) AddBlacklist(ctx context.Context, req *relationpb.AddBlacklistRequest) (*relationpb.AddBlacklistResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.BlacklistService", "AddBlacklist", func() (*relationpb.AddBlacklistResponse, error) {
 		return c.blacklistClient.AddBlacklist(ctx, req)
 	})
 }
 
 // RemoveBlacklist 取消拉黑
-func (c *userServiceClientImpl) RemoveBlacklist(ctx context.Context, req *userpb.RemoveBlacklistRequest) (*userpb.RemoveBlacklistResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "RemoveBlacklist", func() (*userpb.RemoveBlacklistResponse, error) {
+func (c *userServiceClientImpl) RemoveBlacklist(ctx context.Context, req *relationpb.RemoveBlacklistRequest) (*relationpb.RemoveBlacklistResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.BlacklistService", "RemoveBlacklist", func() (*relationpb.RemoveBlacklistResponse, error) {
 		return c.blacklistClient.RemoveBlacklist(ctx, req)
 	})
 }
 
 // GetBlacklistList 获取黑名单列表
-func (c *userServiceClientImpl) GetBlacklistList(ctx context.Context, req *userpb.GetBlacklistListRequest) (*userpb.GetBlacklistListResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "GetBlacklistList", func() (*userpb.GetBlacklistListResponse, error) {
+func (c *userServiceClientImpl) GetBlacklistList(ctx context.Context, req *relationpb.GetBlacklistListRequest) (*relationpb.GetBlacklistListResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.BlacklistService", "GetBlacklistList", func() (*relationpb.GetBlacklistListResponse, error) {
 		return c.blacklistClient.GetBlacklistList(ctx, req)
 	})
 }
 
 // CheckIsBlacklist 判断是否拉黑
-func (c *userServiceClientImpl) CheckIsBlacklist(ctx context.Context, req *userpb.CheckIsBlacklistRequest) (*userpb.CheckIsBlacklistResponse, error) {
-	return ExecuteWithBreaker(c.breaker, "user.Service", "CheckIsBlacklist", func() (*userpb.CheckIsBlacklistResponse, error) {
+func (c *userServiceClientImpl) CheckIsBlacklist(ctx context.Context, req *relationpb.CheckIsBlacklistRequest) (*relationpb.CheckIsBlacklistResponse, error) {
+	return ExecuteWithBreaker(c.breaker, "relation.BlacklistService", "CheckIsBlacklist", func() (*relationpb.CheckIsBlacklistResponse, error) {
 		return c.blacklistClient.CheckIsBlacklist(ctx, req)
 	})
 }
@@ -501,4 +502,20 @@ func CreateBlacklistServiceConnection(addr string, breaker *gobreaker.CircuitBre
 // 返回: gRPC 连接和错误
 func CreateDeviceServiceConnection(addr string, breaker *gobreaker.CircuitBreaker) (*grpc.ClientConn, error) {
 	return CreateConnection(addr, getRetryPolicy("user.DeviceService"), breaker)
+}
+
+// CreateRelationFriendServiceConnection 创建 relation-friend 服务 gRPC 连接。
+// addr: relation 服务地址，格式为 "host:port"
+// breaker: 熔断器实例
+// 返回: gRPC 连接和错误
+func CreateRelationFriendServiceConnection(addr string, breaker *gobreaker.CircuitBreaker) (*grpc.ClientConn, error) {
+	return CreateConnection(addr, getRetryPolicy("relation.FriendService"), breaker)
+}
+
+// CreateRelationBlacklistServiceConnection 创建 relation-blacklist 服务 gRPC 连接。
+// addr: relation 服务地址，格式为 "host:port"
+// breaker: 熔断器实例
+// 返回: gRPC 连接和错误
+func CreateRelationBlacklistServiceConnection(addr string, breaker *gobreaker.CircuitBreaker) (*grpc.ClientConn, error) {
+	return CreateConnection(addr, getRetryPolicy("relation.BlacklistService"), breaker)
 }

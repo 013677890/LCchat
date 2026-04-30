@@ -19,6 +19,7 @@ const gatewayDefaultRequestTimeout = 2 * time.Second
 //   - 1s: 轻量读、探活类
 //   - 2s: 常规写 / 常规聚合
 //   - 3s: 搜索、批量、发送、上传等相对更重的接口
+//
 // 未命中的新接口仍会回退到 gatewayDefaultRequestTimeout，避免漏配后完全失去保护。
 var gatewayRequestTimeouts = map[string]time.Duration{
 	"/health":  0,
@@ -68,6 +69,7 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 
 	// auth blacklist
 	"/api/v1/auth/blacklist":           2 * time.Second,
+	"/api/v1/auth/blacklist/check":     1 * time.Second,
 	"/api/v1/auth/blacklist/:userUuid": 2 * time.Second,
 
 	// auth messages
@@ -220,8 +222,9 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				blacklist.POST("", blacklistHandler.AddBlacklist)
 				blacklist.GET("", blacklistHandler.GetBlacklistList)
 				blacklist.DELETE("/:userUuid", blacklistHandler.RemoveBlacklist)
-				// /check 接口存在越权查询风险（GATEWAY-001），暂不对外暴露。
-				// 如需判断黑名单关系，调用方应通过内部 gRPC 接口。
+				// 兼容现有客户端与测试约定，暂时继续对外暴露 /check。
+				// 后续若要收敛越权风险，需要改成仅允许判断“当前登录用户 -> target”的关系。
+				blacklist.POST("/check", blacklistHandler.CheckIsBlacklist)
 			}
 			messages := auth.Group("/messages")
 			{

@@ -9,7 +9,9 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	commonpb "github.com/013677890/LCchat-Backend/pkg/commonpb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"github.com/stretchr/testify/assert"
@@ -28,28 +30,28 @@ func initGatewayBlacklistTestLogger() {
 type fakeGatewayUserClient struct {
 	gatewaypb.UserServiceClient
 
-	addBlacklistFn     func(context.Context, *userpb.AddBlacklistRequest) (*userpb.AddBlacklistResponse, error)
-	removeBlacklistFn  func(context.Context, *userpb.RemoveBlacklistRequest) (*userpb.RemoveBlacklistResponse, error)
-	getBlacklistListFn func(context.Context, *userpb.GetBlacklistListRequest) (*userpb.GetBlacklistListResponse, error)
+	addBlacklistFn     func(context.Context, *relationpb.AddBlacklistRequest) (*relationpb.AddBlacklistResponse, error)
+	removeBlacklistFn  func(context.Context, *relationpb.RemoveBlacklistRequest) (*relationpb.RemoveBlacklistResponse, error)
+	getBlacklistListFn func(context.Context, *relationpb.GetBlacklistListRequest) (*relationpb.GetBlacklistListResponse, error)
 	batchGetProfileFn  func(context.Context, *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error)
-	checkIsBlacklistFn func(context.Context, *userpb.CheckIsBlacklistRequest) (*userpb.CheckIsBlacklistResponse, error)
+	checkIsBlacklistFn func(context.Context, *relationpb.CheckIsBlacklistRequest) (*relationpb.CheckIsBlacklistResponse, error)
 }
 
-func (f *fakeGatewayUserClient) AddBlacklist(ctx context.Context, req *userpb.AddBlacklistRequest) (*userpb.AddBlacklistResponse, error) {
+func (f *fakeGatewayUserClient) AddBlacklist(ctx context.Context, req *relationpb.AddBlacklistRequest) (*relationpb.AddBlacklistResponse, error) {
 	if f.addBlacklistFn == nil {
 		return nil, errors.New("unexpected AddBlacklist call")
 	}
 	return f.addBlacklistFn(ctx, req)
 }
 
-func (f *fakeGatewayUserClient) RemoveBlacklist(ctx context.Context, req *userpb.RemoveBlacklistRequest) (*userpb.RemoveBlacklistResponse, error) {
+func (f *fakeGatewayUserClient) RemoveBlacklist(ctx context.Context, req *relationpb.RemoveBlacklistRequest) (*relationpb.RemoveBlacklistResponse, error) {
 	if f.removeBlacklistFn == nil {
 		return nil, errors.New("unexpected RemoveBlacklist call")
 	}
 	return f.removeBlacklistFn(ctx, req)
 }
 
-func (f *fakeGatewayUserClient) GetBlacklistList(ctx context.Context, req *userpb.GetBlacklistListRequest) (*userpb.GetBlacklistListResponse, error) {
+func (f *fakeGatewayUserClient) GetBlacklistList(ctx context.Context, req *relationpb.GetBlacklistListRequest) (*relationpb.GetBlacklistListResponse, error) {
 	if f.getBlacklistListFn == nil {
 		return nil, errors.New("unexpected GetBlacklistList call")
 	}
@@ -63,7 +65,7 @@ func (f *fakeGatewayUserClient) BatchGetProfile(ctx context.Context, req *userpb
 	return f.batchGetProfileFn(ctx, req)
 }
 
-func (f *fakeGatewayUserClient) CheckIsBlacklist(ctx context.Context, req *userpb.CheckIsBlacklistRequest) (*userpb.CheckIsBlacklistResponse, error) {
+func (f *fakeGatewayUserClient) CheckIsBlacklist(ctx context.Context, req *relationpb.CheckIsBlacklistRequest) (*relationpb.CheckIsBlacklistResponse, error) {
 	if f.checkIsBlacklistFn == nil {
 		return nil, errors.New("unexpected CheckIsBlacklist call")
 	}
@@ -75,9 +77,9 @@ func TestGatewayBlacklistServiceAddBlacklist(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayUserClient{
-			addBlacklistFn: func(_ context.Context, req *userpb.AddBlacklistRequest) (*userpb.AddBlacklistResponse, error) {
+			addBlacklistFn: func(_ context.Context, req *relationpb.AddBlacklistRequest) (*relationpb.AddBlacklistResponse, error) {
 				require.Equal(t, "target-1", req.TargetUuid)
-				return &userpb.AddBlacklistResponse{}, nil
+				return &relationpb.AddBlacklistResponse{}, nil
 			},
 		}
 		svc := NewBlacklistService(client)
@@ -90,7 +92,7 @@ func TestGatewayBlacklistServiceAddBlacklist(t *testing.T) {
 	t.Run("grpc_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayUserClient{
-			addBlacklistFn: func(_ context.Context, _ *userpb.AddBlacklistRequest) (*userpb.AddBlacklistResponse, error) {
+			addBlacklistFn: func(_ context.Context, _ *relationpb.AddBlacklistRequest) (*relationpb.AddBlacklistResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -107,9 +109,9 @@ func TestGatewayBlacklistServiceRemoveBlacklist(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayUserClient{
-			removeBlacklistFn: func(_ context.Context, req *userpb.RemoveBlacklistRequest) (*userpb.RemoveBlacklistResponse, error) {
+			removeBlacklistFn: func(_ context.Context, req *relationpb.RemoveBlacklistRequest) (*relationpb.RemoveBlacklistResponse, error) {
 				require.Equal(t, "target-1", req.UserUuid)
-				return &userpb.RemoveBlacklistResponse{}, nil
+				return &relationpb.RemoveBlacklistResponse{}, nil
 			},
 		}
 		svc := NewBlacklistService(client)
@@ -122,7 +124,7 @@ func TestGatewayBlacklistServiceRemoveBlacklist(t *testing.T) {
 	t.Run("grpc_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayUserClient{
-			removeBlacklistFn: func(_ context.Context, _ *userpb.RemoveBlacklistRequest) (*userpb.RemoveBlacklistResponse, error) {
+			removeBlacklistFn: func(_ context.Context, _ *relationpb.RemoveBlacklistRequest) (*relationpb.RemoveBlacklistResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -140,10 +142,10 @@ func TestGatewayBlacklistServiceGetBlacklistList(t *testing.T) {
 	t.Run("empty_list_skips_profile_enrichment", func(t *testing.T) {
 		batchCalls := 0
 		client := &fakeGatewayUserClient{
-			getBlacklistListFn: func(_ context.Context, _ *userpb.GetBlacklistListRequest) (*userpb.GetBlacklistListResponse, error) {
-				return &userpb.GetBlacklistListResponse{
-					Items:      []*userpb.BlacklistItem{},
-					Pagination: &userpb.PaginationInfo{Page: 1, PageSize: 20, Total: 0, TotalPages: 0},
+			getBlacklistListFn: func(_ context.Context, _ *relationpb.GetBlacklistListRequest) (*relationpb.GetBlacklistListResponse, error) {
+				return &relationpb.GetBlacklistListResponse{
+					Items:      []*relationpb.BlacklistItem{},
+					Pagination: &commonpb.PaginationInfo{Page: 1, PageSize: 20, Total: 0, TotalPages: 0},
 				}, nil
 			},
 			batchGetProfileFn: func(_ context.Context, _ *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error) {
@@ -163,18 +165,18 @@ func TestGatewayBlacklistServiceGetBlacklistList(t *testing.T) {
 	t.Run("enrich_user_info_and_deduplicate", func(t *testing.T) {
 		var batchCalls [][]string
 		client := &fakeGatewayUserClient{
-			getBlacklistListFn: func(_ context.Context, req *userpb.GetBlacklistListRequest) (*userpb.GetBlacklistListResponse, error) {
+			getBlacklistListFn: func(_ context.Context, req *relationpb.GetBlacklistListRequest) (*relationpb.GetBlacklistListResponse, error) {
 				require.Equal(t, int32(1), req.Page)
 				require.Equal(t, int32(20), req.PageSize)
-				return &userpb.GetBlacklistListResponse{
-					Items: []*userpb.BlacklistItem{
+				return &relationpb.GetBlacklistListResponse{
+					Items: []*relationpb.BlacklistItem{
 						{Uuid: "u1", BlacklistedAt: 1001},
 						nil,
 						{Uuid: "u2", BlacklistedAt: 1002},
 						{Uuid: "u1", BlacklistedAt: 1003},
 						{Uuid: "", BlacklistedAt: 1004},
 					},
-					Pagination: &userpb.PaginationInfo{Page: 1, PageSize: 20, Total: 5, TotalPages: 1},
+					Pagination: &commonpb.PaginationInfo{Page: 1, PageSize: 20, Total: 5, TotalPages: 1},
 				}, nil
 			},
 			batchGetProfileFn: func(_ context.Context, req *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error) {
@@ -209,12 +211,12 @@ func TestGatewayBlacklistServiceGetBlacklistList(t *testing.T) {
 
 	t.Run("batch_profile_failed_then_degrade", func(t *testing.T) {
 		client := &fakeGatewayUserClient{
-			getBlacklistListFn: func(_ context.Context, _ *userpb.GetBlacklistListRequest) (*userpb.GetBlacklistListResponse, error) {
-				return &userpb.GetBlacklistListResponse{
-					Items: []*userpb.BlacklistItem{
+			getBlacklistListFn: func(_ context.Context, _ *relationpb.GetBlacklistListRequest) (*relationpb.GetBlacklistListResponse, error) {
+				return &relationpb.GetBlacklistListResponse{
+					Items: []*relationpb.BlacklistItem{
 						{Uuid: "u1", Nickname: "from-user-service", Avatar: "raw-avatar", BlacklistedAt: 1001},
 					},
-					Pagination: &userpb.PaginationInfo{Page: 1, PageSize: 20, Total: 1, TotalPages: 1},
+					Pagination: &commonpb.PaginationInfo{Page: 1, PageSize: 20, Total: 1, TotalPages: 1},
 				}, nil
 			},
 			batchGetProfileFn: func(_ context.Context, _ *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error) {
@@ -233,7 +235,7 @@ func TestGatewayBlacklistServiceGetBlacklistList(t *testing.T) {
 	t.Run("grpc_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("rpc failed")
 		client := &fakeGatewayUserClient{
-			getBlacklistListFn: func(_ context.Context, _ *userpb.GetBlacklistListRequest) (*userpb.GetBlacklistListResponse, error) {
+			getBlacklistListFn: func(_ context.Context, _ *relationpb.GetBlacklistListRequest) (*relationpb.GetBlacklistListResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -335,10 +337,10 @@ func TestGatewayBlacklistServiceCheckIsBlacklist(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayUserClient{
-			checkIsBlacklistFn: func(_ context.Context, req *userpb.CheckIsBlacklistRequest) (*userpb.CheckIsBlacklistResponse, error) {
+			checkIsBlacklistFn: func(_ context.Context, req *relationpb.CheckIsBlacklistRequest) (*relationpb.CheckIsBlacklistResponse, error) {
 				require.Equal(t, "u1", req.UserUuid)
 				require.Equal(t, "u2", req.TargetUuid)
-				return &userpb.CheckIsBlacklistResponse{IsBlacklist: true}, nil
+				return &relationpb.CheckIsBlacklistResponse{IsBlacklist: true}, nil
 			},
 		}
 		svc := NewBlacklistService(client)
@@ -352,7 +354,7 @@ func TestGatewayBlacklistServiceCheckIsBlacklist(t *testing.T) {
 	t.Run("grpc_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayUserClient{
-			checkIsBlacklistFn: func(_ context.Context, _ *userpb.CheckIsBlacklistRequest) (*userpb.CheckIsBlacklistResponse, error) {
+			checkIsBlacklistFn: func(_ context.Context, _ *relationpb.CheckIsBlacklistRequest) (*relationpb.CheckIsBlacklistResponse, error) {
 				return nil, wantErr
 			},
 		}

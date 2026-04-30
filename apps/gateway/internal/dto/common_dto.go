@@ -1,7 +1,9 @@
 package dto
 
 import (
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	commonpb "github.com/013677890/LCchat-Backend/pkg/commonpb"
 )
 
 // ==================== 通用 DTO 定义 ====================
@@ -77,6 +79,20 @@ func ConvertSimpleUserInfoFromProto(pb *userpb.SimpleUserInfo) *SimpleUserInfo {
 	}
 }
 
+// ConvertRelationSimpleUserInfoFromProto 将 relation 域的简化用户信息转换为 DTO。
+func ConvertRelationSimpleUserInfoFromProto(pb *relationpb.SimpleUserInfo) *SimpleUserInfo {
+	if pb == nil {
+		return nil
+	}
+	return &SimpleUserInfo{
+		UUID:      pb.Uuid,
+		Nickname:  pb.Nickname,
+		Avatar:    pb.Avatar,
+		Gender:    pb.Gender,
+		Signature: pb.Signature,
+	}
+}
+
 // ConvertSimpleUserItemsFromProto 批量将 Protobuf 简化用户信息转换为 DTO
 func ConvertSimpleUserItemsFromProto(pbs []*userpb.SimpleUserInfo) []*SimpleUserInfo {
 	if pbs == nil {
@@ -105,6 +121,19 @@ func ConvertDeviceInfoFromProto(pb *userpb.DeviceInfo) *DeviceInfo {
 
 // ConvertPaginationInfoFromProto 将 Protobuf 分页信息转换为 DTO
 func ConvertPaginationInfoFromProto(pb *userpb.PaginationInfo) *PaginationInfo {
+	if pb == nil {
+		return nil
+	}
+	return &PaginationInfo{
+		Page:       pb.Page,
+		PageSize:   pb.PageSize,
+		Total:      pb.Total,
+		TotalPages: pb.TotalPages,
+	}
+}
+
+// ConvertCommonPaginationInfoFromProto 将跨服务共享分页信息转换为 DTO。
+func ConvertCommonPaginationInfoFromProto(pb *commonpb.PaginationInfo) *PaginationInfo {
 	if pb == nil {
 		return nil
 	}

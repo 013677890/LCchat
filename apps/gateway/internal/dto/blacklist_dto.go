@@ -1,7 +1,7 @@
 package dto
 
 import (
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 )
 
 // ==================== 黑名单服务相关 DTO ====================
@@ -56,38 +56,38 @@ type CheckIsBlacklistResponse struct {
 // ==================== 黑名单服务 DTO 转换函数 ====================
 
 // ConvertToProtoAddBlacklistRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoAddBlacklistRequest(dto *AddBlacklistRequest) *userpb.AddBlacklistRequest {
+func ConvertToProtoAddBlacklistRequest(dto *AddBlacklistRequest) *relationpb.AddBlacklistRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.AddBlacklistRequest{
+	return &relationpb.AddBlacklistRequest{
 		TargetUuid: dto.TargetUUID,
 	}
 }
 
 // ConvertToProtoRemoveBlacklistRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoRemoveBlacklistRequest(dto *RemoveBlacklistRequest) *userpb.RemoveBlacklistRequest {
+func ConvertToProtoRemoveBlacklistRequest(dto *RemoveBlacklistRequest) *relationpb.RemoveBlacklistRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.RemoveBlacklistRequest{
+	return &relationpb.RemoveBlacklistRequest{
 		UserUuid: dto.UserUUID,
 	}
 }
 
 // ConvertToProtoCheckIsBlacklistRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoCheckIsBlacklistRequest(dto *CheckIsBlacklistRequest) *userpb.CheckIsBlacklistRequest {
+func ConvertToProtoCheckIsBlacklistRequest(dto *CheckIsBlacklistRequest) *relationpb.CheckIsBlacklistRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.CheckIsBlacklistRequest{
+	return &relationpb.CheckIsBlacklistRequest{
 		UserUuid:   dto.UserUUID,
 		TargetUuid: dto.TargetUUID,
 	}
 }
 
 // ConvertBlacklistItemFromProto 将 Protobuf 黑名单项转换为 DTO
-func ConvertBlacklistItemFromProto(pb *userpb.BlacklistItem) *BlacklistItem {
+func ConvertBlacklistItemFromProto(pb *relationpb.BlacklistItem) *BlacklistItem {
 	if pb == nil {
 		return nil
 	}
@@ -100,7 +100,7 @@ func ConvertBlacklistItemFromProto(pb *userpb.BlacklistItem) *BlacklistItem {
 }
 
 // ConvertBlacklistItemsFromProto 批量将 Protobuf 黑名单项转换为 DTO
-func ConvertBlacklistItemsFromProto(pbs []*userpb.BlacklistItem) []*BlacklistItem {
+func ConvertBlacklistItemsFromProto(pbs []*relationpb.BlacklistItem) []*BlacklistItem {
 	if pbs == nil {
 		return []*BlacklistItem{}
 	}
@@ -115,7 +115,7 @@ func ConvertBlacklistItemsFromProto(pbs []*userpb.BlacklistItem) []*BlacklistIte
 // ==================== 黑名单服务 gRPC响应到DTO转换函数 ====================
 
 // ConvertAddBlacklistResponseFromProto 将 Protobuf 拉黑用户响应转换为 DTO
-func ConvertAddBlacklistResponseFromProto(pb *userpb.AddBlacklistResponse) *AddBlacklistResponse {
+func ConvertAddBlacklistResponseFromProto(pb *relationpb.AddBlacklistResponse) *AddBlacklistResponse {
 	if pb == nil {
 		return nil
 	}
@@ -123,7 +123,7 @@ func ConvertAddBlacklistResponseFromProto(pb *userpb.AddBlacklistResponse) *AddB
 }
 
 // ConvertRemoveBlacklistResponseFromProto 将 Protobuf 取消拉黑响应转换为 DTO
-func ConvertRemoveBlacklistResponseFromProto(pb *userpb.RemoveBlacklistResponse) *RemoveBlacklistResponse {
+func ConvertRemoveBlacklistResponseFromProto(pb *relationpb.RemoveBlacklistResponse) *RemoveBlacklistResponse {
 	if pb == nil {
 		return nil
 	}
@@ -131,7 +131,7 @@ func ConvertRemoveBlacklistResponseFromProto(pb *userpb.RemoveBlacklistResponse)
 }
 
 // ConvertGetBlacklistListResponseFromProto 将 Protobuf 获取黑名单列表响应转换为 DTO
-func ConvertGetBlacklistListResponseFromProto(pb *userpb.GetBlacklistListResponse) *GetBlacklistListResponse {
+func ConvertGetBlacklistListResponseFromProto(pb *relationpb.GetBlacklistListResponse) *GetBlacklistListResponse {
 	if pb == nil {
 		return nil
 	}
@@ -140,12 +140,12 @@ func ConvertGetBlacklistListResponseFromProto(pb *userpb.GetBlacklistListRespons
 
 	return &GetBlacklistListResponse{
 		Items:      items,
-		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+		Pagination: ConvertCommonPaginationInfoFromProto(pb.Pagination),
 	}
 }
 
 // ConvertCheckIsBlacklistResponseFromProto 将 Protobuf 判断是否拉黑响应转换为 DTO
-func ConvertCheckIsBlacklistResponseFromProto(pb *userpb.CheckIsBlacklistResponse) *CheckIsBlacklistResponse {
+func ConvertCheckIsBlacklistResponseFromProto(pb *relationpb.CheckIsBlacklistResponse) *CheckIsBlacklistResponse {
 	if pb == nil {
 		return nil
 	}

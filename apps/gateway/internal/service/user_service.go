@@ -7,6 +7,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
@@ -59,7 +60,7 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 	group := async.NewGroup(ctx, 5*time.Second)
 
 	var userResp *userpb.GetOtherProfileResponse
-	var friendResp *userpb.CheckIsFriendResponse
+	var friendResp *relationpb.CheckIsFriendResponse
 	var friendErr error
 
 	if err := group.Go(func(asyncCtx context.Context) error {
@@ -74,7 +75,7 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 	}
 
 	if err := group.Go(func(asyncCtx context.Context) error {
-		friendReq := &userpb.CheckIsFriendRequest{
+		friendReq := &relationpb.CheckIsFriendRequest{
 			UserUuid: currentUserUUID,
 			PeerUuid: req.UserUUID,
 		}
@@ -151,7 +152,7 @@ func (s *UserServiceImpl) SearchUser(ctx context.Context, req *dto.SearchUserReq
 			peerUUIDs = append(peerUUIDs, item.UUID)
 		}
 		if len(peerUUIDs) > 0 {
-			batchResp, err := s.userClient.BatchCheckIsFriend(ctx, &userpb.BatchCheckIsFriendRequest{UserUuid: currentUserUUID, PeerUuids: peerUUIDs})
+			batchResp, err := s.userClient.BatchCheckIsFriend(ctx, &relationpb.BatchCheckIsFriendRequest{UserUuid: currentUserUUID, PeerUuids: peerUUIDs})
 			if err != nil {
 				logger.Warn(ctx, "批量判断好友关系失败，按普通搜索结果返回",
 					logger.Int("count", len(peerUUIDs)),

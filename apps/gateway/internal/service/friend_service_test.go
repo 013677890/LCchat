@@ -9,6 +9,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
@@ -30,115 +31,115 @@ func initGatewayFriendServiceTestLogger() {
 type fakeGatewayFriendClient struct {
 	gatewaypb.UserServiceClient
 
-	sendFriendApplyFn    func(context.Context, *userpb.SendFriendApplyRequest) (*userpb.SendFriendApplyResponse, error)
-	getFriendApplyListFn func(context.Context, *userpb.GetFriendApplyListRequest) (*userpb.GetFriendApplyListResponse, error)
-	getSentApplyListFn   func(context.Context, *userpb.GetSentApplyListRequest) (*userpb.GetSentApplyListResponse, error)
-	handleFriendApplyFn  func(context.Context, *userpb.HandleFriendApplyRequest) (*userpb.HandleFriendApplyResponse, error)
-	getUnreadCountFn     func(context.Context, *userpb.GetUnreadApplyCountRequest) (*userpb.GetUnreadApplyCountResponse, error)
-	markApplyAsReadFn    func(context.Context, *userpb.MarkApplyAsReadRequest) (*userpb.MarkApplyAsReadResponse, error)
-	getFriendListFn      func(context.Context, *userpb.GetFriendListRequest) (*userpb.GetFriendListResponse, error)
-	syncFriendListFn     func(context.Context, *userpb.SyncFriendListRequest) (*userpb.SyncFriendListResponse, error)
-	deleteFriendFn       func(context.Context, *userpb.DeleteFriendRequest) (*userpb.DeleteFriendResponse, error)
-	setFriendRemarkFn    func(context.Context, *userpb.SetFriendRemarkRequest) (*userpb.SetFriendRemarkResponse, error)
-	setFriendTagFn       func(context.Context, *userpb.SetFriendTagRequest) (*userpb.SetFriendTagResponse, error)
-	getTagListFn         func(context.Context, *userpb.GetTagListRequest) (*userpb.GetTagListResponse, error)
-	checkIsFriendFn      func(context.Context, *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error)
-	getRelationStatusFn  func(context.Context, *userpb.GetRelationStatusRequest) (*userpb.GetRelationStatusResponse, error)
+	sendFriendApplyFn    func(context.Context, *relationpb.SendFriendApplyRequest) (*relationpb.SendFriendApplyResponse, error)
+	getFriendApplyListFn func(context.Context, *relationpb.GetFriendApplyListRequest) (*relationpb.GetFriendApplyListResponse, error)
+	getSentApplyListFn   func(context.Context, *relationpb.GetSentApplyListRequest) (*relationpb.GetSentApplyListResponse, error)
+	handleFriendApplyFn  func(context.Context, *relationpb.HandleFriendApplyRequest) (*relationpb.HandleFriendApplyResponse, error)
+	getUnreadCountFn     func(context.Context, *relationpb.GetUnreadApplyCountRequest) (*relationpb.GetUnreadApplyCountResponse, error)
+	markApplyAsReadFn    func(context.Context, *relationpb.MarkApplyAsReadRequest) (*relationpb.MarkApplyAsReadResponse, error)
+	getFriendListFn      func(context.Context, *relationpb.GetFriendListRequest) (*relationpb.GetFriendListResponse, error)
+	syncFriendListFn     func(context.Context, *relationpb.SyncFriendListRequest) (*relationpb.SyncFriendListResponse, error)
+	deleteFriendFn       func(context.Context, *relationpb.DeleteFriendRequest) (*relationpb.DeleteFriendResponse, error)
+	setFriendRemarkFn    func(context.Context, *relationpb.SetFriendRemarkRequest) (*relationpb.SetFriendRemarkResponse, error)
+	setFriendTagFn       func(context.Context, *relationpb.SetFriendTagRequest) (*relationpb.SetFriendTagResponse, error)
+	getTagListFn         func(context.Context, *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error)
+	checkIsFriendFn      func(context.Context, *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error)
+	getRelationStatusFn  func(context.Context, *relationpb.GetRelationStatusRequest) (*relationpb.GetRelationStatusResponse, error)
 	batchGetProfileFn    func(context.Context, *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error)
 }
 
-func (f *fakeGatewayFriendClient) SendFriendApply(ctx context.Context, req *userpb.SendFriendApplyRequest) (*userpb.SendFriendApplyResponse, error) {
+func (f *fakeGatewayFriendClient) SendFriendApply(ctx context.Context, req *relationpb.SendFriendApplyRequest) (*relationpb.SendFriendApplyResponse, error) {
 	if f.sendFriendApplyFn == nil {
 		return nil, errors.New("unexpected SendFriendApply call")
 	}
 	return f.sendFriendApplyFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) GetFriendApplyList(ctx context.Context, req *userpb.GetFriendApplyListRequest) (*userpb.GetFriendApplyListResponse, error) {
+func (f *fakeGatewayFriendClient) GetFriendApplyList(ctx context.Context, req *relationpb.GetFriendApplyListRequest) (*relationpb.GetFriendApplyListResponse, error) {
 	if f.getFriendApplyListFn == nil {
 		return nil, errors.New("unexpected GetFriendApplyList call")
 	}
 	return f.getFriendApplyListFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) GetSentApplyList(ctx context.Context, req *userpb.GetSentApplyListRequest) (*userpb.GetSentApplyListResponse, error) {
+func (f *fakeGatewayFriendClient) GetSentApplyList(ctx context.Context, req *relationpb.GetSentApplyListRequest) (*relationpb.GetSentApplyListResponse, error) {
 	if f.getSentApplyListFn == nil {
 		return nil, errors.New("unexpected GetSentApplyList call")
 	}
 	return f.getSentApplyListFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) HandleFriendApply(ctx context.Context, req *userpb.HandleFriendApplyRequest) (*userpb.HandleFriendApplyResponse, error) {
+func (f *fakeGatewayFriendClient) HandleFriendApply(ctx context.Context, req *relationpb.HandleFriendApplyRequest) (*relationpb.HandleFriendApplyResponse, error) {
 	if f.handleFriendApplyFn == nil {
 		return nil, errors.New("unexpected HandleFriendApply call")
 	}
 	return f.handleFriendApplyFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) GetUnreadApplyCount(ctx context.Context, req *userpb.GetUnreadApplyCountRequest) (*userpb.GetUnreadApplyCountResponse, error) {
+func (f *fakeGatewayFriendClient) GetUnreadApplyCount(ctx context.Context, req *relationpb.GetUnreadApplyCountRequest) (*relationpb.GetUnreadApplyCountResponse, error) {
 	if f.getUnreadCountFn == nil {
 		return nil, errors.New("unexpected GetUnreadApplyCount call")
 	}
 	return f.getUnreadCountFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) MarkApplyAsRead(ctx context.Context, req *userpb.MarkApplyAsReadRequest) (*userpb.MarkApplyAsReadResponse, error) {
+func (f *fakeGatewayFriendClient) MarkApplyAsRead(ctx context.Context, req *relationpb.MarkApplyAsReadRequest) (*relationpb.MarkApplyAsReadResponse, error) {
 	if f.markApplyAsReadFn == nil {
 		return nil, errors.New("unexpected MarkApplyAsRead call")
 	}
 	return f.markApplyAsReadFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) GetFriendList(ctx context.Context, req *userpb.GetFriendListRequest) (*userpb.GetFriendListResponse, error) {
+func (f *fakeGatewayFriendClient) GetFriendList(ctx context.Context, req *relationpb.GetFriendListRequest) (*relationpb.GetFriendListResponse, error) {
 	if f.getFriendListFn == nil {
 		return nil, errors.New("unexpected GetFriendList call")
 	}
 	return f.getFriendListFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) SyncFriendList(ctx context.Context, req *userpb.SyncFriendListRequest) (*userpb.SyncFriendListResponse, error) {
+func (f *fakeGatewayFriendClient) SyncFriendList(ctx context.Context, req *relationpb.SyncFriendListRequest) (*relationpb.SyncFriendListResponse, error) {
 	if f.syncFriendListFn == nil {
 		return nil, errors.New("unexpected SyncFriendList call")
 	}
 	return f.syncFriendListFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) DeleteFriend(ctx context.Context, req *userpb.DeleteFriendRequest) (*userpb.DeleteFriendResponse, error) {
+func (f *fakeGatewayFriendClient) DeleteFriend(ctx context.Context, req *relationpb.DeleteFriendRequest) (*relationpb.DeleteFriendResponse, error) {
 	if f.deleteFriendFn == nil {
 		return nil, errors.New("unexpected DeleteFriend call")
 	}
 	return f.deleteFriendFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) SetFriendRemark(ctx context.Context, req *userpb.SetFriendRemarkRequest) (*userpb.SetFriendRemarkResponse, error) {
+func (f *fakeGatewayFriendClient) SetFriendRemark(ctx context.Context, req *relationpb.SetFriendRemarkRequest) (*relationpb.SetFriendRemarkResponse, error) {
 	if f.setFriendRemarkFn == nil {
 		return nil, errors.New("unexpected SetFriendRemark call")
 	}
 	return f.setFriendRemarkFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) SetFriendTag(ctx context.Context, req *userpb.SetFriendTagRequest) (*userpb.SetFriendTagResponse, error) {
+func (f *fakeGatewayFriendClient) SetFriendTag(ctx context.Context, req *relationpb.SetFriendTagRequest) (*relationpb.SetFriendTagResponse, error) {
 	if f.setFriendTagFn == nil {
 		return nil, errors.New("unexpected SetFriendTag call")
 	}
 	return f.setFriendTagFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) GetTagList(ctx context.Context, req *userpb.GetTagListRequest) (*userpb.GetTagListResponse, error) {
+func (f *fakeGatewayFriendClient) GetTagList(ctx context.Context, req *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error) {
 	if f.getTagListFn == nil {
 		return nil, errors.New("unexpected GetTagList call")
 	}
 	return f.getTagListFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) CheckIsFriend(ctx context.Context, req *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error) {
+func (f *fakeGatewayFriendClient) CheckIsFriend(ctx context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
 	if f.checkIsFriendFn == nil {
 		return nil, errors.New("unexpected CheckIsFriend call")
 	}
 	return f.checkIsFriendFn(ctx, req)
 }
 
-func (f *fakeGatewayFriendClient) GetRelationStatus(ctx context.Context, req *userpb.GetRelationStatusRequest) (*userpb.GetRelationStatusResponse, error) {
+func (f *fakeGatewayFriendClient) GetRelationStatus(ctx context.Context, req *relationpb.GetRelationStatusRequest) (*relationpb.GetRelationStatusResponse, error) {
 	if f.getRelationStatusFn == nil {
 		return nil, errors.New("unexpected GetRelationStatus call")
 	}
@@ -157,11 +158,11 @@ func TestGatewayFriendServiceSendFriendApply(t *testing.T) {
 
 	t.Run("success_mapping", func(t *testing.T) {
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			sendFriendApplyFn: func(_ context.Context, req *userpb.SendFriendApplyRequest) (*userpb.SendFriendApplyResponse, error) {
+			sendFriendApplyFn: func(_ context.Context, req *relationpb.SendFriendApplyRequest) (*relationpb.SendFriendApplyResponse, error) {
 				require.Equal(t, "u2", req.TargetUuid)
 				require.Equal(t, "hi", req.Reason)
 				require.Equal(t, "search", req.Source)
-				return &userpb.SendFriendApplyResponse{ApplyId: 1001}, nil
+				return &relationpb.SendFriendApplyResponse{ApplyId: 1001}, nil
 			},
 		})
 
@@ -178,7 +179,7 @@ func TestGatewayFriendServiceSendFriendApply(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			sendFriendApplyFn: func(_ context.Context, _ *userpb.SendFriendApplyRequest) (*userpb.SendFriendApplyResponse, error) {
+			sendFriendApplyFn: func(_ context.Context, _ *relationpb.SendFriendApplyRequest) (*relationpb.SendFriendApplyResponse, error) {
 				return nil, wantErr
 			},
 		})
@@ -195,7 +196,7 @@ func TestGatewayFriendServiceGetFriendApplyList(t *testing.T) {
 	t.Run("error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			getFriendApplyListFn: func(_ context.Context, _ *userpb.GetFriendApplyListRequest) (*userpb.GetFriendApplyListResponse, error) {
+			getFriendApplyListFn: func(_ context.Context, _ *relationpb.GetFriendApplyListRequest) (*relationpb.GetFriendApplyListResponse, error) {
 				return nil, wantErr
 			},
 		})
@@ -207,9 +208,9 @@ func TestGatewayFriendServiceGetFriendApplyList(t *testing.T) {
 	t.Run("empty_items_do_not_call_batch_profile", func(t *testing.T) {
 		batchCalled := false
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			getFriendApplyListFn: func(_ context.Context, _ *userpb.GetFriendApplyListRequest) (*userpb.GetFriendApplyListResponse, error) {
-				return &userpb.GetFriendApplyListResponse{
-					Items: []*userpb.FriendApplyItem{},
+			getFriendApplyListFn: func(_ context.Context, _ *relationpb.GetFriendApplyListRequest) (*relationpb.GetFriendApplyListResponse, error) {
+				return &relationpb.GetFriendApplyListResponse{
+					Items: []*relationpb.FriendApplyItem{},
 				}, nil
 			},
 			batchGetProfileFn: func(_ context.Context, _ *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error) {
@@ -226,9 +227,9 @@ func TestGatewayFriendServiceGetFriendApplyList(t *testing.T) {
 	t.Run("enrich_success_and_degrade_on_batch_error", func(t *testing.T) {
 		t.Run("enrich_success", func(t *testing.T) {
 			svc := NewFriendService(&fakeGatewayFriendClient{
-				getFriendApplyListFn: func(_ context.Context, _ *userpb.GetFriendApplyListRequest) (*userpb.GetFriendApplyListResponse, error) {
-					return &userpb.GetFriendApplyListResponse{
-						Items: []*userpb.FriendApplyItem{
+				getFriendApplyListFn: func(_ context.Context, _ *relationpb.GetFriendApplyListRequest) (*relationpb.GetFriendApplyListResponse, error) {
+					return &relationpb.GetFriendApplyListResponse{
+						Items: []*relationpb.FriendApplyItem{
 							{ApplyId: 1, ApplicantUuid: "u2"},
 							nil,
 							{ApplyId: 2, ApplicantUuid: "u3"},
@@ -257,9 +258,9 @@ func TestGatewayFriendServiceGetFriendApplyList(t *testing.T) {
 
 		t.Run("batch_profile_failed_should_degrade", func(t *testing.T) {
 			svc := NewFriendService(&fakeGatewayFriendClient{
-				getFriendApplyListFn: func(_ context.Context, _ *userpb.GetFriendApplyListRequest) (*userpb.GetFriendApplyListResponse, error) {
-					return &userpb.GetFriendApplyListResponse{
-						Items: []*userpb.FriendApplyItem{{ApplyId: 1, ApplicantUuid: "u2"}},
+				getFriendApplyListFn: func(_ context.Context, _ *relationpb.GetFriendApplyListRequest) (*relationpb.GetFriendApplyListResponse, error) {
+					return &relationpb.GetFriendApplyListResponse{
+						Items: []*relationpb.FriendApplyItem{{ApplyId: 1, ApplicantUuid: "u2"}},
 					}, nil
 				},
 				batchGetProfileFn: func(_ context.Context, _ *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error) {
@@ -280,11 +281,11 @@ func TestGatewayFriendServiceGetSentApplyList(t *testing.T) {
 
 	t.Run("enrich_target_info", func(t *testing.T) {
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			getSentApplyListFn: func(_ context.Context, _ *userpb.GetSentApplyListRequest) (*userpb.GetSentApplyListResponse, error) {
-				return &userpb.GetSentApplyListResponse{
-					Items: []*userpb.SentApplyItem{
+			getSentApplyListFn: func(_ context.Context, _ *relationpb.GetSentApplyListRequest) (*relationpb.GetSentApplyListResponse, error) {
+				return &relationpb.GetSentApplyListResponse{
+					Items: []*relationpb.SentApplyItem{
 						{ApplyId: 1, TargetUuid: "u2"},
-						{ApplyId: 2, TargetUuid: "u3", TargetInfo: &userpb.SimpleUserInfo{Uuid: "u3"}},
+						{ApplyId: 2, TargetUuid: "u3", TargetInfo: &relationpb.SimpleUserInfo{Uuid: "u3"}},
 					},
 				}, nil
 			},
@@ -308,9 +309,9 @@ func TestGatewayFriendServiceGetSentApplyList(t *testing.T) {
 
 	t.Run("batch_error_should_degrade", func(t *testing.T) {
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			getSentApplyListFn: func(_ context.Context, _ *userpb.GetSentApplyListRequest) (*userpb.GetSentApplyListResponse, error) {
-				return &userpb.GetSentApplyListResponse{
-					Items: []*userpb.SentApplyItem{{ApplyId: 1, TargetUuid: "u2"}},
+			getSentApplyListFn: func(_ context.Context, _ *relationpb.GetSentApplyListRequest) (*relationpb.GetSentApplyListResponse, error) {
+				return &relationpb.GetSentApplyListResponse{
+					Items: []*relationpb.SentApplyItem{{ApplyId: 1, TargetUuid: "u2"}},
 				}, nil
 			},
 			batchGetProfileFn: func(_ context.Context, _ *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error) {
@@ -330,9 +331,9 @@ func TestGatewayFriendServiceGetFriendListAndSync(t *testing.T) {
 
 	t.Run("get_friend_list_enrich", func(t *testing.T) {
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			getFriendListFn: func(_ context.Context, _ *userpb.GetFriendListRequest) (*userpb.GetFriendListResponse, error) {
-				return &userpb.GetFriendListResponse{
-					Items: []*userpb.FriendItem{
+			getFriendListFn: func(_ context.Context, _ *relationpb.GetFriendListRequest) (*relationpb.GetFriendListResponse, error) {
+				return &relationpb.GetFriendListResponse{
+					Items: []*relationpb.FriendItem{
 						{Uuid: "u2"},
 						{Uuid: "u3"},
 					},
@@ -358,9 +359,9 @@ func TestGatewayFriendServiceGetFriendListAndSync(t *testing.T) {
 
 	t.Run("sync_friend_list_enrich_skip_delete", func(t *testing.T) {
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			syncFriendListFn: func(_ context.Context, _ *userpb.SyncFriendListRequest) (*userpb.SyncFriendListResponse, error) {
-				return &userpb.SyncFriendListResponse{
-					Changes: []*userpb.FriendChange{
+			syncFriendListFn: func(_ context.Context, _ *relationpb.SyncFriendListRequest) (*relationpb.SyncFriendListResponse, error) {
+				return &relationpb.SyncFriendListResponse{
+					Changes: []*relationpb.FriendChange{
 						{Uuid: "u2", ChangeType: "add"},
 						{Uuid: "u3", ChangeType: "delete"},
 						{Uuid: "u4", ChangeType: "update"},
@@ -394,9 +395,9 @@ func TestGatewayFriendServiceSimpleMethods(t *testing.T) {
 	t.Run("handle_friend_apply", func(t *testing.T) {
 		wantErr := errors.New("handle failed")
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			handleFriendApplyFn: func(_ context.Context, req *userpb.HandleFriendApplyRequest) (*userpb.HandleFriendApplyResponse, error) {
+			handleFriendApplyFn: func(_ context.Context, req *relationpb.HandleFriendApplyRequest) (*relationpb.HandleFriendApplyResponse, error) {
 				if req.ApplyId == 1 {
-					return &userpb.HandleFriendApplyResponse{}, nil
+					return &relationpb.HandleFriendApplyResponse{}, nil
 				}
 				return nil, wantErr
 			},
@@ -413,47 +414,47 @@ func TestGatewayFriendServiceSimpleMethods(t *testing.T) {
 	t.Run("other_simple_methods", func(t *testing.T) {
 		wantErr := errors.New("downstream failed")
 		svc := NewFriendService(&fakeGatewayFriendClient{
-			getUnreadCountFn: func(_ context.Context, _ *userpb.GetUnreadApplyCountRequest) (*userpb.GetUnreadApplyCountResponse, error) {
-				return &userpb.GetUnreadApplyCountResponse{UnreadCount: 3}, nil
+			getUnreadCountFn: func(_ context.Context, _ *relationpb.GetUnreadApplyCountRequest) (*relationpb.GetUnreadApplyCountResponse, error) {
+				return &relationpb.GetUnreadApplyCountResponse{UnreadCount: 3}, nil
 			},
-			markApplyAsReadFn: func(_ context.Context, req *userpb.MarkApplyAsReadRequest) (*userpb.MarkApplyAsReadResponse, error) {
+			markApplyAsReadFn: func(_ context.Context, req *relationpb.MarkApplyAsReadRequest) (*relationpb.MarkApplyAsReadResponse, error) {
 				if len(req.ApplyIds) == 0 {
 					return nil, wantErr
 				}
-				return &userpb.MarkApplyAsReadResponse{}, nil
+				return &relationpb.MarkApplyAsReadResponse{}, nil
 			},
-			deleteFriendFn: func(_ context.Context, req *userpb.DeleteFriendRequest) (*userpb.DeleteFriendResponse, error) {
+			deleteFriendFn: func(_ context.Context, req *relationpb.DeleteFriendRequest) (*relationpb.DeleteFriendResponse, error) {
 				if req.UserUuid == "bad" {
 					return nil, wantErr
 				}
-				return &userpb.DeleteFriendResponse{}, nil
+				return &relationpb.DeleteFriendResponse{}, nil
 			},
-			setFriendRemarkFn: func(_ context.Context, req *userpb.SetFriendRemarkRequest) (*userpb.SetFriendRemarkResponse, error) {
+			setFriendRemarkFn: func(_ context.Context, req *relationpb.SetFriendRemarkRequest) (*relationpb.SetFriendRemarkResponse, error) {
 				if req.UserUuid == "bad" {
 					return nil, wantErr
 				}
-				return &userpb.SetFriendRemarkResponse{}, nil
+				return &relationpb.SetFriendRemarkResponse{}, nil
 			},
-			setFriendTagFn: func(_ context.Context, req *userpb.SetFriendTagRequest) (*userpb.SetFriendTagResponse, error) {
+			setFriendTagFn: func(_ context.Context, req *relationpb.SetFriendTagRequest) (*relationpb.SetFriendTagResponse, error) {
 				if req.UserUuid == "bad" {
 					return nil, wantErr
 				}
-				return &userpb.SetFriendTagResponse{}, nil
+				return &relationpb.SetFriendTagResponse{}, nil
 			},
-			getTagListFn: func(_ context.Context, _ *userpb.GetTagListRequest) (*userpb.GetTagListResponse, error) {
-				return &userpb.GetTagListResponse{Tags: []*userpb.TagItem{{TagName: "work"}}}, nil
+			getTagListFn: func(_ context.Context, _ *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error) {
+				return &relationpb.GetTagListResponse{Tags: []*relationpb.TagItem{{TagName: "work"}}}, nil
 			},
-			checkIsFriendFn: func(_ context.Context, req *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error) {
+			checkIsFriendFn: func(_ context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
 				if req.PeerUuid == "bad" {
 					return nil, wantErr
 				}
-				return &userpb.CheckIsFriendResponse{IsFriend: true}, nil
+				return &relationpb.CheckIsFriendResponse{IsFriend: true}, nil
 			},
-			getRelationStatusFn: func(_ context.Context, req *userpb.GetRelationStatusRequest) (*userpb.GetRelationStatusResponse, error) {
+			getRelationStatusFn: func(_ context.Context, req *relationpb.GetRelationStatusRequest) (*relationpb.GetRelationStatusResponse, error) {
 				if req.PeerUuid == "bad" {
 					return nil, wantErr
 				}
-				return &userpb.GetRelationStatusResponse{Relation: "friend", IsFriend: true}, nil
+				return &relationpb.GetRelationStatusResponse{Relation: "friend", IsFriend: true}, nil
 			},
 		})
 

@@ -27,6 +27,8 @@ import (
 // 使用别名类型避免 Wire 在多个 string / *grpc.ClientConn / *gobreaker.CircuitBreaker 之间误绑定。
 type gatewayUserServiceAddr string
 
+type gatewayRelationServiceAddr string
+
 type gatewayMsgServiceAddr string
 
 type gatewayHTTPAddr string
@@ -35,9 +37,13 @@ type gatewayAsyncReleaseTimeout time.Duration
 
 type gatewayUserBreaker struct{ value *gobreaker.CircuitBreaker }
 
+type gatewayRelationBreaker struct{ value *gobreaker.CircuitBreaker }
+
 type gatewayMsgBreaker struct{ value *gobreaker.CircuitBreaker }
 
 type gatewayUserConn struct{ value *grpc.ClientConn }
+
+type gatewayRelationConn struct{ value *grpc.ClientConn }
 
 type gatewayMsgConn struct{ value *grpc.ClientConn }
 
@@ -122,6 +128,16 @@ func provideGatewayUserServiceAddr() gatewayUserServiceAddr {
 	return gatewayUserServiceAddr(addr)
 }
 
+// provideGatewayRelationServiceAddr 提供 relation-service 地址。
+// 这里将好友/黑名单两个子域统一指向同一个 relation-service 入口。
+func provideGatewayRelationServiceAddr() gatewayRelationServiceAddr {
+	addr := os.Getenv("RELATION_SERVICE_ADDR")
+	if addr == "" {
+		addr = "localhost:9093"
+	}
+	return gatewayRelationServiceAddr(addr)
+}
+
 func provideGatewayMsgServiceAddr() gatewayMsgServiceAddr {
 	addr := os.Getenv("MSG_SERVICE_ADDR")
 	if addr == "" {
@@ -145,6 +161,13 @@ func provideGatewayUserBreaker(ctx context.Context) gatewayUserBreaker {
 	return gatewayUserBreaker{value: breaker}
 }
 
+// provideGatewayRelationBreaker 创建 relation-service 熔断器。
+func provideGatewayRelationBreaker(ctx context.Context) gatewayRelationBreaker {
+	breaker := pb.CreateCircuitBreaker("relation-service")
+	logger.Info(ctx, "关系服务熔断器创建成功", logger.String("name", "relation-service"))
+	return gatewayRelationBreaker{value: breaker}
+}
+
 // provideGatewayMsgBreaker 创建 msg-service 熔断器。
 func provideGatewayMsgBreaker(ctx context.Context) gatewayMsgBreaker {
 	breaker := pb.CreateCircuitBreaker("msg-service")
@@ -163,6 +186,17 @@ func provideGatewayUserConn(ctx context.Context, addr gatewayUserServiceAddr, br
 	return gatewayUserConn{value: conn}, nil
 }
 
+// provideGatewayRelationConn 建立到 relation-service 的 gRPC 连接。
+// 好友/黑名单路由已经切分出去，因此这里也视为 gateway 的必需依赖。
+func provideGatewayRelationConn(ctx context.Context, addr gatewayRelationServiceAddr, breaker gatewayRelationBreaker) (gatewayRelationConn, error) {
+	conn, err := pb.CreateRelationFriendServiceConnection(string(addr), breaker.value)
+	if err != nil {
+		return gatewayRelationConn{}, err
+	}
+	logger.Info(ctx, "关系服务 gRPC 连接创建成功", logger.String("address", string(addr)))
+	return gatewayRelationConn{value: conn}, nil
+}
+
 // provideGatewayMsgConn 建立到 msg-service 的 gRPC 连接。
 // 这里同样视为 gateway 的必需依赖，因为消息接口已经对外暴露在同一个入口服务中。
 func provideGatewayMsgConn(ctx context.Context, addr gatewayMsgServiceAddr, breaker gatewayMsgBreaker) (gatewayMsgConn, error) {
@@ -174,10 +208,13 @@ func provideGatewayMsgConn(ctx context.Context, addr gatewayMsgServiceAddr, brea
 	return gatewayMsgConn{value: conn}, nil
 }
 
-// provideGatewayUserClient 聚合 user-service 多个子服务客户端。
-// 这里沿用原有实现：同一条连接复用给 auth/user/friend/blacklist/device 五类调用。
-func provideGatewayUserClient(conn gatewayUserConn, breaker gatewayUserBreaker) pb.UserServiceClient {
-	return pb.NewUserServiceClient(conn.value, conn.value, conn.value, conn.value, conn.value, breaker.value)
+// provideGatewayUserClient 聚合 gateway 对多个下游服务的客户端。
+// 当前拆分策略：
+// - auth/user/device 继续走 user-service；
+// - friend/blacklist 切到 relation-service；
+// - 这样可以先完成关系域切换，而不阻塞其余能力。
+func provideGatewayUserClient(userConn gatewayUserConn, relationConn gatewayRelationConn, breaker gatewayUserBreaker) pb.UserServiceClient {
+	return pb.NewUserServiceClient(userConn.value, userConn.value, relationConn.value, relationConn.value, userConn.value, breaker.value)
 }
 
 // provideGatewayMsgClient 构造消息服务客户端。
@@ -225,11 +262,14 @@ var gatewayInfraProviderSet = wire.NewSet(
 	provideGatewayAsyncReleaseTimeout,
 	provideGatewayMinIOClient,
 	provideGatewayUserServiceAddr,
+	provideGatewayRelationServiceAddr,
 	provideGatewayMsgServiceAddr,
 	provideGatewayHTTPAddr,
 	provideGatewayUserBreaker,
+	provideGatewayRelationBreaker,
 	provideGatewayMsgBreaker,
 	provideGatewayUserConn,
+	provideGatewayRelationConn,
 	provideGatewayMsgConn,
 	provideGatewayUserClient,
 	provideGatewayMsgClient,

@@ -33,7 +33,13 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	userServiceClient := provideGatewayUserClient(mainGatewayUserConn, mainGatewayUserBreaker)
+	mainGatewayRelationServiceAddr := provideGatewayRelationServiceAddr()
+	mainGatewayRelationBreaker := provideGatewayRelationBreaker(context)
+	mainGatewayRelationConn, err := provideGatewayRelationConn(context, mainGatewayRelationServiceAddr, mainGatewayRelationBreaker)
+	if err != nil {
+		return nil, err
+	}
+	userServiceClient := provideGatewayUserClient(mainGatewayUserConn, mainGatewayRelationConn, mainGatewayUserBreaker)
 	authService := service.NewAuthService(userServiceClient)
 	authHandler := v1.NewAuthHandler(authService)
 	userService := service.NewUserService(userServiceClient)
@@ -72,7 +78,7 @@ func initializeGatewayApp() (*GatewayApp, error) {
 		return nil, err
 	}
 	deviceActiveConfig := provideGatewayDeviceActiveConfig()
-	gatewayApp, err := NewGatewayApp(logger, server, pool, mainGatewayAsyncReleaseTimeout, client, mainGatewayUserConn, mainGatewayMsgConn, minIOClient, deviceActiveConfig)
+	gatewayApp, err := NewGatewayApp(logger, server, pool, mainGatewayAsyncReleaseTimeout, client, mainGatewayUserConn, mainGatewayRelationConn, mainGatewayMsgConn, minIOClient, deviceActiveConfig)
 	if err != nil {
 		return nil, err
 	}

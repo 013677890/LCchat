@@ -97,11 +97,7 @@ func TestGatewayAuthServiceLogin(t *testing.T) {
 					RefreshToken: "rtk",
 					TokenType:    "Bearer",
 					ExpiresIn:    7200,
-					UserInfo: &userpb.UserInfo{
-						Uuid:     "u1",
-						Nickname: "n1",
-						Email:    "a@test.com",
-					},
+					UserInfo:     &userpb.UserInfo{Uuid: "u1", Nickname: "n1"},
 				}, nil
 			},
 		}

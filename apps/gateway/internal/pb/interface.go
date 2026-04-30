@@ -1,9 +1,10 @@
 package pb
 
 import (
-	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"context"
+	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
+	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 )
 
 // MsgServiceClient 消息服务 gRPC 客户端接口
@@ -105,62 +106,62 @@ type UserServiceClient interface {
 
 	// ==================== 好友服务 ====================
 	// SendFriendApply 发送好友申请
-	SendFriendApply(ctx context.Context, req *userpb.SendFriendApplyRequest) (*userpb.SendFriendApplyResponse, error)
+	SendFriendApply(ctx context.Context, req *relationpb.SendFriendApplyRequest) (*relationpb.SendFriendApplyResponse, error)
 
 	// GetFriendApplyList 获取好友申请列表
-	GetFriendApplyList(ctx context.Context, req *userpb.GetFriendApplyListRequest) (*userpb.GetFriendApplyListResponse, error)
+	GetFriendApplyList(ctx context.Context, req *relationpb.GetFriendApplyListRequest) (*relationpb.GetFriendApplyListResponse, error)
 
 	// GetSentApplyList 获取发出的申请列表
-	GetSentApplyList(ctx context.Context, req *userpb.GetSentApplyListRequest) (*userpb.GetSentApplyListResponse, error)
+	GetSentApplyList(ctx context.Context, req *relationpb.GetSentApplyListRequest) (*relationpb.GetSentApplyListResponse, error)
 
 	// HandleFriendApply 处理好友申请
-	HandleFriendApply(ctx context.Context, req *userpb.HandleFriendApplyRequest) (*userpb.HandleFriendApplyResponse, error)
+	HandleFriendApply(ctx context.Context, req *relationpb.HandleFriendApplyRequest) (*relationpb.HandleFriendApplyResponse, error)
 
 	// GetUnreadApplyCount 获取未读申请数量
-	GetUnreadApplyCount(ctx context.Context, req *userpb.GetUnreadApplyCountRequest) (*userpb.GetUnreadApplyCountResponse, error)
+	GetUnreadApplyCount(ctx context.Context, req *relationpb.GetUnreadApplyCountRequest) (*relationpb.GetUnreadApplyCountResponse, error)
 
 	// MarkApplyAsRead 标记申请已读
-	MarkApplyAsRead(ctx context.Context, req *userpb.MarkApplyAsReadRequest) (*userpb.MarkApplyAsReadResponse, error)
+	MarkApplyAsRead(ctx context.Context, req *relationpb.MarkApplyAsReadRequest) (*relationpb.MarkApplyAsReadResponse, error)
 
 	// GetFriendList 获取好友列表
-	GetFriendList(ctx context.Context, req *userpb.GetFriendListRequest) (*userpb.GetFriendListResponse, error)
+	GetFriendList(ctx context.Context, req *relationpb.GetFriendListRequest) (*relationpb.GetFriendListResponse, error)
 
 	// SyncFriendList 好友增量同步
-	SyncFriendList(ctx context.Context, req *userpb.SyncFriendListRequest) (*userpb.SyncFriendListResponse, error)
+	SyncFriendList(ctx context.Context, req *relationpb.SyncFriendListRequest) (*relationpb.SyncFriendListResponse, error)
 
 	// DeleteFriend 删除好友
-	DeleteFriend(ctx context.Context, req *userpb.DeleteFriendRequest) (*userpb.DeleteFriendResponse, error)
+	DeleteFriend(ctx context.Context, req *relationpb.DeleteFriendRequest) (*relationpb.DeleteFriendResponse, error)
 
 	// SetFriendRemark 设置好友备注
-	SetFriendRemark(ctx context.Context, req *userpb.SetFriendRemarkRequest) (*userpb.SetFriendRemarkResponse, error)
+	SetFriendRemark(ctx context.Context, req *relationpb.SetFriendRemarkRequest) (*relationpb.SetFriendRemarkResponse, error)
 
 	// SetFriendTag 设置好友标签
-	SetFriendTag(ctx context.Context, req *userpb.SetFriendTagRequest) (*userpb.SetFriendTagResponse, error)
+	SetFriendTag(ctx context.Context, req *relationpb.SetFriendTagRequest) (*relationpb.SetFriendTagResponse, error)
 
 	// GetTagList 获取标签列表
-	GetTagList(ctx context.Context, req *userpb.GetTagListRequest) (*userpb.GetTagListResponse, error)
+	GetTagList(ctx context.Context, req *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error)
 
 	// CheckIsFriend 判断是否好友
-	CheckIsFriend(ctx context.Context, req *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error)
+	CheckIsFriend(ctx context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error)
 
 	// BatchCheckIsFriend 批量判断是否好友
-	BatchCheckIsFriend(ctx context.Context, req *userpb.BatchCheckIsFriendRequest) (*userpb.BatchCheckIsFriendResponse, error)
+	BatchCheckIsFriend(ctx context.Context, req *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error)
 
 	// GetRelationStatus 获取关系状态
-	GetRelationStatus(ctx context.Context, req *userpb.GetRelationStatusRequest) (*userpb.GetRelationStatusResponse, error)
+	GetRelationStatus(ctx context.Context, req *relationpb.GetRelationStatusRequest) (*relationpb.GetRelationStatusResponse, error)
 
 	// ==================== 黑名单服务 ====================
 	// AddBlacklist 拉黑用户
-	AddBlacklist(ctx context.Context, req *userpb.AddBlacklistRequest) (*userpb.AddBlacklistResponse, error)
+	AddBlacklist(ctx context.Context, req *relationpb.AddBlacklistRequest) (*relationpb.AddBlacklistResponse, error)
 
 	// RemoveBlacklist 取消拉黑
-	RemoveBlacklist(ctx context.Context, req *userpb.RemoveBlacklistRequest) (*userpb.RemoveBlacklistResponse, error)
+	RemoveBlacklist(ctx context.Context, req *relationpb.RemoveBlacklistRequest) (*relationpb.RemoveBlacklistResponse, error)
 
 	// GetBlacklistList 获取黑名单列表
-	GetBlacklistList(ctx context.Context, req *userpb.GetBlacklistListRequest) (*userpb.GetBlacklistListResponse, error)
+	GetBlacklistList(ctx context.Context, req *relationpb.GetBlacklistListRequest) (*relationpb.GetBlacklistListResponse, error)
 
 	// CheckIsBlacklist 判断是否拉黑
-	CheckIsBlacklist(ctx context.Context, req *userpb.CheckIsBlacklistRequest) (*userpb.CheckIsBlacklistResponse, error)
+	CheckIsBlacklist(ctx context.Context, req *relationpb.CheckIsBlacklistRequest) (*relationpb.CheckIsBlacklistResponse, error)
 
 	// ==================== 设备会话服务 ====================
 	// GetDeviceList 获取设备列表

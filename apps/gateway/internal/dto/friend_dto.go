@@ -1,6 +1,7 @@
 package dto
 
 import (
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 )
 
@@ -252,11 +253,11 @@ func ConvertToProtoSearchUserRequest(dto *SearchUserRequest) *userpb.SearchUserR
 }
 
 // ConvertToProtoSendFriendApplyRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoSendFriendApplyRequest(dto *SendFriendApplyRequest) *userpb.SendFriendApplyRequest {
+func ConvertToProtoSendFriendApplyRequest(dto *SendFriendApplyRequest) *relationpb.SendFriendApplyRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.SendFriendApplyRequest{
+	return &relationpb.SendFriendApplyRequest{
 		TargetUuid: dto.TargetUUID,
 		Reason:     dto.Reason,
 		Source:     dto.Source,
@@ -264,11 +265,11 @@ func ConvertToProtoSendFriendApplyRequest(dto *SendFriendApplyRequest) *userpb.S
 }
 
 // ConvertToProtoHandleFriendApplyRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoHandleFriendApplyRequest(dto *HandleFriendApplyRequest) *userpb.HandleFriendApplyRequest {
+func ConvertToProtoHandleFriendApplyRequest(dto *HandleFriendApplyRequest) *relationpb.HandleFriendApplyRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.HandleFriendApplyRequest{
+	return &relationpb.HandleFriendApplyRequest{
 		ApplyId: dto.ApplyID,
 		Action:  dto.Action,
 		Remark:  dto.Remark,
@@ -276,64 +277,64 @@ func ConvertToProtoHandleFriendApplyRequest(dto *HandleFriendApplyRequest) *user
 }
 
 // ConvertToProtoMarkApplyAsReadRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoMarkApplyAsReadRequest(dto *MarkApplyAsReadRequest) *userpb.MarkApplyAsReadRequest {
+func ConvertToProtoMarkApplyAsReadRequest(dto *MarkApplyAsReadRequest) *relationpb.MarkApplyAsReadRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.MarkApplyAsReadRequest{
+	return &relationpb.MarkApplyAsReadRequest{
 		ApplyIds: dto.ApplyIDs,
 	}
 }
 
 // ConvertToProtoSetFriendRemarkRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoSetFriendRemarkRequest(dto *SetFriendRemarkRequest) *userpb.SetFriendRemarkRequest {
+func ConvertToProtoSetFriendRemarkRequest(dto *SetFriendRemarkRequest) *relationpb.SetFriendRemarkRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.SetFriendRemarkRequest{
+	return &relationpb.SetFriendRemarkRequest{
 		UserUuid: dto.UserUUID,
 		Remark:   dto.Remark,
 	}
 }
 
 // ConvertToProtoSetFriendTagRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoSetFriendTagRequest(dto *SetFriendTagRequest) *userpb.SetFriendTagRequest {
+func ConvertToProtoSetFriendTagRequest(dto *SetFriendTagRequest) *relationpb.SetFriendTagRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.SetFriendTagRequest{
+	return &relationpb.SetFriendTagRequest{
 		UserUuid: dto.UserUUID,
 		GroupTag: dto.GroupTag,
 	}
 }
 
 // ConvertToProtoDeleteFriendRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoDeleteFriendRequest(dto *DeleteFriendRequest) *userpb.DeleteFriendRequest {
+func ConvertToProtoDeleteFriendRequest(dto *DeleteFriendRequest) *relationpb.DeleteFriendRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.DeleteFriendRequest{
+	return &relationpb.DeleteFriendRequest{
 		UserUuid: dto.UserUUID,
 	}
 }
 
 // ConvertToProtoCheckIsFriendRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoCheckIsFriendRequest(dto *CheckIsFriendRequest) *userpb.CheckIsFriendRequest {
+func ConvertToProtoCheckIsFriendRequest(dto *CheckIsFriendRequest) *relationpb.CheckIsFriendRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.CheckIsFriendRequest{
+	return &relationpb.CheckIsFriendRequest{
 		UserUuid: dto.UserUUID,
 		PeerUuid: dto.PeerUUID,
 	}
 }
 
 // ConvertToProtoGetRelationStatusRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoGetRelationStatusRequest(dto *GetRelationStatusRequest) *userpb.GetRelationStatusRequest {
+func ConvertToProtoGetRelationStatusRequest(dto *GetRelationStatusRequest) *relationpb.GetRelationStatusRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.GetRelationStatusRequest{
+	return &relationpb.GetRelationStatusRequest{
 		UserUuid: dto.UserUUID,
 		PeerUuid: dto.PeerUUID,
 	}
@@ -373,7 +374,7 @@ func ConvertSimpleUserItemFromProto(pb *userpb.SimpleUserItem) *SimpleUserItem {
 }
 
 // ConvertFriendApplyResponseFromProto 将 Protobuf 发送好友申请响应转换为 DTO
-func ConvertFriendApplyResponseFromProto(pb *userpb.SendFriendApplyResponse) *SendFriendApplyResponse {
+func ConvertFriendApplyResponseFromProto(pb *relationpb.SendFriendApplyResponse) *SendFriendApplyResponse {
 	if pb == nil {
 		return nil
 	}
@@ -383,12 +384,12 @@ func ConvertFriendApplyResponseFromProto(pb *userpb.SendFriendApplyResponse) *Se
 }
 
 // ConvertFriendApplyItemFromProto 将 Protobuf 好友申请项转换为 DTO
-func ConvertFriendApplyItemFromProto(pb *userpb.FriendApplyItem) *FriendApplyItem {
+func ConvertFriendApplyItemFromProto(pb *relationpb.FriendApplyItem) *FriendApplyItem {
 	if pb == nil {
 		return nil
 	}
 
-	applicantInfo := ConvertSimpleUserInfoFromProto(pb.ApplicantInfo)
+	applicantInfo := ConvertRelationSimpleUserInfoFromProto(pb.ApplicantInfo)
 	if applicantInfo == nil {
 		applicantInfo = &SimpleUserInfo{}
 	}
@@ -407,7 +408,7 @@ func ConvertFriendApplyItemFromProto(pb *userpb.FriendApplyItem) *FriendApplyIte
 }
 
 // ConvertGetFriendApplyListResponseFromProto 将 Protobuf 获取好友申请列表响应转换为 DTO
-func ConvertGetFriendApplyListResponseFromProto(pb *userpb.GetFriendApplyListResponse) *GetFriendApplyListResponse {
+func ConvertGetFriendApplyListResponseFromProto(pb *relationpb.GetFriendApplyListResponse) *GetFriendApplyListResponse {
 	if pb == nil {
 		return nil
 	}
@@ -419,19 +420,19 @@ func ConvertGetFriendApplyListResponseFromProto(pb *userpb.GetFriendApplyListRes
 
 	return &GetFriendApplyListResponse{
 		Items:      items,
-		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+		Pagination: ConvertCommonPaginationInfoFromProto(pb.Pagination),
 	}
 }
 
 // ConvertSentApplyItemFromProto 将 Protobuf 发出的申请项转换为 DTO
-func ConvertSentApplyItemFromProto(pb *userpb.SentApplyItem) *SentApplyItem {
+func ConvertSentApplyItemFromProto(pb *relationpb.SentApplyItem) *SentApplyItem {
 	if pb == nil {
 		return nil
 	}
 	return &SentApplyItem{
 		ApplyID:    pb.ApplyId,
 		TargetUUID: pb.TargetUuid,
-		TargetInfo: ConvertSimpleUserInfoFromProto(pb.TargetInfo),
+		TargetInfo: ConvertRelationSimpleUserInfoFromProto(pb.TargetInfo),
 		Reason:     pb.Reason,
 		Source:     pb.Source,
 		Status:     pb.Status,
@@ -441,7 +442,7 @@ func ConvertSentApplyItemFromProto(pb *userpb.SentApplyItem) *SentApplyItem {
 }
 
 // ConvertGetSentApplyListResponseFromProto 将 Protobuf 获取发出的申请列表响应转换为 DTO
-func ConvertGetSentApplyListResponseFromProto(pb *userpb.GetSentApplyListResponse) *GetSentApplyListResponse {
+func ConvertGetSentApplyListResponseFromProto(pb *relationpb.GetSentApplyListResponse) *GetSentApplyListResponse {
 	if pb == nil {
 		return nil
 	}
@@ -453,12 +454,12 @@ func ConvertGetSentApplyListResponseFromProto(pb *userpb.GetSentApplyListRespons
 
 	return &GetSentApplyListResponse{
 		Items:      items,
-		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+		Pagination: ConvertCommonPaginationInfoFromProto(pb.Pagination),
 	}
 }
 
 // ConvertHandleFriendApplyResponseFromProto 将 Protobuf 处理好友申请响应转换为 DTO
-func ConvertHandleFriendApplyResponseFromProto(pb *userpb.HandleFriendApplyResponse) *HandleFriendApplyResponse {
+func ConvertHandleFriendApplyResponseFromProto(pb *relationpb.HandleFriendApplyResponse) *HandleFriendApplyResponse {
 	if pb == nil {
 		return nil
 	}
@@ -466,7 +467,7 @@ func ConvertHandleFriendApplyResponseFromProto(pb *userpb.HandleFriendApplyRespo
 }
 
 // ConvertGetUnreadApplyCountResponseFromProto 将 Protobuf 获取未读申请数量响应转换为 DTO
-func ConvertGetUnreadApplyCountResponseFromProto(pb *userpb.GetUnreadApplyCountResponse) *GetUnreadApplyCountResponse {
+func ConvertGetUnreadApplyCountResponseFromProto(pb *relationpb.GetUnreadApplyCountResponse) *GetUnreadApplyCountResponse {
 	if pb == nil {
 		return nil
 	}
@@ -476,7 +477,7 @@ func ConvertGetUnreadApplyCountResponseFromProto(pb *userpb.GetUnreadApplyCountR
 }
 
 // ConvertMarkApplyAsReadResponseFromProto 将 Protobuf 标记申请已读响应转换为 DTO
-func ConvertMarkApplyAsReadResponseFromProto(pb *userpb.MarkApplyAsReadResponse) *MarkApplyAsReadResponse {
+func ConvertMarkApplyAsReadResponseFromProto(pb *relationpb.MarkApplyAsReadResponse) *MarkApplyAsReadResponse {
 	if pb == nil {
 		return nil
 	}
@@ -484,7 +485,7 @@ func ConvertMarkApplyAsReadResponseFromProto(pb *userpb.MarkApplyAsReadResponse)
 }
 
 // ConvertFriendItemFromProto 将 Protobuf 好友项转换为 DTO
-func ConvertFriendItemFromProto(pb *userpb.FriendItem) *FriendItem {
+func ConvertFriendItemFromProto(pb *relationpb.FriendItem) *FriendItem {
 	if pb == nil {
 		return nil
 	}
@@ -502,7 +503,7 @@ func ConvertFriendItemFromProto(pb *userpb.FriendItem) *FriendItem {
 }
 
 // ConvertGetFriendListResponseFromProto 将 Protobuf 获取好友列表响应转换为 DTO
-func ConvertGetFriendListResponseFromProto(pb *userpb.GetFriendListResponse) *GetFriendListResponse {
+func ConvertGetFriendListResponseFromProto(pb *relationpb.GetFriendListResponse) *GetFriendListResponse {
 	if pb == nil {
 		return nil
 	}
@@ -514,13 +515,13 @@ func ConvertGetFriendListResponseFromProto(pb *userpb.GetFriendListResponse) *Ge
 
 	return &GetFriendListResponse{
 		Items:      items,
-		Pagination: ConvertPaginationInfoFromProto(pb.Pagination),
+		Pagination: ConvertCommonPaginationInfoFromProto(pb.Pagination),
 		Version:    pb.Version,
 	}
 }
 
 // ConvertFriendChangeFromProto 将 Protobuf 好友变更转换为 DTO
-func ConvertFriendChangeFromProto(pb *userpb.FriendChange) *FriendChange {
+func ConvertFriendChangeFromProto(pb *relationpb.FriendChange) *FriendChange {
 	if pb == nil {
 		return nil
 	}
@@ -539,7 +540,7 @@ func ConvertFriendChangeFromProto(pb *userpb.FriendChange) *FriendChange {
 }
 
 // ConvertSyncFriendListResponseFromProto 将 Protobuf 增量同步响应转换为 DTO
-func ConvertSyncFriendListResponseFromProto(pb *userpb.SyncFriendListResponse) *SyncFriendListResponse {
+func ConvertSyncFriendListResponseFromProto(pb *relationpb.SyncFriendListResponse) *SyncFriendListResponse {
 	if pb == nil {
 		return nil
 	}
@@ -557,7 +558,7 @@ func ConvertSyncFriendListResponseFromProto(pb *userpb.SyncFriendListResponse) *
 }
 
 // ConvertDeleteFriendResponseFromProto 将 Protobuf 删除好友响应转换为 DTO
-func ConvertDeleteFriendResponseFromProto(pb *userpb.DeleteFriendResponse) *DeleteFriendResponse {
+func ConvertDeleteFriendResponseFromProto(pb *relationpb.DeleteFriendResponse) *DeleteFriendResponse {
 	if pb == nil {
 		return nil
 	}
@@ -565,7 +566,7 @@ func ConvertDeleteFriendResponseFromProto(pb *userpb.DeleteFriendResponse) *Dele
 }
 
 // ConvertSetFriendRemarkResponseFromProto 将 Protobuf 设置好友备注响应转换为 DTO
-func ConvertSetFriendRemarkResponseFromProto(pb *userpb.SetFriendRemarkResponse) *SetFriendRemarkResponse {
+func ConvertSetFriendRemarkResponseFromProto(pb *relationpb.SetFriendRemarkResponse) *SetFriendRemarkResponse {
 	if pb == nil {
 		return nil
 	}
@@ -573,7 +574,7 @@ func ConvertSetFriendRemarkResponseFromProto(pb *userpb.SetFriendRemarkResponse)
 }
 
 // ConvertSetFriendTagResponseFromProto 将 Protobuf 设置好友标签响应转换为 DTO
-func ConvertSetFriendTagResponseFromProto(pb *userpb.SetFriendTagResponse) *SetFriendTagResponse {
+func ConvertSetFriendTagResponseFromProto(pb *relationpb.SetFriendTagResponse) *SetFriendTagResponse {
 	if pb == nil {
 		return nil
 	}
@@ -581,7 +582,7 @@ func ConvertSetFriendTagResponseFromProto(pb *userpb.SetFriendTagResponse) *SetF
 }
 
 // ConvertTagItemFromProto 将 Protobuf 标签项转换为 DTO
-func ConvertTagItemFromProto(pb *userpb.TagItem) *TagItem {
+func ConvertTagItemFromProto(pb *relationpb.TagItem) *TagItem {
 	if pb == nil {
 		return nil
 	}
@@ -592,7 +593,7 @@ func ConvertTagItemFromProto(pb *userpb.TagItem) *TagItem {
 }
 
 // ConvertGetTagListResponseFromProto 将 Protobuf 获取标签列表响应转换为 DTO
-func ConvertGetTagListResponseFromProto(pb *userpb.GetTagListResponse) *GetTagListResponse {
+func ConvertGetTagListResponseFromProto(pb *relationpb.GetTagListResponse) *GetTagListResponse {
 	if pb == nil {
 		return nil
 	}
@@ -608,7 +609,7 @@ func ConvertGetTagListResponseFromProto(pb *userpb.GetTagListResponse) *GetTagLi
 }
 
 // ConvertCheckIsFriendResponseFromProto 将 Protobuf 判断是否好友响应转换为 DTO
-func ConvertCheckIsFriendResponseFromProto(pb *userpb.CheckIsFriendResponse) *CheckIsFriendResponse {
+func ConvertCheckIsFriendResponseFromProto(pb *relationpb.CheckIsFriendResponse) *CheckIsFriendResponse {
 	if pb == nil {
 		return nil
 	}
@@ -618,7 +619,7 @@ func ConvertCheckIsFriendResponseFromProto(pb *userpb.CheckIsFriendResponse) *Ch
 }
 
 // ConvertGetRelationStatusResponseFromProto 将 Protobuf 获取关系状态响应转换为 DTO
-func ConvertGetRelationStatusResponseFromProto(pb *userpb.GetRelationStatusResponse) *GetRelationStatusResponse {
+func ConvertGetRelationStatusResponseFromProto(pb *relationpb.GetRelationStatusResponse) *GetRelationStatusResponse {
 	if pb == nil {
 		return nil
 	}

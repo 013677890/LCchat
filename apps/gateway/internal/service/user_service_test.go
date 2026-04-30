@@ -3,18 +3,18 @@ package service
 import (
 	"context"
 	"errors"
-		"sync"
+	"sync"
 	"testing"
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,19 +33,19 @@ func initGatewayUserServiceTestEnv() {
 type fakeGatewayUserServiceClient struct {
 	gatewaypb.UserServiceClient
 
-	getProfileFn       func(context.Context, *userpb.GetProfileRequest) (*userpb.GetProfileResponse, error)
-	getOtherProfileFn  func(context.Context, *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error)
-	checkIsFriendFn    func(context.Context, *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error)
-	searchUserFn       func(context.Context, *userpb.SearchUserRequest) (*userpb.SearchUserResponse, error)
-	batchIsFriendFn    func(context.Context, *userpb.BatchCheckIsFriendRequest) (*userpb.BatchCheckIsFriendResponse, error)
-	updateProfileFn    func(context.Context, *userpb.UpdateProfileRequest) (*userpb.UpdateProfileResponse, error)
-	changePasswordFn   func(context.Context, *userpb.ChangePasswordRequest) (*userpb.ChangePasswordResponse, error)
-	changeEmailFn      func(context.Context, *userpb.ChangeEmailRequest) (*userpb.ChangeEmailResponse, error)
-	uploadAvatarFn     func(context.Context, *userpb.UploadAvatarRequest) (*userpb.UploadAvatarResponse, error)
-	batchGetProfileFn  func(context.Context, *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error)
-	getQRCodeFn        func(context.Context, *userpb.GetQRCodeRequest) (*userpb.GetQRCodeResponse, error)
-	parseQRCodeFn      func(context.Context, *userpb.ParseQRCodeRequest) (*userpb.ParseQRCodeResponse, error)
-	deleteAccountFn    func(context.Context, *userpb.DeleteAccountRequest) (*userpb.DeleteAccountResponse, error)
+	getProfileFn      func(context.Context, *userpb.GetProfileRequest) (*userpb.GetProfileResponse, error)
+	getOtherProfileFn func(context.Context, *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error)
+	checkIsFriendFn   func(context.Context, *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error)
+	searchUserFn      func(context.Context, *userpb.SearchUserRequest) (*userpb.SearchUserResponse, error)
+	batchIsFriendFn   func(context.Context, *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error)
+	updateProfileFn   func(context.Context, *userpb.UpdateProfileRequest) (*userpb.UpdateProfileResponse, error)
+	changePasswordFn  func(context.Context, *userpb.ChangePasswordRequest) (*userpb.ChangePasswordResponse, error)
+	changeEmailFn     func(context.Context, *userpb.ChangeEmailRequest) (*userpb.ChangeEmailResponse, error)
+	uploadAvatarFn    func(context.Context, *userpb.UploadAvatarRequest) (*userpb.UploadAvatarResponse, error)
+	batchGetProfileFn func(context.Context, *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error)
+	getQRCodeFn       func(context.Context, *userpb.GetQRCodeRequest) (*userpb.GetQRCodeResponse, error)
+	parseQRCodeFn     func(context.Context, *userpb.ParseQRCodeRequest) (*userpb.ParseQRCodeResponse, error)
+	deleteAccountFn   func(context.Context, *userpb.DeleteAccountRequest) (*userpb.DeleteAccountResponse, error)
 }
 
 func (f *fakeGatewayUserServiceClient) GetProfile(ctx context.Context, req *userpb.GetProfileRequest) (*userpb.GetProfileResponse, error) {
@@ -62,7 +62,7 @@ func (f *fakeGatewayUserServiceClient) GetOtherProfile(ctx context.Context, req 
 	return f.getOtherProfileFn(ctx, req)
 }
 
-func (f *fakeGatewayUserServiceClient) CheckIsFriend(ctx context.Context, req *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error) {
+func (f *fakeGatewayUserServiceClient) CheckIsFriend(ctx context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
 	if f.checkIsFriendFn == nil {
 		return nil, errors.New("unexpected CheckIsFriend call")
 	}
@@ -76,7 +76,7 @@ func (f *fakeGatewayUserServiceClient) SearchUser(ctx context.Context, req *user
 	return f.searchUserFn(ctx, req)
 }
 
-func (f *fakeGatewayUserServiceClient) BatchCheckIsFriend(ctx context.Context, req *userpb.BatchCheckIsFriendRequest) (*userpb.BatchCheckIsFriendResponse, error) {
+func (f *fakeGatewayUserServiceClient) BatchCheckIsFriend(ctx context.Context, req *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error) {
 	if f.batchIsFriendFn == nil {
 		return nil, errors.New("unexpected BatchCheckIsFriend call")
 	}
@@ -206,10 +206,10 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 				require.Equal(t, "u2", req.UserUuid)
 				return nil, wantErr
 			},
-			checkIsFriendFn: func(_ context.Context, req *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error) {
+			checkIsFriendFn: func(_ context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
 				require.Equal(t, "u1", req.UserUuid)
 				require.Equal(t, "u2", req.PeerUuid)
-				return &userpb.CheckIsFriendResponse{IsFriend: false}, nil
+				return &relationpb.CheckIsFriendResponse{IsFriend: false}, nil
 			},
 		})
 
@@ -224,8 +224,8 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 			getOtherProfileFn: func(_ context.Context, _ *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error) {
 				return &userpb.GetOtherProfileResponse{}, nil
 			},
-			checkIsFriendFn: func(_ context.Context, _ *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error) {
-				return &userpb.CheckIsFriendResponse{IsFriend: true}, nil
+			checkIsFriendFn: func(_ context.Context, _ *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
+				return &relationpb.CheckIsFriendResponse{IsFriend: true}, nil
 			},
 		})
 
@@ -240,13 +240,12 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 			getOtherProfileFn: func(_ context.Context, _ *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error) {
 				return &userpb.GetOtherProfileResponse{
 					UserInfo: &userpb.UserInfo{
-						Uuid:      "u2",
-						Email:     "alice@example.com",
-						Telephone: "13800138000",
+						Uuid:     "u2",
+						Nickname: "alice",
 					},
 				}, nil
 			},
-			checkIsFriendFn: func(_ context.Context, _ *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error) {
+			checkIsFriendFn: func(_ context.Context, _ *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
 				return nil, errors.New("friend service failed")
 			},
 		})
@@ -257,8 +256,8 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 		require.NotNil(t, resp)
 		require.NotNil(t, resp.UserInfo)
 		assert.False(t, resp.IsFriend)
-		assert.Equal(t, utils.MaskEmail("alice@example.com"), resp.UserInfo.Email)
-		assert.Equal(t, utils.MaskTelephone("13800138000"), resp.UserInfo.Telephone)
+		assert.Equal(t, "u2", resp.UserInfo.UUID)
+		assert.Equal(t, "alice", resp.UserInfo.Nickname)
 	})
 
 	t.Run("friend_true_no_mask", func(t *testing.T) {
@@ -266,14 +265,13 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 			getOtherProfileFn: func(_ context.Context, _ *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error) {
 				return &userpb.GetOtherProfileResponse{
 					UserInfo: &userpb.UserInfo{
-						Uuid:      "u2",
-						Email:     "alice@example.com",
-						Telephone: "13800138000",
+						Uuid:     "u2",
+						Nickname: "alice",
 					},
 				}, nil
 			},
-			checkIsFriendFn: func(_ context.Context, _ *userpb.CheckIsFriendRequest) (*userpb.CheckIsFriendResponse, error) {
-				return &userpb.CheckIsFriendResponse{IsFriend: true}, nil
+			checkIsFriendFn: func(_ context.Context, _ *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
+				return &relationpb.CheckIsFriendResponse{IsFriend: true}, nil
 			},
 		})
 
@@ -283,8 +281,8 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 		require.NotNil(t, resp)
 		require.NotNil(t, resp.UserInfo)
 		assert.True(t, resp.IsFriend)
-		assert.Equal(t, "alice@example.com", resp.UserInfo.Email)
-		assert.Equal(t, "13800138000", resp.UserInfo.Telephone)
+		assert.Equal(t, "u2", resp.UserInfo.UUID)
+		assert.Equal(t, "alice", resp.UserInfo.Nickname)
 	})
 }
 
@@ -317,7 +315,7 @@ func TestGatewayUserServiceSearchUser(t *testing.T) {
 					Items: []*userpb.SimpleUserItem{},
 				}, nil
 			},
-			batchIsFriendFn: func(_ context.Context, _ *userpb.BatchCheckIsFriendRequest) (*userpb.BatchCheckIsFriendResponse, error) {
+			batchIsFriendFn: func(_ context.Context, _ *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error) {
 				called = true
 				return nil, nil
 			},
@@ -346,12 +344,12 @@ func TestGatewayUserServiceSearchUser(t *testing.T) {
 					},
 				}, nil
 			},
-			batchIsFriendFn: func(_ context.Context, req *userpb.BatchCheckIsFriendRequest) (*userpb.BatchCheckIsFriendResponse, error) {
+			batchIsFriendFn: func(_ context.Context, req *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error) {
 				require.Equal(t, "u1", req.UserUuid)
 				require.Len(t, req.PeerUuids, 2)
 				assert.ElementsMatch(t, []string{"u2", "u3"}, req.PeerUuids)
-				return &userpb.BatchCheckIsFriendResponse{
-					Items: []*userpb.FriendCheckItem{
+				return &relationpb.BatchCheckIsFriendResponse{
+					Items: []*relationpb.FriendCheckItem{
 						{PeerUuid: "u2", IsFriend: true},
 						{PeerUuid: "u3", IsFriend: false},
 					},
@@ -379,7 +377,7 @@ func TestGatewayUserServiceSearchUser(t *testing.T) {
 					Items: []*userpb.SimpleUserItem{{Uuid: "u2", Nickname: "n2"}},
 				}, nil
 			},
-			batchIsFriendFn: func(_ context.Context, _ *userpb.BatchCheckIsFriendRequest) (*userpb.BatchCheckIsFriendResponse, error) {
+			batchIsFriendFn: func(_ context.Context, _ *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error) {
 				return nil, errors.New("friend rpc failed")
 			},
 		})
@@ -560,4 +558,3 @@ func TestGatewayUserServiceOtherMethods(t *testing.T) {
 		require.ErrorIs(t, gotGetErr, getErr)
 	})
 }
-

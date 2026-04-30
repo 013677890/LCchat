@@ -43,7 +43,7 @@ func initializeRelationApp() (*RelationApp, error) {
 	blacklistRepo := repository.NewBlacklistRepository(db, client)
 
 	// Service
-	friendService := service.NewFriendService(db, client, friendRepo, applyRepo)
+	friendService := service.NewFriendService(db, client, friendRepo, applyRepo, blacklistRepo)
 	blacklistService := service.NewBlacklistService(db, client, blacklistRepo, friendRepo)
 
 	// Handler

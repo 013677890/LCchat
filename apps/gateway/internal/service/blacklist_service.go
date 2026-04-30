@@ -5,6 +5,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
@@ -49,7 +50,7 @@ func (s *BlacklistServiceImpl) RemoveBlacklist(ctx context.Context, req *dto.Rem
 // GetBlacklistList 获取黑名单列表
 func (s *BlacklistServiceImpl) GetBlacklistList(ctx context.Context, req *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
 
-	grpcReq := &userpb.GetBlacklistListRequest{
+	grpcReq := &relationpb.GetBlacklistListRequest{
 		Page:     req.Page,
 		PageSize: req.PageSize,
 	}
