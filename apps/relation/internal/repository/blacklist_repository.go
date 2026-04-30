@@ -5,7 +5,9 @@ import (
 	"errors"
 	"time"
 
+	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/async"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -18,8 +20,8 @@ type blacklistRepositoryImpl struct {
 
 // NewBlacklistRepository 创建黑名单仓储实例。
 //
-// 当前 relation-service 的最小闭环采用 DB-first 策略，redisClient 仅作为后续缓存增强
-// 的预留依赖传入；即使 Redis 缺失，黑名单核心读写也应能够正常工作。
+// 黑名单是权限判断链路上的高频数据，因此这里恢复为“Redis ZSet + MySQL”双层结构：
+// Redis 负责快速判断与列表分页，MySQL 则继续作为最终权威来源，负责兜底与重建缓存。
 func NewBlacklistRepository(db *gorm.DB, redisClient *goredis.Client) IBlacklistRepository {
 	return &blacklistRepositoryImpl{db: db, redisClient: redisClient}
 }
@@ -74,6 +76,10 @@ func (r *blacklistRepositoryImpl) AddBlacklist(ctx context.Context, userUUID, ta
 	if err != nil {
 		return WrapDBError(err)
 	}
+
+	// 黑名单 ZSet 与好友 Hash 都只维护当前用户视角，因此这里只更新单侧缓存。
+	r.updateBlacklistCacheAsync(ctx, userUUID, targetUUID, now.UnixMilli())
+	r.removeFriendCacheAsync(ctx, userUUID, targetUUID)
 	return nil
 }
 
@@ -103,7 +109,8 @@ func (r *blacklistRepositoryImpl) RemoveBlacklist(ctx context.Context, userUUID,
 		"blacklisted_at": nil,
 		"updated_at":     now,
 	}
-	if relation.Status == 1 {
+	restoreFriend := relation.Status == 1
+	if restoreFriend {
 		// 拉黑前是好友：取消拉黑后恢复好友关系。
 		updates["status"] = 0
 		updates["deleted_at"] = nil
@@ -124,15 +131,71 @@ func (r *blacklistRepositoryImpl) RemoveBlacklist(ctx context.Context, userUUID,
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
+
+	r.removeBlacklistCacheAsync(ctx, userUUID, targetUUID)
+	if restoreFriend {
+		r.restoreFriendCacheAsync(ctx, userUUID, targetUUID)
+	} else {
+		r.removeFriendCacheAsync(ctx, userUUID, targetUUID)
+	}
 	return nil
 }
 
 // GetBlacklistList 分页查询 userUUID 的黑名单列表。
 //
-// 本阶段只返回关系域拥有的数据（peer_uuid、blacklisted_at 等），头像昵称后续应通过
-// user-service 的 InternalProfileService 批量补齐，避免 relation 直查 profile 表。
+// 列表缓存使用 ZSet，member=peer_uuid，score=blacklisted_at 毫秒时间戳；这样既能高效判断
+// 是否拉黑，也能天然支持按拉黑时间倒序分页。
 func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID string, page, pageSize int) ([]*model.UserRelation, int64, error) {
 	_, pageSize, offset := normalizePage(page, pageSize)
+
+	if r.redisClient != nil {
+		cacheKey := rediskey.BlacklistRelationKey(userUUID)
+		pipe := r.redisClient.Pipeline()
+		existsCmd := pipe.Exists(ctx, cacheKey)
+		countCmd := pipe.ZCard(ctx, cacheKey)
+		rangeCmd := pipe.ZRevRangeWithScores(ctx, cacheKey, int64(offset), int64(offset+pageSize-1))
+		emptyScoreCmd := pipe.ZScore(ctx, cacheKey, "__EMPTY__")
+		if getRandomBool(0.01) {
+			pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
+		}
+
+		_, err := pipe.Exec(ctx)
+		if err == nil {
+			if existsCmd.Val() > 0 {
+				total := countCmd.Val()
+				if total == 1 && emptyScoreCmd.Err() == nil {
+					return []*model.UserRelation{}, 0, nil
+				}
+
+				relations := make([]*model.UserRelation, 0, len(rangeCmd.Val()))
+				for _, z := range rangeCmd.Val() {
+					member, ok := z.Member.(string)
+					if !ok || member == "" || member == "__EMPTY__" {
+						continue
+					}
+					blacklistedAt := time.UnixMilli(int64(z.Score))
+					relations = append(relations, &model.UserRelation{
+						UserUuid:      userUUID,
+						PeerUuid:      member,
+						Status:        1,
+						BlacklistedAt: &blacklistedAt,
+					})
+				}
+
+				realTotal := total
+				if emptyScoreCmd.Err() == nil && realTotal > 0 {
+					realTotal--
+				}
+				return relations, realTotal, nil
+			}
+		} else if err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(ctx, cacheKey).Err()
+			} else {
+				LogRedisError(ctx, err)
+			}
+		}
+	}
 
 	query := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
@@ -151,14 +214,50 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 		Find(&relations).Error; err != nil {
 		return nil, 0, WrapDBError(err)
 	}
+
+	// 列表缓存必须从全量数据重建，避免把当前分页误写成完整黑名单集合。
+	r.rebuildBlacklistCacheFromDBAsync(ctx, userUUID)
 	return relations, total, nil
 }
 
 // IsBlocked 判断 userUUID 是否已拉黑 targetUUID。
 //
-// 该方法是消息权限校验和好友申请校验的高频路径；当前先使用 MySQL 保证拆分闭环正确，
-// 后续可在不改变接口语义的前提下补回 Redis cache-aside。
+// 该方法是消息权限校验和好友申请校验的高频路径，因此优先命中 Redis；缓存缺失时再回源
+// 数据库，并异步重建整份黑名单集合，避免后续查询继续穿透。
 func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targetUUID string) (bool, error) {
+	if r.redisClient != nil {
+		cacheKey := rediskey.BlacklistRelationKey(userUUID)
+		pipe := r.redisClient.Pipeline()
+		existsCmd := pipe.Exists(ctx, cacheKey)
+		scoreCmd := pipe.ZScore(ctx, cacheKey, targetUUID)
+		if getRandomBool(0.01) {
+			pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
+		}
+
+		_, err := pipe.Exec(ctx)
+		if err == nil {
+			if existsCmd.Val() > 0 {
+				if scoreCmd.Err() == nil {
+					return true, nil
+				}
+				if scoreCmd.Err() == goredis.Nil {
+					return false, nil
+				}
+				if isRedisWrongType(scoreCmd.Err()) {
+					_ = r.redisClient.Del(ctx, cacheKey).Err()
+				} else {
+					LogRedisError(ctx, scoreCmd.Err())
+				}
+			}
+		} else if err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(ctx, cacheKey).Err()
+			} else {
+				LogRedisError(ctx, err)
+			}
+		}
+	}
+
 	var count int64
 	if err := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
@@ -166,6 +265,8 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 		Count(&count).Error; err != nil {
 		return false, WrapDBError(err)
 	}
+
+	r.rebuildBlacklistCacheFromDBAsync(ctx, userUUID)
 	return count > 0, nil
 }
 
@@ -183,4 +284,187 @@ func (r *blacklistRepositoryImpl) GetBlacklistRelation(ctx context.Context, user
 		return nil, WrapDBError(err)
 	}
 	return &relation, nil
+}
+
+// rebuildBlacklistCacheFromDBAsync 异步从数据库重建整份黑名单缓存。
+//
+// 黑名单点查只靠单条结果无法推断整份集合是否完整，因此缓存 miss 后统一回源全量列表再
+// 重建，避免把局部结果误写成最终事实。
+func (r *blacklistRepositoryImpl) rebuildBlacklistCacheFromDBAsync(ctx context.Context, userUUID string) {
+	if r.redisClient == nil || userUUID == "" {
+		return
+	}
+
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		var relations []model.UserRelation
+		err := r.db.WithContext(runCtx).
+			Select("peer_uuid", "blacklisted_at", "updated_at").
+			Where("user_uuid = ? AND status IN ? AND deleted_at IS NULL", userUUID, []int{1, 3}).
+			Find(&relations).Error
+		if err != nil {
+			return
+		}
+		r.rebuildBlacklistCacheAsync(runCtx, userUUID, relations)
+	}, async.AsyncDBTimeout)
+}
+
+// rebuildBlacklistCacheAsync 异步写入整份黑名单 ZSet。
+//
+// 若当前用户没有任何黑名单成员，则写入 __EMPTY__ 占位符，防止高频空查询持续穿透。
+func (r *blacklistRepositoryImpl) rebuildBlacklistCacheAsync(ctx context.Context, userUUID string, relations []model.UserRelation) {
+	if r.redisClient == nil || userUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.BlacklistRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		pipe := r.redisClient.Pipeline()
+		pipe.Del(runCtx, cacheKey)
+
+		if len(relations) == 0 {
+			pipe.ZAdd(runCtx, cacheKey, goredis.Z{Score: 0, Member: "__EMPTY__"})
+			pipe.Expire(runCtx, cacheKey, rediskey.BlacklistEmptyTTL)
+		} else {
+			members := make([]goredis.Z, 0, len(relations))
+			for _, relation := range relations {
+				if relation.PeerUuid == "" {
+					continue
+				}
+				blacklistedAt := relation.UpdatedAt
+				if relation.BlacklistedAt != nil {
+					blacklistedAt = *relation.BlacklistedAt
+				}
+				members = append(members, goredis.Z{
+					Score:  float64(blacklistedAt.UnixMilli()),
+					Member: relation.PeerUuid,
+				})
+			}
+			if len(members) > 0 {
+				pipe.ZAdd(runCtx, cacheKey, members...)
+			}
+			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
+		}
+
+		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisPipelineTimeout)
+}
+
+// updateBlacklistCacheAsync 异步把单个用户增量加入黑名单缓存。
+//
+// 与好友缓存相同，这里只在 key 已存在时做增量写入；如果缓存整体已过期，则交给下一次
+// 读路径统一全量回填，避免产生不完整集合。
+func (r *blacklistRepositoryImpl) updateBlacklistCacheAsync(ctx context.Context, userUUID, targetUUID string, blockedAt int64) {
+	if r.redisClient == nil || userUUID == "" || targetUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.BlacklistRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		luaScript := goredis.NewScript(luaAddBlacklistIfExists)
+		expireSeconds := int(getRandomExpireTime(rediskey.BlacklistTTL).Seconds())
+		_, err := luaScript.Run(runCtx, r.redisClient,
+			[]string{cacheKey},
+			blockedAt,
+			targetUUID,
+			expireSeconds,
+		).Result()
+		if err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisTimeout)
+}
+
+// removeBlacklistCacheAsync 异步移除黑名单缓存中的单个成员。
+//
+// 若移除后集合为空，则脚本会自动补写 __EMPTY__ 占位，保证后续空查询仍然能命中缓存。
+func (r *blacklistRepositoryImpl) removeBlacklistCacheAsync(ctx context.Context, userUUID, targetUUID string) {
+	if r.redisClient == nil || userUUID == "" || targetUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.BlacklistRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		luaScript := goredis.NewScript(luaRemoveBlacklistIfExists)
+		expireSeconds := int(getRandomExpireTime(rediskey.BlacklistTTL).Seconds())
+		_, err := luaScript.Run(runCtx, r.redisClient,
+			[]string{cacheKey},
+			targetUUID,
+			expireSeconds,
+		).Result()
+		if err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisTimeout)
+}
+
+// removeFriendCacheAsync 异步删除当前用户侧的好友缓存 field。
+//
+// 拉黑后 A->B 不再是好友，但 B->A 关系保持不变，因此这里只清理当前用户这一侧的好友 Hash。
+func (r *blacklistRepositoryImpl) removeFriendCacheAsync(ctx context.Context, userUUID, friendUUID string) {
+	if r.redisClient == nil || userUUID == "" || friendUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		luaScript := goredis.NewScript(luaRemoveFriendMetaIfExists)
+		placeholderJSON := buildFriendMetaJSON("", "", "", 0)
+		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		_, err := luaScript.Run(runCtx, r.redisClient,
+			[]string{cacheKey},
+			friendUUID,
+			placeholderJSON,
+			expireSeconds,
+		).Result()
+		if err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisTimeout)
+}
+
+// restoreFriendCacheAsync 在“取消拉黑并恢复好友”时补回当前用户侧的好友缓存。
+//
+// 恢复好友时只要把 field 放回 Hash 即可；若整个 Hash 不存在，则继续让读路径下次全量重建。
+func (r *blacklistRepositoryImpl) restoreFriendCacheAsync(ctx context.Context, userUUID, friendUUID string) {
+	if r.redisClient == nil || userUUID == "" || friendUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		luaScript := goredis.NewScript(luaInsertFriendMetaIfExists)
+		metaJSON := buildFriendMetaJSON("", "", "", time.Now().UnixMilli())
+		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		_, err := luaScript.Run(runCtx, r.redisClient,
+			[]string{cacheKey},
+			friendUUID,
+			metaJSON,
+			expireSeconds,
+		).Result()
+		if err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisTimeout)
 }

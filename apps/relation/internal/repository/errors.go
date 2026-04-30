@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -45,4 +47,15 @@ func WrapRedisError(err error) error {
 		return ErrRedisNil
 	}
 	return fmt.Errorf("%w: %v", ErrRedis, err)
+}
+
+// LogRedisError 统一记录 Redis 降级日志。
+//
+// relation-service 对 Redis 的使用都遵循“尽力命中缓存、失败降级 DB”的原则，因此这里
+// 统一输出 warn 日志，避免每个仓储方法重复拼装相同的日志字段。
+func LogRedisError(ctx context.Context, err error) {
+	if err == nil {
+		return
+	}
+	logger.Warn(ctx, "Redis 操作错误，已降级处理", logger.ErrorField("error", err))
 }

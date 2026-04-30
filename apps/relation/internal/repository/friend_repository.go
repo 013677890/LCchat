@@ -5,7 +5,9 @@ import (
 	"errors"
 	"time"
 
+	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/async"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -18,8 +20,8 @@ type friendRepositoryImpl struct {
 
 // NewFriendRepository 创建好友关系仓储实例。
 //
-// 当前拆分阶段优先保证 relation-service 能独立运行，因此仓储实现采用 MySQL 为主、
-// Redis 为辅的策略。redisClient 先保留在结构体中，为后续恢复缓存优化预留注入点。
+// relation-service 中好友关系属于高频读路径，因此这里恢复为“Redis Hash + MySQL”双层
+// 结构：Redis 负责常见存在性判断与元数据读取，MySQL 继续作为最终权威来源兜底。
 func NewFriendRepository(db *gorm.DB, redisClient *goredis.Client) IFriendRepository {
 	return &friendRepositoryImpl{db: db, redisClient: redisClient}
 }
@@ -111,6 +113,9 @@ func (r *friendRepositoryImpl) CreateFriendRelation(ctx context.Context, userUUI
 	}).Create(&relations).Error; err != nil {
 		return WrapDBError(err)
 	}
+
+	// 事务成功后只做“缓存存在时”的增量补丁；若 key 已过期，则后续读路径会负责全量重建。
+	r.invalidateFriendCacheAsync(ctx, userUUID, friendUUID)
 	return nil
 }
 
@@ -133,6 +138,9 @@ func (r *friendRepositoryImpl) DeleteFriendRelation(ctx context.Context, userUUI
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
+
+	// 删除好友只影响当前用户单侧视角，因此这里只移除当前 userUUID 对应的 Hash field。
+	r.removeFriendCacheAsync(ctx, userUUID, friendUUID)
 	return nil
 }
 
@@ -140,16 +148,20 @@ func (r *friendRepositoryImpl) DeleteFriendRelation(ctx context.Context, userUUI
 //
 // 备注是单向属性，只影响当前 userUUID 视角下看到的 peerUUID 展示信息。
 func (r *friendRepositoryImpl) SetFriendRemark(ctx context.Context, userUUID, friendUUID, remark string) error {
+	now := time.Now()
 	result := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
-		Updates(map[string]interface{}{"remark": remark, "updated_at": time.Now()})
+		Updates(map[string]interface{}{"remark": remark, "updated_at": now})
 	if result.Error != nil {
 		return WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
+
+	// 备注是单条元数据修改，优先走单 field 增量回写，避免整份好友列表重建。
+	r.updateFriendRemarkCacheAsync(ctx, userUUID, friendUUID, remark, now.UnixMilli())
 	return nil
 }
 
@@ -157,16 +169,20 @@ func (r *friendRepositoryImpl) SetFriendRemark(ctx context.Context, userUUID, fr
 //
 // 标签同样是单向属性，仅影响当前用户的好友分组视图，不修改对方视角下的数据。
 func (r *friendRepositoryImpl) SetFriendTag(ctx context.Context, userUUID, friendUUID, groupTag string) error {
+	now := time.Now()
 	result := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
-		Updates(map[string]interface{}{"group_tag": groupTag, "updated_at": time.Now()})
+		Updates(map[string]interface{}{"group_tag": groupTag, "updated_at": now})
 	if result.Error != nil {
 		return WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
+
+	// 标签与备注一样都是好友元数据的一部分，可以在已有 Hash 上做细粒度更新。
+	r.updateFriendTagCacheAsync(ctx, userUUID, friendUUID, groupTag, now.UnixMilli())
 	return nil
 }
 
@@ -188,15 +204,171 @@ func (r *friendRepositoryImpl) GetTagList(ctx context.Context, userUUID string) 
 
 // IsFriend 判断两人是否为好友。
 //
-// 这里直接复用 CheckIsFriendRelation，保持外部语义清晰，同时避免重复 SQL。
+// 对外语义仍保持不变，但内部会优先命中 Redis Hash，只有缓存未命中时才回源 MySQL。
 func (r *friendRepositoryImpl) IsFriend(ctx context.Context, userUUID, friendUUID string) (bool, error) {
 	return r.CheckIsFriendRelation(ctx, userUUID, friendUUID)
+}
+
+// checkFriendCache 检查单侧好友缓存命中情况。
+//
+// 返回值依次表示：
+//  1. 当前用户的好友 Hash 是否存在；
+//  2. 若 Hash 存在，对方是否在该 Hash 中。
+//
+// 之所以区分“缓存存在但字段不存在”和“缓存整体不存在”，是为了让调用方能把前者视为
+// 权威的 false，后者则继续回源数据库，避免把缓存未命中误判成业务不存在。
+func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, friendUUID string) (bool, bool) {
+	if r.redisClient == nil || userUUID == "" || friendUUID == "" {
+		return false, false
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	pipe := r.redisClient.Pipeline()
+	existsCmd := pipe.Exists(ctx, cacheKey)
+	metaCmd := pipe.HGet(ctx, cacheKey, friendUUID)
+
+	// 热点 key 使用小概率续期，避免每次读取都追加 EXPIRE 带来额外 RTT。
+	if getRandomBool(0.01) {
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
+	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != goredis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+		} else {
+			LogRedisError(ctx, err)
+		}
+		return false, false
+	}
+
+	if existsCmd.Val() == 0 {
+		return false, false
+	}
+
+	if metaCmd.Err() == nil {
+		// 这里只需要“该 field 是否存在”的结论；即使 JSON 解析失败，也仍按好友存在处理。
+		_, _ = parseFriendMetaJSON(metaCmd.Val())
+		return true, true
+	}
+	if metaCmd.Err() == goredis.Nil {
+		return true, false
+	}
+	if isRedisWrongType(metaCmd.Err()) {
+		_ = r.redisClient.Del(ctx, cacheKey).Err()
+		return false, false
+	}
+
+	LogRedisError(ctx, metaCmd.Err())
+	return false, false
+}
+
+// getFriendMetaCache 获取某个好友 field 的缓存元数据。
+//
+// 与 checkFriendCache 类似，该方法同样区分“Hash 存在但 field 缺失”和“整个 Hash 不存在”；
+// 这样 GetRelationStatus 既能利用缓存补 remark/group_tag/source，又不会误把冷数据查成空。
+func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID, friendUUID string) (bool, *friendMeta, bool) {
+	if r.redisClient == nil || userUUID == "" || friendUUID == "" {
+		return false, nil, false
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	pipe := r.redisClient.Pipeline()
+	existsCmd := pipe.Exists(ctx, cacheKey)
+	metaCmd := pipe.HGet(ctx, cacheKey, friendUUID)
+
+	if getRandomBool(0.01) {
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
+	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != goredis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+		} else {
+			LogRedisError(ctx, err)
+		}
+		return false, nil, false
+	}
+
+	if existsCmd.Val() == 0 {
+		return false, nil, false
+	}
+
+	if metaCmd.Err() == nil {
+		meta, parseErr := parseFriendMetaJSON(metaCmd.Val())
+		if parseErr != nil {
+			return true, nil, true
+		}
+		return true, meta, true
+	}
+	if metaCmd.Err() == goredis.Nil {
+		return true, nil, false
+	}
+	if isRedisWrongType(metaCmd.Err()) {
+		_ = r.redisClient.Del(ctx, cacheKey).Err()
+		return false, nil, false
+	}
+
+	LogRedisError(ctx, metaCmd.Err())
+	return false, nil, false
+}
+
+// checkBlacklistCache 检查黑名单缓存命中情况。
+//
+// 好友关系状态查询需要同时感知好友 Hash 与黑名单 ZSet，因此这里直接复用黑名单缓存，避免
+// 为 GetRelationStatus 额外追加一次数据库访问。
+func (r *friendRepositoryImpl) checkBlacklistCache(ctx context.Context, userUUID, peerUUID string) (bool, bool) {
+	if r.redisClient == nil || userUUID == "" || peerUUID == "" {
+		return false, false
+	}
+
+	cacheKey := rediskey.BlacklistRelationKey(userUUID)
+	pipe := r.redisClient.Pipeline()
+	existsCmd := pipe.Exists(ctx, cacheKey)
+	scoreCmd := pipe.ZScore(ctx, cacheKey, peerUUID)
+
+	if getRandomBool(0.01) {
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
+	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != goredis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+		} else {
+			LogRedisError(ctx, err)
+		}
+		return false, false
+	}
+
+	if existsCmd.Val() == 0 {
+		return false, false
+	}
+	if scoreCmd.Err() == nil {
+		return true, true
+	}
+	if scoreCmd.Err() == goredis.Nil {
+		return true, false
+	}
+	if isRedisWrongType(scoreCmd.Err()) {
+		_ = r.redisClient.Del(ctx, cacheKey).Err()
+		return false, false
+	}
+
+	LogRedisError(ctx, scoreCmd.Err())
+	return false, false
 }
 
 // CheckIsFriendRelation 判断当前 userUUID 视角下是否存在有效好友关系。
 //
 // 由于 relation 表是单向建模，因此这里只检查单侧关系是否存在，不隐式推断对向记录。
 func (r *friendRepositoryImpl) CheckIsFriendRelation(ctx context.Context, userUUID, peerUUID string) (bool, error) {
+	cacheHit, isFriend := r.checkFriendCache(ctx, userUUID, peerUUID)
+	if cacheHit {
+		return isFriend, nil
+	}
+
 	var count int64
 	if err := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
@@ -204,6 +376,9 @@ func (r *friendRepositoryImpl) CheckIsFriendRelation(ctx context.Context, userUU
 		Count(&count).Error; err != nil {
 		return false, WrapDBError(err)
 	}
+
+	// 缓存未命中时异步重建整份好友 Hash，避免后续同用户的高频关系判断持续打 DB。
+	r.rebuildFriendCacheFromDBAsync(ctx, userUUID)
 	return count > 0, nil
 }
 
@@ -219,6 +394,39 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 		result[peerUUID] = false
 	}
 
+	if r.redisClient != nil {
+		cacheKey := rediskey.FriendRelationKey(userUUID)
+		fields := make([]string, 0, len(peerUUIDs))
+		for _, peerUUID := range peerUUIDs {
+			fields = append(fields, peerUUID)
+		}
+
+		pipe := r.redisClient.Pipeline()
+		existsCmd := pipe.Exists(ctx, cacheKey)
+		valuesCmd := pipe.HMGet(ctx, cacheKey, fields...)
+		if getRandomBool(0.01) {
+			pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
+		}
+
+		_, err := pipe.Exec(ctx)
+		if err == nil {
+			if existsCmd.Val() > 0 {
+				for index, value := range valuesCmd.Val() {
+					if value != nil {
+						result[peerUUIDs[index]] = true
+					}
+				}
+				return result, nil
+			}
+		} else if err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(ctx, cacheKey).Err()
+			} else {
+				LogRedisError(ctx, err)
+			}
+		}
+	}
+
 	var relations []model.UserRelation
 	if err := r.db.WithContext(ctx).
 		Select("peer_uuid").
@@ -229,6 +437,9 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 	for _, relation := range relations {
 		result[relation.PeerUuid] = true
 	}
+
+	// 批量校验通常紧跟着大量会话/资料卡展示，命中 DB 后顺手重建一次缓存最划算。
+	r.rebuildFriendCacheFromDBAsync(ctx, userUUID)
 	return result, nil
 }
 
@@ -239,6 +450,31 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 //  2. 曾经是好友但已删除；
 //  3. 当前处于黑名单状态。
 func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, peerUUID string) (*model.UserRelation, error) {
+	friendHit, meta, isFriend := r.getFriendMetaCache(ctx, userUUID, peerUUID)
+	if friendHit && isFriend {
+		relation := &model.UserRelation{
+			UserUuid: userUUID,
+			PeerUuid: peerUUID,
+			Status:   0,
+		}
+		if meta != nil {
+			relation.Remark = meta.Remark
+			relation.GroupTag = meta.GroupTag
+			relation.Source = meta.Source
+		}
+		return relation, nil
+	}
+
+	blacklistHit, isBlacklist := r.checkBlacklistCache(ctx, userUUID, peerUUID)
+	if blacklistHit && isBlacklist {
+		return &model.UserRelation{UserUuid: userUUID, PeerUuid: peerUUID, Status: 1}, nil
+	}
+
+	// 当好友和黑名单缓存都明确给出“不存在”时，可直接认定两者没有有效关系。
+	if friendHit && !isFriend && blacklistHit && !isBlacklist {
+		return nil, nil
+	}
+
 	var relation model.UserRelation
 	if err := r.db.WithContext(ctx).
 		Unscoped().
@@ -295,4 +531,325 @@ func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID stri
 	}
 
 	return relations, latestVersion, hasMore, nil
+}
+
+// rebuildFriendCacheFromDBAsync 异步从数据库重建某个用户的整份好友 Hash。
+//
+// 只有整份重建才能保证 Hash 中的 field 集合完整，因此缓存缺失时不做“单条补丁式写入”，
+// 而是统一回源当前用户全部好友关系后一次性替换。
+func (r *friendRepositoryImpl) rebuildFriendCacheFromDBAsync(ctx context.Context, userUUID string) {
+	if r.redisClient == nil || userUUID == "" {
+		return
+	}
+
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		var relations []model.UserRelation
+		err := r.db.WithContext(runCtx).
+			Select("peer_uuid", "remark", "group_tag", "source", "updated_at").
+			Where("user_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, 0).
+			Find(&relations).Error
+		if err != nil {
+			return
+		}
+		r.rebuildFriendCacheAsync(runCtx, userUUID, relations)
+	}, async.AsyncDBTimeout)
+}
+
+// invalidateFriendCacheAsync 异步把新好友补进双方的好友 Hash。
+//
+// 这里只在目标 Hash 已存在时做增量插入；如果整个 key 已过期，则让下一次读请求回源 DB
+// 并全量重建，避免把“不完整的好友集合”误写成缓存事实。
+func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, userUUID, friendUUID string) {
+	if r.redisClient == nil || userUUID == "" || friendUUID == "" {
+		return
+	}
+
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		pairs := []struct {
+			userKey   string
+			newFriend string
+		}{
+			{userKey: rediskey.FriendRelationKey(userUUID), newFriend: friendUUID},
+			{userKey: rediskey.FriendRelationKey(friendUUID), newFriend: userUUID},
+		}
+
+		metaJSON := buildFriendMetaJSON("", "", "", time.Now().UnixMilli())
+		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		luaScript := goredis.NewScript(luaInsertFriendMetaIfExists)
+
+		for _, pair := range pairs {
+			_, err := luaScript.Run(runCtx, r.redisClient,
+				[]string{pair.userKey},
+				pair.newFriend,
+				metaJSON,
+				expireSeconds,
+			).Result()
+			if err != nil && err != goredis.Nil {
+				if isRedisWrongType(err) {
+					_ = r.redisClient.Del(runCtx, pair.userKey).Err()
+					continue
+				}
+				LogRedisError(runCtx, err)
+			}
+		}
+	}, async.AsyncRedisTimeout)
+}
+
+// removeFriendCacheAsync 异步删除单向好友缓存。
+//
+// 删除好友只影响当前用户视角，因此这里只移除 userUUID -> friendUUID 这一侧的 Hash field。
+func (r *friendRepositoryImpl) removeFriendCacheAsync(ctx context.Context, userUUID, friendUUID string) {
+	if r.redisClient == nil || userUUID == "" || friendUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		luaScript := goredis.NewScript(luaRemoveFriendMetaIfExists)
+		placeholderJSON := buildFriendMetaJSON("", "", "", 0)
+		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		_, err := luaScript.Run(runCtx, r.redisClient,
+			[]string{cacheKey},
+			friendUUID,
+			placeholderJSON,
+			expireSeconds,
+		).Result()
+
+		if err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisTimeout)
+}
+
+// rebuildFriendCacheAsync 异步重建某个用户的好友 Hash。
+//
+// 该方法只负责把调用方已经拿到的完整关系集合写入 Redis；真正决定“是否需要全量回源”
+// 的逻辑由上层 read path 控制，以便把缓存成本放在首次 miss 上摊平。
+func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, userUUID string, relations []model.UserRelation) {
+	if r.redisClient == nil || userUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		pipe := r.redisClient.Pipeline()
+		pipe.Del(runCtx, cacheKey)
+
+		if len(relations) == 0 {
+			pipe.HSet(runCtx, cacheKey, "__EMPTY__", buildFriendMetaJSON("", "", "", 0))
+			pipe.Expire(runCtx, cacheKey, rediskey.FriendRelationEmptyTTL)
+		} else {
+			fields := make(map[string]interface{}, len(relations))
+			for _, relation := range relations {
+				if relation.PeerUuid == "" {
+					continue
+				}
+				fields[relation.PeerUuid] = buildFriendMetaJSON(
+					relation.Remark,
+					relation.GroupTag,
+					relation.Source,
+					relation.UpdatedAt.UnixMilli(),
+				)
+			}
+			if len(fields) > 0 {
+				pipe.HSet(runCtx, cacheKey, fields)
+			}
+			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
+		}
+
+		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisPipelineTimeout)
+}
+
+// updateFriendMetaCacheAsync 异步更新单个好友的元数据缓存。
+//
+// 该方法用于 remark/group_tag/source 等单条关系属性变更后做增量回写，前提仍然是目标 Hash
+// 已存在；若 key 不存在，说明缓存已过期，后续读路径会全量重建。
+func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, userUUID string, relation *model.UserRelation) {
+	if r.redisClient == nil || userUUID == "" || relation == nil || relation.PeerUuid == "" {
+		return
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		metaJSON := buildFriendMetaJSON(
+			relation.Remark,
+			relation.GroupTag,
+			relation.Source,
+			relation.UpdatedAt.UnixMilli(),
+		)
+		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		luaScript := goredis.NewScript(luaUpsertFriendMetaIfExists)
+		_, err := luaScript.Run(runCtx, r.redisClient,
+			[]string{cacheKey},
+			relation.PeerUuid,
+			metaJSON,
+			expireSeconds,
+		).Result()
+		if err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisTimeout)
+}
+
+// updateFriendRemarkCacheAsync 异步更新单个好友的备注缓存。
+//
+// 如果 Hash 已存在但 field 缺失，说明缓存已不是最新完整集合，此时会回源 DB 读取整条关系
+// 元数据后再尝试回写，避免把只含 remark 的“半条记录”塞进缓存。
+func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context, userUUID, friendUUID, remark string, updatedAt int64) {
+	if r.redisClient == nil || userUUID == "" || friendUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		pipe := r.redisClient.Pipeline()
+		existsCmd := pipe.Exists(runCtx, cacheKey)
+		metaCmd := pipe.HGet(runCtx, cacheKey, friendUUID)
+		_, err := pipe.Exec(runCtx)
+
+		if err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+			return
+		}
+		if existsCmd.Val() == 0 {
+			return
+		}
+
+		if metaCmd.Err() == nil {
+			meta, parseErr := parseFriendMetaJSON(metaCmd.Val())
+			if parseErr != nil {
+				return
+			}
+			meta.Remark = remark
+			meta.UpdatedAt = updatedAt
+
+			luaScript := goredis.NewScript(luaUpsertFriendMetaIfExists)
+			expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+			_, err = luaScript.Run(runCtx, r.redisClient,
+				[]string{cacheKey},
+				friendUUID,
+				buildFriendMetaJSON(meta.Remark, meta.GroupTag, meta.Source, meta.UpdatedAt),
+				expireSeconds,
+			).Result()
+			if err != nil && err != goredis.Nil {
+				if isRedisWrongType(err) {
+					_ = r.redisClient.Del(runCtx, cacheKey).Err()
+					return
+				}
+				LogRedisError(runCtx, err)
+			}
+			return
+		}
+
+		if metaCmd.Err() != goredis.Nil {
+			if isRedisWrongType(metaCmd.Err()) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+			} else {
+				LogRedisError(runCtx, metaCmd.Err())
+			}
+			return
+		}
+
+		var relation model.UserRelation
+		if err := r.db.WithContext(runCtx).
+			Select("peer_uuid", "remark", "group_tag", "source", "updated_at").
+			Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
+			First(&relation).Error; err != nil {
+			return
+		}
+		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
+	}, async.AsyncRedisPipelineTimeout)
+}
+
+// updateFriendTagCacheAsync 异步更新单个好友的标签缓存。
+//
+// 与备注更新类似，这里也优先走“在已有 Hash 上增量改 field”的策略；只有 field 缺失时才
+// 回源 DB，避免把缓存写放大成整份列表重建。
+func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, userUUID, friendUUID, groupTag string, updatedAt int64) {
+	if r.redisClient == nil || userUUID == "" || friendUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.FriendRelationKey(userUUID)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		pipe := r.redisClient.Pipeline()
+		existsCmd := pipe.Exists(runCtx, cacheKey)
+		metaCmd := pipe.HGet(runCtx, cacheKey, friendUUID)
+		_, err := pipe.Exec(runCtx)
+
+		if err != nil && err != goredis.Nil {
+			if isRedisWrongType(err) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+				return
+			}
+			LogRedisError(runCtx, err)
+			return
+		}
+		if existsCmd.Val() == 0 {
+			return
+		}
+
+		if metaCmd.Err() == nil {
+			meta, parseErr := parseFriendMetaJSON(metaCmd.Val())
+			if parseErr != nil {
+				return
+			}
+			meta.GroupTag = groupTag
+			meta.UpdatedAt = updatedAt
+
+			luaScript := goredis.NewScript(luaUpsertFriendMetaIfExists)
+			expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+			_, err = luaScript.Run(runCtx, r.redisClient,
+				[]string{cacheKey},
+				friendUUID,
+				buildFriendMetaJSON(meta.Remark, meta.GroupTag, meta.Source, meta.UpdatedAt),
+				expireSeconds,
+			).Result()
+			if err != nil && err != goredis.Nil {
+				if isRedisWrongType(err) {
+					_ = r.redisClient.Del(runCtx, cacheKey).Err()
+					return
+				}
+				LogRedisError(runCtx, err)
+			}
+			return
+		}
+
+		if metaCmd.Err() != goredis.Nil {
+			if isRedisWrongType(metaCmd.Err()) {
+				_ = r.redisClient.Del(runCtx, cacheKey).Err()
+			} else {
+				LogRedisError(runCtx, metaCmd.Err())
+			}
+			return
+		}
+
+		var relation model.UserRelation
+		if err := r.db.WithContext(runCtx).
+			Select("peer_uuid", "remark", "group_tag", "source", "updated_at").
+			Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
+			First(&relation).Error; err != nil {
+			return
+		}
+		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
+	}, async.AsyncRedisPipelineTimeout)
 }
