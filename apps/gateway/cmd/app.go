@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/pkg/async"
@@ -35,6 +35,7 @@ type GatewayApp struct {
 	asyncPool           *ants.Pool
 	asyncReleaseTimeout time.Duration
 	redisClient         *goredis.Client
+	authServiceConn     gatewayAuthConn
 	userServiceConn     gatewayUserConn
 	relationServiceConn gatewayRelationConn
 	msgServiceConn      gatewayMsgConn
@@ -57,6 +58,7 @@ func NewGatewayApp(
 	asyncPool *ants.Pool,
 	asyncReleaseTimeout gatewayAsyncReleaseTimeout,
 	redisClient *goredis.Client,
+	authServiceConn gatewayAuthConn,
 	userServiceConn gatewayUserConn,
 	relationServiceConn gatewayRelationConn,
 	msgServiceConn gatewayMsgConn,
@@ -71,6 +73,9 @@ func NewGatewayApp(
 	}
 	if asyncPool == nil {
 		return nil, errors.New("gateway async pool 未初始化")
+	}
+	if authServiceConn.value == nil {
+		return nil, errors.New("gateway auth-service gRPC 连接未初始化")
 	}
 	if userServiceConn.value == nil {
 		return nil, errors.New("gateway user-service gRPC 连接未初始化")
@@ -88,6 +93,7 @@ func NewGatewayApp(
 		asyncPool:           asyncPool,
 		asyncReleaseTimeout: time.Duration(asyncReleaseTimeout),
 		redisClient:         redisClient,
+		authServiceConn:     authServiceConn,
 		userServiceConn:     userServiceConn,
 		relationServiceConn: relationServiceConn,
 		msgServiceConn:      msgServiceConn,
@@ -155,6 +161,11 @@ func (a *GatewayApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 msg-service gRPC 连接失败: %w", err))
 		}
 	}
+	if a.authServiceConn.value != nil {
+		if err := a.authServiceConn.value.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 auth-service gRPC 连接失败: %w", err))
+		}
+	}
 	if a.relationServiceConn.value != nil {
 		if err := a.relationServiceConn.value.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 relation-service gRPC 连接失败: %w", err))
@@ -198,7 +209,7 @@ func (a *GatewayApp) installGatewayGlobals(ctx context.Context) {
 		logger.String("blacklist_key", rediskey.GatewayIPBlacklistKey()),
 	)
 
-	deviceRPCClient := userpb.NewDeviceServiceClient(a.userServiceConn.value)
+	deviceRPCClient := authpb.NewDeviceServiceClient(a.authServiceConn.value)
 	if err := middleware.InitDeviceActiveSyncer(a.deviceActiveConfig, func(_ context.Context, items []deviceactive.BatchItem) error {
 		const batchSize = 1000
 		var firstErr error
@@ -207,15 +218,15 @@ func (a *GatewayApp) installGatewayGlobals(ctx context.Context) {
 			if end > len(items) {
 				end = len(items)
 			}
-			activeItems := make([]*userpb.UpdateDeviceActiveItem, 0, end-start)
+			activeItems := make([]*authpb.UpdateDeviceActiveItem, 0, end-start)
 			for i := start; i < end; i++ {
-				activeItems = append(activeItems, &userpb.UpdateDeviceActiveItem{
+				activeItems = append(activeItems, &authpb.UpdateDeviceActiveItem{
 					UserUuid: items[i].UserUUID,
 					DeviceId: items[i].DeviceID,
 				})
 			}
 			rpcCtx, cancel := context.WithTimeout(context.Background(), a.deviceActiveConfig.RPCTimeout)
-			_, err := deviceRPCClient.UpdateDeviceActive(rpcCtx, &userpb.UpdateDeviceActiveRequest{Items: activeItems})
+			_, err := deviceRPCClient.UpdateDeviceActive(rpcCtx, &authpb.UpdateDeviceActiveRequest{Items: activeItems})
 			cancel()
 			if err != nil && firstErr == nil {
 				firstErr = err

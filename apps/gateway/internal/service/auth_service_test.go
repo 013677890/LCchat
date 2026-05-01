@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 
@@ -18,66 +18,66 @@ import (
 type fakeGatewayAuthUserClient struct {
 	gatewaypb.UserServiceClient
 
-	loginFn          func(context.Context, *userpb.LoginRequest) (*userpb.LoginResponse, error)
-	registerFn       func(context.Context, *userpb.RegisterRequest) (*userpb.RegisterResponse, error)
-	sendVerifyCodeFn func(context.Context, *userpb.SendVerifyCodeRequest) (*userpb.SendVerifyCodeResponse, error)
-	loginByCodeFn    func(context.Context, *userpb.LoginByCodeRequest) (*userpb.LoginByCodeResponse, error)
-	logoutFn         func(context.Context, *userpb.LogoutRequest) (*userpb.LogoutResponse, error)
-	resetPasswordFn  func(context.Context, *userpb.ResetPasswordRequest) (*userpb.ResetPasswordResponse, error)
-	refreshTokenFn   func(context.Context, *userpb.RefreshTokenRequest) (*userpb.RefreshTokenResponse, error)
-	verifyCodeFn     func(context.Context, *userpb.VerifyCodeRequest) (*userpb.VerifyCodeResponse, error)
+	loginFn          func(context.Context, *authpb.LoginRequest) (*authpb.LoginResponse, error)
+	registerFn       func(context.Context, *authpb.RegisterRequest) (*authpb.RegisterResponse, error)
+	sendVerifyCodeFn func(context.Context, *authpb.SendVerifyCodeRequest) (*authpb.SendVerifyCodeResponse, error)
+	loginByCodeFn    func(context.Context, *authpb.LoginByCodeRequest) (*authpb.LoginByCodeResponse, error)
+	logoutFn         func(context.Context, *authpb.LogoutRequest) (*authpb.LogoutResponse, error)
+	resetPasswordFn  func(context.Context, *authpb.ResetPasswordRequest) (*authpb.ResetPasswordResponse, error)
+	refreshTokenFn   func(context.Context, *authpb.RefreshTokenRequest) (*authpb.RefreshTokenResponse, error)
+	verifyCodeFn     func(context.Context, *authpb.VerifyCodeRequest) (*authpb.VerifyCodeResponse, error)
 }
 
-func (f *fakeGatewayAuthUserClient) Login(ctx context.Context, req *userpb.LoginRequest) (*userpb.LoginResponse, error) {
+func (f *fakeGatewayAuthUserClient) Login(ctx context.Context, req *authpb.LoginRequest) (*authpb.LoginResponse, error) {
 	if f.loginFn == nil {
 		return nil, errors.New("unexpected Login call")
 	}
 	return f.loginFn(ctx, req)
 }
 
-func (f *fakeGatewayAuthUserClient) Register(ctx context.Context, req *userpb.RegisterRequest) (*userpb.RegisterResponse, error) {
+func (f *fakeGatewayAuthUserClient) Register(ctx context.Context, req *authpb.RegisterRequest) (*authpb.RegisterResponse, error) {
 	if f.registerFn == nil {
 		return nil, errors.New("unexpected Register call")
 	}
 	return f.registerFn(ctx, req)
 }
 
-func (f *fakeGatewayAuthUserClient) SendVerifyCode(ctx context.Context, req *userpb.SendVerifyCodeRequest) (*userpb.SendVerifyCodeResponse, error) {
+func (f *fakeGatewayAuthUserClient) SendVerifyCode(ctx context.Context, req *authpb.SendVerifyCodeRequest) (*authpb.SendVerifyCodeResponse, error) {
 	if f.sendVerifyCodeFn == nil {
 		return nil, errors.New("unexpected SendVerifyCode call")
 	}
 	return f.sendVerifyCodeFn(ctx, req)
 }
 
-func (f *fakeGatewayAuthUserClient) LoginByCode(ctx context.Context, req *userpb.LoginByCodeRequest) (*userpb.LoginByCodeResponse, error) {
+func (f *fakeGatewayAuthUserClient) LoginByCode(ctx context.Context, req *authpb.LoginByCodeRequest) (*authpb.LoginByCodeResponse, error) {
 	if f.loginByCodeFn == nil {
 		return nil, errors.New("unexpected LoginByCode call")
 	}
 	return f.loginByCodeFn(ctx, req)
 }
 
-func (f *fakeGatewayAuthUserClient) Logout(ctx context.Context, req *userpb.LogoutRequest) (*userpb.LogoutResponse, error) {
+func (f *fakeGatewayAuthUserClient) Logout(ctx context.Context, req *authpb.LogoutRequest) (*authpb.LogoutResponse, error) {
 	if f.logoutFn == nil {
 		return nil, errors.New("unexpected Logout call")
 	}
 	return f.logoutFn(ctx, req)
 }
 
-func (f *fakeGatewayAuthUserClient) ResetPassword(ctx context.Context, req *userpb.ResetPasswordRequest) (*userpb.ResetPasswordResponse, error) {
+func (f *fakeGatewayAuthUserClient) ResetPassword(ctx context.Context, req *authpb.ResetPasswordRequest) (*authpb.ResetPasswordResponse, error) {
 	if f.resetPasswordFn == nil {
 		return nil, errors.New("unexpected ResetPassword call")
 	}
 	return f.resetPasswordFn(ctx, req)
 }
 
-func (f *fakeGatewayAuthUserClient) RefreshToken(ctx context.Context, req *userpb.RefreshTokenRequest) (*userpb.RefreshTokenResponse, error) {
+func (f *fakeGatewayAuthUserClient) RefreshToken(ctx context.Context, req *authpb.RefreshTokenRequest) (*authpb.RefreshTokenResponse, error) {
 	if f.refreshTokenFn == nil {
 		return nil, errors.New("unexpected RefreshToken call")
 	}
 	return f.refreshTokenFn(ctx, req)
 }
 
-func (f *fakeGatewayAuthUserClient) VerifyCode(ctx context.Context, req *userpb.VerifyCodeRequest) (*userpb.VerifyCodeResponse, error) {
+func (f *fakeGatewayAuthUserClient) VerifyCode(ctx context.Context, req *authpb.VerifyCodeRequest) (*authpb.VerifyCodeResponse, error) {
 	if f.verifyCodeFn == nil {
 		return nil, errors.New("unexpected VerifyCode call")
 	}
@@ -87,17 +87,17 @@ func (f *fakeGatewayAuthUserClient) VerifyCode(ctx context.Context, req *userpb.
 func TestGatewayAuthServiceLogin(t *testing.T) {
 	t.Run("success_with_mapping", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			loginFn: func(_ context.Context, req *userpb.LoginRequest) (*userpb.LoginResponse, error) {
+			loginFn: func(_ context.Context, req *authpb.LoginRequest) (*authpb.LoginResponse, error) {
 				require.Equal(t, "acc", req.Account)
 				require.Equal(t, "pass123", req.Password)
 				require.NotNil(t, req.DeviceInfo)
 				require.Equal(t, "ios", req.DeviceInfo.Platform)
-				return &userpb.LoginResponse{
+				return &authpb.LoginResponse{
 					AccessToken:  "atk",
 					RefreshToken: "rtk",
 					TokenType:    "Bearer",
 					ExpiresIn:    7200,
-					UserInfo:     &userpb.UserInfo{Uuid: "u1", Nickname: "n1"},
+					UserInfo:     &authpb.LoginUserInfo{Uuid: "u1", Nickname: "n1"},
 				}, nil
 			},
 		}
@@ -120,7 +120,7 @@ func TestGatewayAuthServiceLogin(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayAuthUserClient{
-			loginFn: func(_ context.Context, _ *userpb.LoginRequest) (*userpb.LoginResponse, error) {
+			loginFn: func(_ context.Context, _ *authpb.LoginRequest) (*authpb.LoginResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -136,8 +136,8 @@ func TestGatewayAuthServiceLogin(t *testing.T) {
 
 	t.Run("nil_user_info_returns_internal_code", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			loginFn: func(_ context.Context, _ *userpb.LoginRequest) (*userpb.LoginResponse, error) {
-				return &userpb.LoginResponse{
+			loginFn: func(_ context.Context, _ *authpb.LoginRequest) (*authpb.LoginResponse, error) {
+				return &authpb.LoginResponse{
 					AccessToken: "atk",
 				}, nil
 			},
@@ -156,13 +156,13 @@ func TestGatewayAuthServiceLogin(t *testing.T) {
 func TestGatewayAuthServiceRegister(t *testing.T) {
 	t.Run("success_with_mapping", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			registerFn: func(_ context.Context, req *userpb.RegisterRequest) (*userpb.RegisterResponse, error) {
+			registerFn: func(_ context.Context, req *authpb.RegisterRequest) (*authpb.RegisterResponse, error) {
 				require.Equal(t, "a@test.com", req.Email)
 				require.Equal(t, "pass123", req.Password)
 				require.Equal(t, "123456", req.VerifyCode)
 				require.Equal(t, "n1", req.Nickname)
 				require.Equal(t, "13800138000", req.Telephone)
-				return &userpb.RegisterResponse{
+				return &authpb.RegisterResponse{
 					UserUuid:  "u1",
 					Email:     req.Email,
 					Telephone: req.Telephone,
@@ -188,7 +188,7 @@ func TestGatewayAuthServiceRegister(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayAuthUserClient{
-			registerFn: func(_ context.Context, _ *userpb.RegisterRequest) (*userpb.RegisterResponse, error) {
+			registerFn: func(_ context.Context, _ *authpb.RegisterRequest) (*authpb.RegisterResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -205,8 +205,8 @@ func TestGatewayAuthServiceRegister(t *testing.T) {
 
 	t.Run("empty_user_uuid_returns_internal_code", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			registerFn: func(_ context.Context, _ *userpb.RegisterRequest) (*userpb.RegisterResponse, error) {
-				return &userpb.RegisterResponse{}, nil
+			registerFn: func(_ context.Context, _ *authpb.RegisterRequest) (*authpb.RegisterResponse, error) {
+				return &authpb.RegisterResponse{}, nil
 			},
 		}
 		svc := NewAuthService(client)
@@ -224,10 +224,10 @@ func TestGatewayAuthServiceRegister(t *testing.T) {
 func TestGatewayAuthServiceSendVerifyCode(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			sendVerifyCodeFn: func(_ context.Context, req *userpb.SendVerifyCodeRequest) (*userpb.SendVerifyCodeResponse, error) {
+			sendVerifyCodeFn: func(_ context.Context, req *authpb.SendVerifyCodeRequest) (*authpb.SendVerifyCodeResponse, error) {
 				require.Equal(t, "a@test.com", req.Email)
 				require.Equal(t, int32(2), req.Type)
-				return &userpb.SendVerifyCodeResponse{ExpireSeconds: 120}, nil
+				return &authpb.SendVerifyCodeResponse{ExpireSeconds: 120}, nil
 			},
 		}
 		svc := NewAuthService(client)
@@ -244,7 +244,7 @@ func TestGatewayAuthServiceSendVerifyCode(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayAuthUserClient{
-			sendVerifyCodeFn: func(_ context.Context, _ *userpb.SendVerifyCodeRequest) (*userpb.SendVerifyCodeResponse, error) {
+			sendVerifyCodeFn: func(_ context.Context, _ *authpb.SendVerifyCodeRequest) (*authpb.SendVerifyCodeResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -262,17 +262,17 @@ func TestGatewayAuthServiceSendVerifyCode(t *testing.T) {
 func TestGatewayAuthServiceLoginByCode(t *testing.T) {
 	t.Run("success_with_mapping", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			loginByCodeFn: func(_ context.Context, req *userpb.LoginByCodeRequest) (*userpb.LoginByCodeResponse, error) {
+			loginByCodeFn: func(_ context.Context, req *authpb.LoginByCodeRequest) (*authpb.LoginByCodeResponse, error) {
 				require.Equal(t, "a@test.com", req.Email)
 				require.Equal(t, "123456", req.VerifyCode)
 				require.NotNil(t, req.DeviceInfo)
 				require.Equal(t, "android", req.DeviceInfo.Platform)
-				return &userpb.LoginByCodeResponse{
+				return &authpb.LoginByCodeResponse{
 					AccessToken:  "atk",
 					RefreshToken: "rtk",
 					TokenType:    "Bearer",
 					ExpiresIn:    7200,
-					UserInfo: &userpb.UserInfo{
+					UserInfo: &authpb.LoginUserInfo{
 						Uuid:     "u2",
 						Nickname: "n2",
 					},
@@ -297,7 +297,7 @@ func TestGatewayAuthServiceLoginByCode(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayAuthUserClient{
-			loginByCodeFn: func(_ context.Context, _ *userpb.LoginByCodeRequest) (*userpb.LoginByCodeResponse, error) {
+			loginByCodeFn: func(_ context.Context, _ *authpb.LoginByCodeRequest) (*authpb.LoginByCodeResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -313,8 +313,8 @@ func TestGatewayAuthServiceLoginByCode(t *testing.T) {
 
 	t.Run("nil_user_info_returns_internal_code", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			loginByCodeFn: func(_ context.Context, _ *userpb.LoginByCodeRequest) (*userpb.LoginByCodeResponse, error) {
-				return &userpb.LoginByCodeResponse{
+			loginByCodeFn: func(_ context.Context, _ *authpb.LoginByCodeRequest) (*authpb.LoginByCodeResponse, error) {
+				return &authpb.LoginByCodeResponse{
 					AccessToken: "atk",
 				}, nil
 			},
@@ -333,9 +333,9 @@ func TestGatewayAuthServiceLoginByCode(t *testing.T) {
 func TestGatewayAuthServiceLogout(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			logoutFn: func(_ context.Context, req *userpb.LogoutRequest) (*userpb.LogoutResponse, error) {
+			logoutFn: func(_ context.Context, req *authpb.LogoutRequest) (*authpb.LogoutResponse, error) {
 				require.Equal(t, "d1", req.DeviceId)
-				return &userpb.LogoutResponse{}, nil
+				return &authpb.LogoutResponse{}, nil
 			},
 		}
 		svc := NewAuthService(client)
@@ -348,7 +348,7 @@ func TestGatewayAuthServiceLogout(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayAuthUserClient{
-			logoutFn: func(_ context.Context, _ *userpb.LogoutRequest) (*userpb.LogoutResponse, error) {
+			logoutFn: func(_ context.Context, _ *authpb.LogoutRequest) (*authpb.LogoutResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -363,11 +363,11 @@ func TestGatewayAuthServiceLogout(t *testing.T) {
 func TestGatewayAuthServiceResetPassword(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			resetPasswordFn: func(_ context.Context, req *userpb.ResetPasswordRequest) (*userpb.ResetPasswordResponse, error) {
+			resetPasswordFn: func(_ context.Context, req *authpb.ResetPasswordRequest) (*authpb.ResetPasswordResponse, error) {
 				require.Equal(t, "a@test.com", req.Email)
 				require.Equal(t, "123456", req.VerifyCode)
 				require.Equal(t, "pass999", req.NewPassword)
-				return &userpb.ResetPasswordResponse{}, nil
+				return &authpb.ResetPasswordResponse{}, nil
 			},
 		}
 		svc := NewAuthService(client)
@@ -384,7 +384,7 @@ func TestGatewayAuthServiceResetPassword(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayAuthUserClient{
-			resetPasswordFn: func(_ context.Context, _ *userpb.ResetPasswordRequest) (*userpb.ResetPasswordResponse, error) {
+			resetPasswordFn: func(_ context.Context, _ *authpb.ResetPasswordRequest) (*authpb.ResetPasswordResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -403,9 +403,9 @@ func TestGatewayAuthServiceResetPassword(t *testing.T) {
 func TestGatewayAuthServiceRefreshToken(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			refreshTokenFn: func(_ context.Context, req *userpb.RefreshTokenRequest) (*userpb.RefreshTokenResponse, error) {
+			refreshTokenFn: func(_ context.Context, req *authpb.RefreshTokenRequest) (*authpb.RefreshTokenResponse, error) {
 				require.Equal(t, "rtk", req.RefreshToken)
-				return &userpb.RefreshTokenResponse{
+				return &authpb.RefreshTokenResponse{
 					AccessToken: "atk2",
 					TokenType:   "Bearer",
 					ExpiresIn:   7200,
@@ -427,7 +427,7 @@ func TestGatewayAuthServiceRefreshToken(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayAuthUserClient{
-			refreshTokenFn: func(_ context.Context, _ *userpb.RefreshTokenRequest) (*userpb.RefreshTokenResponse, error) {
+			refreshTokenFn: func(_ context.Context, _ *authpb.RefreshTokenRequest) (*authpb.RefreshTokenResponse, error) {
 				return nil, wantErr
 			},
 		}
@@ -446,11 +446,11 @@ func TestGatewayAuthServiceRefreshToken(t *testing.T) {
 func TestGatewayAuthServiceVerifyCode(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		client := &fakeGatewayAuthUserClient{
-			verifyCodeFn: func(_ context.Context, req *userpb.VerifyCodeRequest) (*userpb.VerifyCodeResponse, error) {
+			verifyCodeFn: func(_ context.Context, req *authpb.VerifyCodeRequest) (*authpb.VerifyCodeResponse, error) {
 				require.Equal(t, "a@test.com", req.Email)
 				require.Equal(t, "123456", req.VerifyCode)
 				require.Equal(t, int32(2), req.Type)
-				return &userpb.VerifyCodeResponse{Valid: true}, nil
+				return &authpb.VerifyCodeResponse{Valid: true}, nil
 			},
 		}
 		svc := NewAuthService(client)
@@ -468,7 +468,7 @@ func TestGatewayAuthServiceVerifyCode(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		client := &fakeGatewayAuthUserClient{
-			verifyCodeFn: func(_ context.Context, _ *userpb.VerifyCodeRequest) (*userpb.VerifyCodeResponse, error) {
+			verifyCodeFn: func(_ context.Context, _ *authpb.VerifyCodeRequest) (*authpb.VerifyCodeResponse, error) {
 				return nil, wantErr
 			},
 		}

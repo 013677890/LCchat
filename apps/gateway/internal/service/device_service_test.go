@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/stretchr/testify/assert"
@@ -18,36 +18,36 @@ import (
 type fakeGatewayDeviceClient struct {
 	gatewaypb.UserServiceClient
 
-	getDeviceListFn       func(context.Context, *userpb.GetDeviceListRequest) (*userpb.GetDeviceListResponse, error)
-	kickDeviceFn          func(context.Context, *userpb.KickDeviceRequest) (*userpb.KickDeviceResponse, error)
-	getOnlineStatusFn     func(context.Context, *userpb.GetOnlineStatusRequest) (*userpb.GetOnlineStatusResponse, error)
-	batchGetOnlineStatusFn func(context.Context, *userpb.BatchGetOnlineStatusRequest) (*userpb.BatchGetOnlineStatusResponse, error)
+	getDeviceListFn        func(context.Context, *authpb.GetDeviceListRequest) (*authpb.GetDeviceListResponse, error)
+	kickDeviceFn           func(context.Context, *authpb.KickDeviceRequest) (*authpb.KickDeviceResponse, error)
+	getOnlineStatusFn      func(context.Context, *authpb.GetOnlineStatusRequest) (*authpb.GetOnlineStatusResponse, error)
+	batchGetOnlineStatusFn func(context.Context, *authpb.BatchGetOnlineStatusRequest) (*authpb.BatchGetOnlineStatusResponse, error)
 }
 
-func (f *fakeGatewayDeviceClient) GetDeviceList(ctx context.Context, req *userpb.GetDeviceListRequest) (*userpb.GetDeviceListResponse, error) {
+func (f *fakeGatewayDeviceClient) GetDeviceList(ctx context.Context, req *authpb.GetDeviceListRequest) (*authpb.GetDeviceListResponse, error) {
 	if f.getDeviceListFn == nil {
-		return &userpb.GetDeviceListResponse{}, nil
+		return &authpb.GetDeviceListResponse{}, nil
 	}
 	return f.getDeviceListFn(ctx, req)
 }
 
-func (f *fakeGatewayDeviceClient) KickDevice(ctx context.Context, req *userpb.KickDeviceRequest) (*userpb.KickDeviceResponse, error) {
+func (f *fakeGatewayDeviceClient) KickDevice(ctx context.Context, req *authpb.KickDeviceRequest) (*authpb.KickDeviceResponse, error) {
 	if f.kickDeviceFn == nil {
-		return &userpb.KickDeviceResponse{}, nil
+		return &authpb.KickDeviceResponse{}, nil
 	}
 	return f.kickDeviceFn(ctx, req)
 }
 
-func (f *fakeGatewayDeviceClient) GetOnlineStatus(ctx context.Context, req *userpb.GetOnlineStatusRequest) (*userpb.GetOnlineStatusResponse, error) {
+func (f *fakeGatewayDeviceClient) GetOnlineStatus(ctx context.Context, req *authpb.GetOnlineStatusRequest) (*authpb.GetOnlineStatusResponse, error) {
 	if f.getOnlineStatusFn == nil {
-		return &userpb.GetOnlineStatusResponse{}, nil
+		return &authpb.GetOnlineStatusResponse{}, nil
 	}
 	return f.getOnlineStatusFn(ctx, req)
 }
 
-func (f *fakeGatewayDeviceClient) BatchGetOnlineStatus(ctx context.Context, req *userpb.BatchGetOnlineStatusRequest) (*userpb.BatchGetOnlineStatusResponse, error) {
+func (f *fakeGatewayDeviceClient) BatchGetOnlineStatus(ctx context.Context, req *authpb.BatchGetOnlineStatusRequest) (*authpb.BatchGetOnlineStatusResponse, error) {
 	if f.batchGetOnlineStatusFn == nil {
-		return &userpb.BatchGetOnlineStatusResponse{}, nil
+		return &authpb.BatchGetOnlineStatusResponse{}, nil
 	}
 	return f.batchGetOnlineStatusFn(ctx, req)
 }
@@ -57,9 +57,9 @@ func TestGatewayDeviceServiceGetDeviceList(t *testing.T) {
 		ts := time.Date(2026, 2, 6, 12, 0, 0, 0, time.UTC)
 		tsMilli := ts.UnixMilli()
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			getDeviceListFn: func(_ context.Context, _ *userpb.GetDeviceListRequest) (*userpb.GetDeviceListResponse, error) {
-				return &userpb.GetDeviceListResponse{
-					Devices: []*userpb.DeviceItem{
+			getDeviceListFn: func(_ context.Context, _ *authpb.GetDeviceListRequest) (*authpb.GetDeviceListResponse, error) {
+				return &authpb.GetDeviceListResponse{
+					Devices: []*authpb.DeviceItem{
 						{
 							DeviceId:        "d1",
 							DeviceName:      "iPhone",
@@ -86,7 +86,7 @@ func TestGatewayDeviceServiceGetDeviceList(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			getDeviceListFn: func(_ context.Context, _ *userpb.GetDeviceListRequest) (*userpb.GetDeviceListResponse, error) {
+			getDeviceListFn: func(_ context.Context, _ *authpb.GetDeviceListRequest) (*authpb.GetDeviceListResponse, error) {
 				return nil, wantErr
 			},
 		})
@@ -99,9 +99,9 @@ func TestGatewayDeviceServiceGetDeviceList(t *testing.T) {
 func TestGatewayDeviceServiceKickDevice(t *testing.T) {
 	t.Run("success_mapping", func(t *testing.T) {
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			kickDeviceFn: func(_ context.Context, req *userpb.KickDeviceRequest) (*userpb.KickDeviceResponse, error) {
+			kickDeviceFn: func(_ context.Context, req *authpb.KickDeviceRequest) (*authpb.KickDeviceResponse, error) {
 				require.Equal(t, "d1", req.DeviceId)
-				return &userpb.KickDeviceResponse{}, nil
+				return &authpb.KickDeviceResponse{}, nil
 			},
 		})
 		resp, err := svc.KickDevice(context.Background(), &dto.KickDeviceRequest{DeviceID: "d1"})
@@ -112,7 +112,7 @@ func TestGatewayDeviceServiceKickDevice(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc failed")
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			kickDeviceFn: func(_ context.Context, _ *userpb.KickDeviceRequest) (*userpb.KickDeviceResponse, error) {
+			kickDeviceFn: func(_ context.Context, _ *authpb.KickDeviceRequest) (*authpb.KickDeviceResponse, error) {
 				return nil, wantErr
 			},
 		})
@@ -126,10 +126,10 @@ func TestGatewayDeviceServiceGetOnlineStatus(t *testing.T) {
 	t.Run("success_mapping", func(t *testing.T) {
 		ts := time.Date(2026, 2, 6, 12, 30, 0, 0, time.UTC).UnixMilli()
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			getOnlineStatusFn: func(_ context.Context, req *userpb.GetOnlineStatusRequest) (*userpb.GetOnlineStatusResponse, error) {
+			getOnlineStatusFn: func(_ context.Context, req *authpb.GetOnlineStatusRequest) (*authpb.GetOnlineStatusResponse, error) {
 				require.Equal(t, "u2", req.UserUuid)
-				return &userpb.GetOnlineStatusResponse{
-					Status: &userpb.OnlineStatus{
+				return &authpb.GetOnlineStatusResponse{
+					Status: &authpb.OnlineStatus{
 						UserUuid:        "u2",
 						IsOnline:        true,
 						LastSeenAt:      ts,
@@ -150,8 +150,8 @@ func TestGatewayDeviceServiceGetOnlineStatus(t *testing.T) {
 
 	t.Run("status_nil_mapping", func(t *testing.T) {
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			getOnlineStatusFn: func(_ context.Context, _ *userpb.GetOnlineStatusRequest) (*userpb.GetOnlineStatusResponse, error) {
-				return &userpb.GetOnlineStatusResponse{Status: nil}, nil
+			getOnlineStatusFn: func(_ context.Context, _ *authpb.GetOnlineStatusRequest) (*authpb.GetOnlineStatusResponse, error) {
+				return &authpb.GetOnlineStatusResponse{Status: nil}, nil
 			},
 		})
 		resp, err := svc.GetOnlineStatus(context.Background(), &dto.GetOnlineStatusRequest{UserUUID: "u2"})
@@ -166,7 +166,7 @@ func TestGatewayDeviceServiceGetOnlineStatus(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc failed")
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			getOnlineStatusFn: func(_ context.Context, _ *userpb.GetOnlineStatusRequest) (*userpb.GetOnlineStatusResponse, error) {
+			getOnlineStatusFn: func(_ context.Context, _ *authpb.GetOnlineStatusRequest) (*authpb.GetOnlineStatusResponse, error) {
 				return nil, wantErr
 			},
 		})
@@ -180,10 +180,10 @@ func TestGatewayDeviceServiceBatchGetOnlineStatus(t *testing.T) {
 	t.Run("success_mapping", func(t *testing.T) {
 		ts := time.Date(2026, 2, 6, 13, 0, 0, 0, time.UTC).UnixMilli()
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			batchGetOnlineStatusFn: func(_ context.Context, req *userpb.BatchGetOnlineStatusRequest) (*userpb.BatchGetOnlineStatusResponse, error) {
+			batchGetOnlineStatusFn: func(_ context.Context, req *authpb.BatchGetOnlineStatusRequest) (*authpb.BatchGetOnlineStatusResponse, error) {
 				assert.Equal(t, []string{"u1", "u2"}, req.UserUuids)
-				return &userpb.BatchGetOnlineStatusResponse{
-					Users: []*userpb.OnlineStatusItem{
+				return &authpb.BatchGetOnlineStatusResponse{
+					Users: []*authpb.OnlineStatusItem{
 						{UserUuid: "u1", IsOnline: true, LastSeenAt: ts},
 						{UserUuid: "u2", IsOnline: false, LastSeenAt: 0},
 					},
@@ -202,7 +202,7 @@ func TestGatewayDeviceServiceBatchGetOnlineStatus(t *testing.T) {
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc failed")
 		svc := NewDeviceService(&fakeGatewayDeviceClient{
-			batchGetOnlineStatusFn: func(_ context.Context, _ *userpb.BatchGetOnlineStatusRequest) (*userpb.BatchGetOnlineStatusResponse, error) {
+			batchGetOnlineStatusFn: func(_ context.Context, _ *authpb.BatchGetOnlineStatusRequest) (*authpb.BatchGetOnlineStatusResponse, error) {
 				return nil, wantErr
 			},
 		})

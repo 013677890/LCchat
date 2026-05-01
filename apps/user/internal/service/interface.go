@@ -1,8 +1,8 @@
 package service
 
 import (
-	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"context"
+	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 )
 
 // ==================== 认证服务接口 ====================
@@ -75,6 +75,19 @@ type IUserService interface {
 
 	// BatchGetProfile 批量获取用户信息
 	BatchGetProfile(ctx context.Context, req *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error)
+}
+
+// IInternalProfileService 用户内部资料服务接口。
+// 职责：为其他内部服务提供最小必要的资料视图。
+type IInternalProfileService interface {
+	// CreateProfile 创建或确认默认资料存在。
+	CreateProfile(ctx context.Context, req *pb.CreateProfileRequest) (*pb.CreateProfileResponse, error)
+
+	// BatchGetUserCard 批量获取用户卡片信息。
+	BatchGetUserCard(ctx context.Context, req *pb.BatchGetUserCardRequest) (*pb.BatchGetUserCardResponse, error)
+
+	// BatchGetPublicProfile 批量获取公开资料信息。
+	BatchGetPublicProfile(ctx context.Context, req *pb.BatchGetPublicProfileRequest) (*pb.BatchGetPublicProfileResponse, error)
 }
 
 // ==================== 好友服务接口 ====================
@@ -184,6 +197,9 @@ type AuthService = IAuthService
 
 // UserService 别名 IUserService
 type UserService = IUserService
+
+// InternalProfileService 别名 IInternalProfileService
+type InternalProfileService = IInternalProfileService
 
 // FriendService 别名 IFriendService
 type FriendService = IFriendService

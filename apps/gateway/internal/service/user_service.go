@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"time"
 
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
@@ -125,15 +127,84 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 // req: 搜索用户请求
 // 返回: 搜索用户响应
 func (s *UserServiceImpl) SearchUser(ctx context.Context, req *dto.SearchUserRequest) (*dto.SearchUserResponse, error) {
-	//1.调用用户服务搜索用户(gRPC)
+	keyword := strings.TrimSpace(req.Keyword)
+	if util.ValidateEmail(keyword) {
+		return s.searchUserByEmail(ctx, req, keyword)
+	}
+
+	// 1. 非邮箱关键词继续走 user-service 搜索昵称和 UUID。
 	grpcResp, err := s.userClient.SearchUser(ctx, dto.ConvertToProtoSearchUserRequest(req))
 	if err != nil {
 		return nil, err
 	}
-	//2.转换响应
+
+	// 2. 转换响应。
 	resp := dto.ConvertSearchUserResponseFromProto(grpcResp)
 	if resp == nil || len(resp.Items) == 0 {
 		return resp, nil
+	}
+	return s.fillSearchUserFriendStatus(ctx, resp), nil
+
+}
+
+// searchUserByEmail 按邮箱走 auth-service 查账号，再到 user-service 拉资料。
+func (s *UserServiceImpl) searchUserByEmail(ctx context.Context, req *dto.SearchUserRequest, email string) (*dto.SearchUserResponse, error) {
+	accountResp, err := s.userClient.FindAccountByEmail(ctx, &authpb.FindAccountByEmailRequest{Email: email})
+	if err != nil {
+		return nil, err
+	}
+	if accountResp == nil || !accountResp.Found || accountResp.UserUuid == "" {
+		return buildEmptySearchUserResponse(req), nil
+	}
+
+	profileResp, err := s.userClient.BatchGetProfile(ctx, &userpb.BatchGetProfileRequest{UserUuids: []string{accountResp.UserUuid}})
+	if err != nil {
+		return nil, err
+	}
+	if profileResp == nil || len(profileResp.Users) == 0 || profileResp.Users[0] == nil {
+		return buildEmptySearchUserResponse(req), nil
+	}
+
+	items := make([]*dto.SimpleUserItem, 0, 1)
+	if req.Page <= 1 && req.PageSize > 0 {
+		profile := profileResp.Users[0]
+		items = append(items, &dto.SimpleUserItem{
+			UUID:      profile.Uuid,
+			Nickname:  profile.Nickname,
+			Avatar:    profile.Avatar,
+			Signature: profile.Signature,
+		})
+	}
+
+	resp := &dto.SearchUserResponse{
+		Items: items,
+		Pagination: &dto.PaginationInfo{
+			Page:       req.Page,
+			PageSize:   req.PageSize,
+			Total:      1,
+			TotalPages: 1,
+		},
+	}
+	return s.fillSearchUserFriendStatus(ctx, resp), nil
+}
+
+// buildEmptySearchUserResponse 构造空的搜索响应，保持分页结构稳定。
+func buildEmptySearchUserResponse(req *dto.SearchUserRequest) *dto.SearchUserResponse {
+	return &dto.SearchUserResponse{
+		Items: []*dto.SimpleUserItem{},
+		Pagination: &dto.PaginationInfo{
+			Page:       req.Page,
+			PageSize:   req.PageSize,
+			Total:      0,
+			TotalPages: 0,
+		},
+	}
+}
+
+// fillSearchUserFriendStatus 尝试批量补充好友关系，失败时按非好友降级。
+func (s *UserServiceImpl) fillSearchUserFriendStatus(ctx context.Context, resp *dto.SearchUserResponse) *dto.SearchUserResponse {
+	if resp == nil || len(resp.Items) == 0 {
+		return resp
 	}
 
 	// 3. 尝试补充好友关系（批量判断，失败则降级不填）
@@ -175,7 +246,7 @@ func (s *UserServiceImpl) SearchUser(ctx context.Context, req *dto.SearchUserReq
 			}
 		}
 	}
-	return resp, nil
+	return resp
 }
 
 // UpdateProfile 更新基本信息

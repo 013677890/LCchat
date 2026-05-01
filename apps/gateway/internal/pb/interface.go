@@ -2,6 +2,7 @@ package pb
 
 import (
 	"context"
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
@@ -44,28 +45,31 @@ type MsgServiceClient interface {
 type UserServiceClient interface {
 	// ==================== 认证服务 ====================
 	// Login 用户登录
-	Login(ctx context.Context, req *userpb.LoginRequest) (*userpb.LoginResponse, error)
+	Login(ctx context.Context, req *authpb.LoginRequest) (*authpb.LoginResponse, error)
 
 	// LoginByCode 验证码登录
-	LoginByCode(ctx context.Context, req *userpb.LoginByCodeRequest) (*userpb.LoginByCodeResponse, error)
+	LoginByCode(ctx context.Context, req *authpb.LoginByCodeRequest) (*authpb.LoginByCodeResponse, error)
 
 	// SendVerifyCode 发送验证码
-	SendVerifyCode(ctx context.Context, req *userpb.SendVerifyCodeRequest) (*userpb.SendVerifyCodeResponse, error)
+	SendVerifyCode(ctx context.Context, req *authpb.SendVerifyCodeRequest) (*authpb.SendVerifyCodeResponse, error)
 
 	// VerifyCode 校验验证码
-	VerifyCode(ctx context.Context, req *userpb.VerifyCodeRequest) (*userpb.VerifyCodeResponse, error)
+	VerifyCode(ctx context.Context, req *authpb.VerifyCodeRequest) (*authpb.VerifyCodeResponse, error)
 
 	// Register 用户注册
-	Register(ctx context.Context, req *userpb.RegisterRequest) (*userpb.RegisterResponse, error)
+	Register(ctx context.Context, req *authpb.RegisterRequest) (*authpb.RegisterResponse, error)
 
 	// RefreshToken 刷新Token
-	RefreshToken(ctx context.Context, req *userpb.RefreshTokenRequest) (*userpb.RefreshTokenResponse, error)
+	RefreshToken(ctx context.Context, req *authpb.RefreshTokenRequest) (*authpb.RefreshTokenResponse, error)
 
 	// Logout 用户登出
-	Logout(ctx context.Context, req *userpb.LogoutRequest) (*userpb.LogoutResponse, error)
+	Logout(ctx context.Context, req *authpb.LogoutRequest) (*authpb.LogoutResponse, error)
 
 	// ResetPassword 重置密码
-	ResetPassword(ctx context.Context, req *userpb.ResetPasswordRequest) (*userpb.ResetPasswordResponse, error)
+	ResetPassword(ctx context.Context, req *authpb.ResetPasswordRequest) (*authpb.ResetPasswordResponse, error)
+
+	// FindAccountByEmail 按邮箱查找账号（内部调用）
+	FindAccountByEmail(ctx context.Context, req *authpb.FindAccountByEmailRequest) (*authpb.FindAccountByEmailResponse, error)
 
 	// ==================== 用户信息服务 ====================
 	// GetProfile 获取个人信息
@@ -84,13 +88,13 @@ type UserServiceClient interface {
 	UploadAvatar(ctx context.Context, req *userpb.UploadAvatarRequest) (*userpb.UploadAvatarResponse, error)
 
 	// ChangePassword 修改密码
-	ChangePassword(ctx context.Context, req *userpb.ChangePasswordRequest) (*userpb.ChangePasswordResponse, error)
+	ChangePassword(ctx context.Context, req *authpb.ChangePasswordRequest) (*authpb.ChangePasswordResponse, error)
 
 	// ChangeEmail 绑定/换绑邮箱
-	ChangeEmail(ctx context.Context, req *userpb.ChangeEmailRequest) (*userpb.ChangeEmailResponse, error)
+	ChangeEmail(ctx context.Context, req *authpb.ChangeEmailRequest) (*authpb.ChangeEmailResponse, error)
 
 	// ChangeTelephone 绑定/换绑手机
-	ChangeTelephone(ctx context.Context, req *userpb.ChangeTelephoneRequest) (*userpb.ChangeTelephoneResponse, error)
+	ChangeTelephone(ctx context.Context, req *authpb.ChangeTelephoneRequest) (*authpb.ChangeTelephoneResponse, error)
 
 	// GetQRCode 获取用户二维码
 	GetQRCode(ctx context.Context, req *userpb.GetQRCodeRequest) (*userpb.GetQRCodeResponse, error)
@@ -99,7 +103,7 @@ type UserServiceClient interface {
 	ParseQRCode(ctx context.Context, req *userpb.ParseQRCodeRequest) (*userpb.ParseQRCodeResponse, error)
 
 	// DeleteAccount 注销账号
-	DeleteAccount(ctx context.Context, req *userpb.DeleteAccountRequest) (*userpb.DeleteAccountResponse, error)
+	DeleteAccount(ctx context.Context, req *authpb.DeleteAccountRequest) (*authpb.DeleteAccountResponse, error)
 
 	// BatchGetProfile 批量获取用户信息
 	BatchGetProfile(ctx context.Context, req *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error)
@@ -165,14 +169,14 @@ type UserServiceClient interface {
 
 	// ==================== 设备会话服务 ====================
 	// GetDeviceList 获取设备列表
-	GetDeviceList(ctx context.Context, req *userpb.GetDeviceListRequest) (*userpb.GetDeviceListResponse, error)
+	GetDeviceList(ctx context.Context, req *authpb.GetDeviceListRequest) (*authpb.GetDeviceListResponse, error)
 
 	// KickDevice 踢出设备
-	KickDevice(ctx context.Context, req *userpb.KickDeviceRequest) (*userpb.KickDeviceResponse, error)
+	KickDevice(ctx context.Context, req *authpb.KickDeviceRequest) (*authpb.KickDeviceResponse, error)
 
 	// GetOnlineStatus 获取用户在线状态
-	GetOnlineStatus(ctx context.Context, req *userpb.GetOnlineStatusRequest) (*userpb.GetOnlineStatusResponse, error)
+	GetOnlineStatus(ctx context.Context, req *authpb.GetOnlineStatusRequest) (*authpb.GetOnlineStatusResponse, error)
 
 	// BatchGetOnlineStatus 批量获取在线状态
-	BatchGetOnlineStatus(ctx context.Context, req *userpb.BatchGetOnlineStatusRequest) (*userpb.BatchGetOnlineStatusResponse, error)
+	BatchGetOnlineStatus(ctx context.Context, req *authpb.BatchGetOnlineStatusRequest) (*authpb.BatchGetOnlineStatusResponse, error)
 }

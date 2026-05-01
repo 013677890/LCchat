@@ -22,12 +22,12 @@ import (
 
 // ConnectApp 统一管理 connect 服务的运行与资源释放。
 type ConnectApp struct {
-	logger            *zap.Logger
-	httpServer        *connectserver.Server
-	grpcServer        *connectgrpc.Server
-	connManager       *manager.ConnectionManager
-	connectService    *svc.ConnectService
-	userGRPCConn      *googlegrpc.ClientConn
+	logger             *zap.Logger
+	httpServer         *connectserver.Server
+	grpcServer         *connectgrpc.Server
+	connManager        *manager.ConnectionManager
+	connectService     *svc.ConnectService
+	authGRPCConn       *googlegrpc.ClientConn
 	deviceActiveConfig config.DeviceActiveConfig
 }
 
@@ -38,7 +38,7 @@ func NewConnectApp(
 	grpcServer *connectgrpc.Server,
 	connManager *manager.ConnectionManager,
 	connectService *svc.ConnectService,
-	userGRPCConn *googlegrpc.ClientConn,
+	authGRPCConn *googlegrpc.ClientConn,
 	deviceActiveConfig config.DeviceActiveConfig,
 ) (*ConnectApp, error) {
 	if log == nil {
@@ -63,7 +63,7 @@ func NewConnectApp(
 		grpcServer:         grpcServer,
 		connManager:        connManager,
 		connectService:     connectService,
-		userGRPCConn:       userGRPCConn,
+		authGRPCConn:       authGRPCConn,
 		deviceActiveConfig: deviceActiveConfig,
 	}, nil
 }
@@ -121,9 +121,9 @@ func (a *ConnectApp) Shutdown(ctx context.Context) error {
 		a.connectService.ShutdownStatusWorkers()
 		a.connectService.RemoveRoutesByConnectAddr(ctx, os.Getenv("CONNECT_SELF_GRPC_ADDR"))
 	}
-	if a.userGRPCConn != nil {
-		if err := a.userGRPCConn.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("关闭 user-service gRPC 连接失败: %w", err))
+	if a.authGRPCConn != nil {
+		if err := a.authGRPCConn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 auth-service gRPC 连接失败: %w", err))
 		}
 	}
 	if a.logger != nil {

@@ -25,6 +25,8 @@ import (
 )
 
 // 使用别名类型避免 Wire 在多个 string / *grpc.ClientConn / *gobreaker.CircuitBreaker 之间误绑定。
+type gatewayAuthServiceAddr string
+
 type gatewayUserServiceAddr string
 
 type gatewayRelationServiceAddr string
@@ -35,11 +37,15 @@ type gatewayHTTPAddr string
 
 type gatewayAsyncReleaseTimeout time.Duration
 
+type gatewayAuthBreaker struct{ value *gobreaker.CircuitBreaker }
+
 type gatewayUserBreaker struct{ value *gobreaker.CircuitBreaker }
 
 type gatewayRelationBreaker struct{ value *gobreaker.CircuitBreaker }
 
 type gatewayMsgBreaker struct{ value *gobreaker.CircuitBreaker }
+
+type gatewayAuthConn struct{ value *grpc.ClientConn }
 
 type gatewayUserConn struct{ value *grpc.ClientConn }
 
@@ -120,10 +126,20 @@ func provideGatewayMinIOClient(ctx context.Context, log *zap.Logger, cfg config.
 	return client, nil
 }
 
+// provideGatewayAuthServiceAddr 提供 auth-service 地址。
+func provideGatewayAuthServiceAddr() gatewayAuthServiceAddr {
+	addr := os.Getenv("AUTH_SERVICE_ADDR")
+	if addr == "" {
+		addr = "localhost:9090"
+	}
+	return gatewayAuthServiceAddr(addr)
+}
+
+// provideGatewayUserServiceAddr 提供 user-service 地址。
 func provideGatewayUserServiceAddr() gatewayUserServiceAddr {
 	addr := os.Getenv("USER_SERVICE_ADDR")
 	if addr == "" {
-		addr = "localhost:9090"
+		addr = "localhost:9094"
 	}
 	return gatewayUserServiceAddr(addr)
 }
@@ -154,6 +170,13 @@ func provideGatewayHTTPAddr() gatewayHTTPAddr {
 	return gatewayHTTPAddr(addr)
 }
 
+// provideGatewayAuthBreaker 创建 auth-service 熔断器。
+func provideGatewayAuthBreaker(ctx context.Context) gatewayAuthBreaker {
+	breaker := pb.CreateCircuitBreaker("auth-service")
+	logger.Info(ctx, "认证服务熔断器创建成功", logger.String("name", "auth-service"))
+	return gatewayAuthBreaker{value: breaker}
+}
+
 // provideGatewayUserBreaker 创建 user-service 熔断器。
 func provideGatewayUserBreaker(ctx context.Context) gatewayUserBreaker {
 	breaker := pb.CreateCircuitBreaker("user-service")
@@ -173,6 +196,17 @@ func provideGatewayMsgBreaker(ctx context.Context) gatewayMsgBreaker {
 	breaker := pb.CreateCircuitBreaker("msg-service")
 	logger.Info(ctx, "消息服务熔断器创建成功", logger.String("name", "msg-service"))
 	return gatewayMsgBreaker{value: breaker}
+}
+
+// provideGatewayAuthConn 建立到 auth-service 的 gRPC 连接。
+// 认证、账号安全、设备会话与内部账号查询都依赖该连接，因此不允许降级为 nil。
+func provideGatewayAuthConn(ctx context.Context, addr gatewayAuthServiceAddr, breaker gatewayAuthBreaker) (gatewayAuthConn, error) {
+	conn, err := pb.CreateAuthServiceConnection(string(addr), breaker.value)
+	if err != nil {
+		return gatewayAuthConn{}, err
+	}
+	logger.Info(ctx, "认证服务 gRPC 连接创建成功", logger.String("address", string(addr)))
+	return gatewayAuthConn{value: conn}, nil
 }
 
 // provideGatewayUserConn 建立到 user-service 的 gRPC 连接。
@@ -210,11 +244,27 @@ func provideGatewayMsgConn(ctx context.Context, addr gatewayMsgServiceAddr, brea
 
 // provideGatewayUserClient 聚合 gateway 对多个下游服务的客户端。
 // 当前拆分策略：
-// - auth/user/device 继续走 user-service；
-// - friend/blacklist 切到 relation-service；
-// - 这样可以先完成关系域切换，而不阻塞其余能力。
-func provideGatewayUserClient(userConn gatewayUserConn, relationConn gatewayRelationConn, breaker gatewayUserBreaker) pb.UserServiceClient {
-	return pb.NewUserServiceClient(userConn.value, userConn.value, relationConn.value, relationConn.value, userConn.value, breaker.value)
+// - auth/account/internalAuth/device 走 auth-service；
+// - profile/search/qrcode 走 user-service；
+// - friend/blacklist 走 relation-service。
+func provideGatewayUserClient(
+	authConn gatewayAuthConn,
+	userConn gatewayUserConn,
+	relationConn gatewayRelationConn,
+	authBreaker gatewayAuthBreaker,
+	userBreaker gatewayUserBreaker,
+	relationBreaker gatewayRelationBreaker,
+) pb.UserServiceClient {
+	return pb.NewUserServiceClient(
+		authConn.value,
+		userConn.value,
+		relationConn.value,
+		relationConn.value,
+		authConn.value,
+		authBreaker.value,
+		userBreaker.value,
+		relationBreaker.value,
+	)
 }
 
 // provideGatewayMsgClient 构造消息服务客户端。
@@ -261,13 +311,16 @@ var gatewayInfraProviderSet = wire.NewSet(
 	provideGatewayAsyncPool,
 	provideGatewayAsyncReleaseTimeout,
 	provideGatewayMinIOClient,
+	provideGatewayAuthServiceAddr,
 	provideGatewayUserServiceAddr,
 	provideGatewayRelationServiceAddr,
 	provideGatewayMsgServiceAddr,
 	provideGatewayHTTPAddr,
+	provideGatewayAuthBreaker,
 	provideGatewayUserBreaker,
 	provideGatewayRelationBreaker,
 	provideGatewayMsgBreaker,
+	provideGatewayAuthConn,
 	provideGatewayUserConn,
 	provideGatewayRelationConn,
 	provideGatewayMsgConn,

@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 )
 
 // DeviceServiceImpl 设备服务实现
@@ -23,8 +23,7 @@ func NewDeviceService(userClient pb.UserServiceClient) DeviceService {
 
 // GetDeviceList 获取设备列表
 func (s *DeviceServiceImpl) GetDeviceList(ctx context.Context) (*dto.GetDeviceListResponse, error) {
-
-	grpcResp, err := s.userClient.GetDeviceList(ctx, &userpb.GetDeviceListRequest{})
+	grpcResp, err := s.userClient.GetDeviceList(ctx, &authpb.GetDeviceListRequest{})
 	if err != nil {
 		return nil, err
 	}

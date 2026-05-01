@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
@@ -33,19 +34,20 @@ func initGatewayUserServiceTestEnv() {
 type fakeGatewayUserServiceClient struct {
 	gatewaypb.UserServiceClient
 
-	getProfileFn      func(context.Context, *userpb.GetProfileRequest) (*userpb.GetProfileResponse, error)
-	getOtherProfileFn func(context.Context, *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error)
-	checkIsFriendFn   func(context.Context, *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error)
-	searchUserFn      func(context.Context, *userpb.SearchUserRequest) (*userpb.SearchUserResponse, error)
-	batchIsFriendFn   func(context.Context, *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error)
-	updateProfileFn   func(context.Context, *userpb.UpdateProfileRequest) (*userpb.UpdateProfileResponse, error)
-	changePasswordFn  func(context.Context, *userpb.ChangePasswordRequest) (*userpb.ChangePasswordResponse, error)
-	changeEmailFn     func(context.Context, *userpb.ChangeEmailRequest) (*userpb.ChangeEmailResponse, error)
-	uploadAvatarFn    func(context.Context, *userpb.UploadAvatarRequest) (*userpb.UploadAvatarResponse, error)
-	batchGetProfileFn func(context.Context, *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error)
-	getQRCodeFn       func(context.Context, *userpb.GetQRCodeRequest) (*userpb.GetQRCodeResponse, error)
-	parseQRCodeFn     func(context.Context, *userpb.ParseQRCodeRequest) (*userpb.ParseQRCodeResponse, error)
-	deleteAccountFn   func(context.Context, *userpb.DeleteAccountRequest) (*userpb.DeleteAccountResponse, error)
+	getProfileFn         func(context.Context, *userpb.GetProfileRequest) (*userpb.GetProfileResponse, error)
+	getOtherProfileFn    func(context.Context, *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error)
+	checkIsFriendFn      func(context.Context, *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error)
+	findAccountByEmailFn func(context.Context, *authpb.FindAccountByEmailRequest) (*authpb.FindAccountByEmailResponse, error)
+	searchUserFn         func(context.Context, *userpb.SearchUserRequest) (*userpb.SearchUserResponse, error)
+	batchIsFriendFn      func(context.Context, *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error)
+	updateProfileFn      func(context.Context, *userpb.UpdateProfileRequest) (*userpb.UpdateProfileResponse, error)
+	changePasswordFn     func(context.Context, *authpb.ChangePasswordRequest) (*authpb.ChangePasswordResponse, error)
+	changeEmailFn        func(context.Context, *authpb.ChangeEmailRequest) (*authpb.ChangeEmailResponse, error)
+	uploadAvatarFn       func(context.Context, *userpb.UploadAvatarRequest) (*userpb.UploadAvatarResponse, error)
+	batchGetProfileFn    func(context.Context, *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error)
+	getQRCodeFn          func(context.Context, *userpb.GetQRCodeRequest) (*userpb.GetQRCodeResponse, error)
+	parseQRCodeFn        func(context.Context, *userpb.ParseQRCodeRequest) (*userpb.ParseQRCodeResponse, error)
+	deleteAccountFn      func(context.Context, *authpb.DeleteAccountRequest) (*authpb.DeleteAccountResponse, error)
 }
 
 func (f *fakeGatewayUserServiceClient) GetProfile(ctx context.Context, req *userpb.GetProfileRequest) (*userpb.GetProfileResponse, error) {
@@ -69,6 +71,13 @@ func (f *fakeGatewayUserServiceClient) CheckIsFriend(ctx context.Context, req *r
 	return f.checkIsFriendFn(ctx, req)
 }
 
+func (f *fakeGatewayUserServiceClient) FindAccountByEmail(ctx context.Context, req *authpb.FindAccountByEmailRequest) (*authpb.FindAccountByEmailResponse, error) {
+	if f.findAccountByEmailFn == nil {
+		return nil, errors.New("unexpected FindAccountByEmail call")
+	}
+	return f.findAccountByEmailFn(ctx, req)
+}
+
 func (f *fakeGatewayUserServiceClient) SearchUser(ctx context.Context, req *userpb.SearchUserRequest) (*userpb.SearchUserResponse, error) {
 	if f.searchUserFn == nil {
 		return nil, errors.New("unexpected SearchUser call")
@@ -90,14 +99,14 @@ func (f *fakeGatewayUserServiceClient) UpdateProfile(ctx context.Context, req *u
 	return f.updateProfileFn(ctx, req)
 }
 
-func (f *fakeGatewayUserServiceClient) ChangePassword(ctx context.Context, req *userpb.ChangePasswordRequest) (*userpb.ChangePasswordResponse, error) {
+func (f *fakeGatewayUserServiceClient) ChangePassword(ctx context.Context, req *authpb.ChangePasswordRequest) (*authpb.ChangePasswordResponse, error) {
 	if f.changePasswordFn == nil {
 		return nil, errors.New("unexpected ChangePassword call")
 	}
 	return f.changePasswordFn(ctx, req)
 }
 
-func (f *fakeGatewayUserServiceClient) ChangeEmail(ctx context.Context, req *userpb.ChangeEmailRequest) (*userpb.ChangeEmailResponse, error) {
+func (f *fakeGatewayUserServiceClient) ChangeEmail(ctx context.Context, req *authpb.ChangeEmailRequest) (*authpb.ChangeEmailResponse, error) {
 	if f.changeEmailFn == nil {
 		return nil, errors.New("unexpected ChangeEmail call")
 	}
@@ -132,7 +141,7 @@ func (f *fakeGatewayUserServiceClient) ParseQRCode(ctx context.Context, req *use
 	return f.parseQRCodeFn(ctx, req)
 }
 
-func (f *fakeGatewayUserServiceClient) DeleteAccount(ctx context.Context, req *userpb.DeleteAccountRequest) (*userpb.DeleteAccountResponse, error) {
+func (f *fakeGatewayUserServiceClient) DeleteAccount(ctx context.Context, req *authpb.DeleteAccountRequest) (*authpb.DeleteAccountResponse, error) {
 	if f.deleteAccountFn == nil {
 		return nil, errors.New("unexpected DeleteAccount call")
 	}
@@ -370,6 +379,40 @@ func TestGatewayUserServiceSearchUser(t *testing.T) {
 		assert.True(t, resp.Items[2].IsFriend)
 	})
 
+	t.Run("email_search_aggregates_auth_and_profile", func(t *testing.T) {
+		svc := NewUserService(&fakeGatewayUserServiceClient{
+			findAccountByEmailFn: func(_ context.Context, req *authpb.FindAccountByEmailRequest) (*authpb.FindAccountByEmailResponse, error) {
+				require.Equal(t, "alice@test.com", req.Email)
+				return &authpb.FindAccountByEmailResponse{Found: true, UserUuid: "u2"}, nil
+			},
+			batchGetProfileFn: func(_ context.Context, req *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error) {
+				require.Equal(t, []string{"u2"}, req.UserUuids)
+				return &userpb.BatchGetProfileResponse{
+					Users: []*userpb.SimpleUserInfo{{Uuid: "u2", Nickname: "alice", Avatar: "a.png", Signature: "hello"}},
+				}, nil
+			},
+			batchIsFriendFn: func(_ context.Context, req *relationpb.BatchCheckIsFriendRequest) (*relationpb.BatchCheckIsFriendResponse, error) {
+				require.Equal(t, "u1", req.UserUuid)
+				require.Equal(t, []string{"u2"}, req.PeerUuids)
+				return &relationpb.BatchCheckIsFriendResponse{Items: []*relationpb.FriendCheckItem{{PeerUuid: "u2", IsFriend: true}}}, nil
+			},
+		})
+
+		resp, err := svc.SearchUser(context.WithValue(context.Background(), "user_uuid", "u1"), &dto.SearchUserRequest{
+			Keyword:  "alice@test.com",
+			Page:     1,
+			PageSize: 20,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotNil(t, resp.Pagination)
+		require.Len(t, resp.Items, 1)
+		assert.Equal(t, int64(1), resp.Pagination.Total)
+		assert.Equal(t, "u2", resp.Items[0].UUID)
+		assert.Equal(t, "alice", resp.Items[0].Nickname)
+		assert.True(t, resp.Items[0].IsFriend)
+	})
+
 	t.Run("batch_friend_error_degrade", func(t *testing.T) {
 		svc := NewUserService(&fakeGatewayUserServiceClient{
 			searchUserFn: func(_ context.Context, _ *userpb.SearchUserRequest) (*userpb.SearchUserResponse, error) {
@@ -423,11 +466,11 @@ func TestGatewayUserServiceOtherMethods(t *testing.T) {
 	t.Run("change_password_success_and_error", func(t *testing.T) {
 		wantErr := errors.New("change password failed")
 		svc := NewUserService(&fakeGatewayUserServiceClient{
-			changePasswordFn: func(_ context.Context, req *userpb.ChangePasswordRequest) (*userpb.ChangePasswordResponse, error) {
+			changePasswordFn: func(_ context.Context, req *authpb.ChangePasswordRequest) (*authpb.ChangePasswordResponse, error) {
 				if req.OldPassword == "bad" {
 					return nil, wantErr
 				}
-				return &userpb.ChangePasswordResponse{}, nil
+				return &authpb.ChangePasswordResponse{}, nil
 			},
 		})
 
@@ -444,11 +487,11 @@ func TestGatewayUserServiceOtherMethods(t *testing.T) {
 	t.Run("change_email_success_and_error", func(t *testing.T) {
 		wantErr := errors.New("change email failed")
 		svc := NewUserService(&fakeGatewayUserServiceClient{
-			changeEmailFn: func(_ context.Context, req *userpb.ChangeEmailRequest) (*userpb.ChangeEmailResponse, error) {
+			changeEmailFn: func(_ context.Context, req *authpb.ChangeEmailRequest) (*authpb.ChangeEmailResponse, error) {
 				if req.NewEmail == "err@test.com" {
 					return nil, wantErr
 				}
-				return &userpb.ChangeEmailResponse{Email: req.NewEmail}, nil
+				return &authpb.ChangeEmailResponse{Email: req.NewEmail}, nil
 			},
 		})
 
@@ -520,11 +563,11 @@ func TestGatewayUserServiceOtherMethods(t *testing.T) {
 				}
 				return &userpb.ParseQRCodeResponse{UserUuid: "u1"}, nil
 			},
-			deleteAccountFn: func(_ context.Context, req *userpb.DeleteAccountRequest) (*userpb.DeleteAccountResponse, error) {
+			deleteAccountFn: func(_ context.Context, req *authpb.DeleteAccountRequest) (*authpb.DeleteAccountResponse, error) {
 				if req.Password == "bad" {
 					return nil, deleteErr
 				}
-				return &userpb.DeleteAccountResponse{DeleteAt: "now", RecoverDeadline: "later"}, nil
+				return &authpb.DeleteAccountResponse{DeleteAt: "now", RecoverDeadline: "later"}, nil
 			},
 		})
 

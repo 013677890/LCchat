@@ -1,0 +1,261 @@
+package repository
+
+import (
+	"context"
+	"time"
+
+	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+)
+
+// authRepositoryImpl 实现认证与账号安全相关的数据访问逻辑。
+type authRepositoryImpl struct {
+	db          *gorm.DB
+	redisClient *redis.Client
+}
+
+// NewAuthRepository 创建认证仓储实例。
+func NewAuthRepository(db *gorm.DB, redisClient *redis.Client) IAuthRepository {
+	return &authRepositoryImpl{db: db, redisClient: redisClient}
+}
+
+// GetByEmail 根据邮箱查询可登录账号。
+func (r *authRepositoryImpl) GetByEmail(ctx context.Context, email string) (*model.UserInfo, error) {
+	var user model.UserInfo
+	err := r.db.WithContext(ctx).Where("email = ? AND deleted_at IS NULL", email).First(&user).Error
+	if err != nil {
+		return nil, WrapDBError(err)
+	}
+	return &user, nil
+}
+
+// GetByUserUUID 根据用户 UUID 查询可登录账号。
+func (r *authRepositoryImpl) GetByUserUUID(ctx context.Context, userUUID string) (*model.UserInfo, error) {
+	var user model.UserInfo
+	err := r.db.WithContext(ctx).Where("uuid = ? AND deleted_at IS NULL", userUUID).First(&user).Error
+	if err != nil {
+		return nil, WrapDBError(err)
+	}
+	return &user, nil
+}
+
+// ExistsByEmail 检查邮箱是否已被占用。
+func (r *authRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).Where("email = ? AND deleted_at IS NULL", email).Count(&count).Error
+	if err != nil {
+		return false, WrapDBError(err)
+	}
+	return count > 0, nil
+}
+
+// Create 创建账号记录。
+func (r *authRepositoryImpl) Create(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error) {
+	db := r.db.WithContext(ctx)
+	if user.Telephone == "" {
+		if err := db.Omit("Telephone").Create(user).Error; err != nil {
+			return nil, WrapDBError(err)
+		}
+		return user, nil
+	}
+	if err := db.Create(user).Error; err != nil {
+		return nil, WrapDBError(err)
+	}
+	return user, nil
+}
+
+// UpdatePassword 更新密码哈希。
+func (r *authRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, password string) error {
+	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).
+		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		Update("password", password).Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+	r.invalidateUserCache(ctx, userUUID)
+	return nil
+}
+
+// UpdateEmail 更新邮箱。
+func (r *authRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email string) error {
+	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).
+		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		Update("email", email).Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+	r.invalidateUserCache(ctx, userUUID)
+	return nil
+}
+
+// UpdateLoginDisplay 更新登录态依赖的昵称和头像字段。
+func (r *authRepositoryImpl) UpdateLoginDisplay(ctx context.Context, userUUID, nickname, avatar string) error {
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	if nickname != "" {
+		updates["nickname"] = nickname
+	}
+	if avatar != "" {
+		updates["avatar"] = avatar
+	}
+	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).
+		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		Updates(updates).Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+	r.invalidateUserCache(ctx, userUUID)
+	return nil
+}
+
+// Delete 软删除账号。
+func (r *authRepositoryImpl) Delete(ctx context.Context, userUUID string) error {
+	err := r.db.WithContext(ctx).Where("uuid = ? AND deleted_at IS NULL", userUUID).Delete(&model.UserInfo{}).Error
+	if err != nil {
+		return WrapDBError(err)
+	}
+	r.invalidateUserCache(ctx, userUUID)
+	return nil
+}
+
+// VerifyVerifyCode 校验验证码是否匹配。
+func (r *authRepositoryImpl) VerifyVerifyCode(ctx context.Context, email, verifyCode string, codeType int32) (bool, error) {
+	if r.redisClient == nil {
+		return false, ErrRedisNil
+	}
+	value, err := r.redisClient.Get(ctx, rediskey.VerifyCodeKey(email, codeType)).Result()
+	if err != nil {
+		return false, WrapRedisError(err)
+	}
+	return value == verifyCode, nil
+}
+
+// StoreVerifyCode 存储验证码。
+func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyCode string, codeType int32, expireDuration time.Duration) error {
+	if r.redisClient == nil {
+		return ErrRedis
+	}
+	return WrapRedisError(r.redisClient.Set(ctx, rediskey.VerifyCodeKey(email, codeType), verifyCode, expireDuration).Err())
+}
+
+// DeleteVerifyCode 删除验证码。
+func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string, codeType int32) error {
+	if r.redisClient == nil {
+		return nil
+	}
+	return WrapRedisError(r.redisClient.Del(ctx, rediskey.VerifyCodeKey(email, codeType)).Err())
+}
+
+// VerifyVerifyCodeRateLimit 校验验证码发送限流。
+func (r *authRepositoryImpl) VerifyVerifyCodeRateLimit(ctx context.Context, email, ip string) (bool, error) {
+	if r.redisClient == nil {
+		return false, nil
+	}
+
+	minuteCount, err := r.redisClient.Get(ctx, rediskey.VerifyCodeMinuteKey(email)).Int()
+	if err != nil && err != redis.Nil {
+		return false, WrapRedisError(err)
+	}
+	if minuteCount >= 1 {
+		return true, nil
+	}
+
+	hour24Count, err := r.redisClient.Get(ctx, rediskey.VerifyCode24HKey(email)).Int()
+	if err != nil && err != redis.Nil {
+		return false, WrapRedisError(err)
+	}
+	if hour24Count >= 10 {
+		return true, nil
+	}
+
+	hour1Count, err := r.redisClient.Get(ctx, rediskey.VerifyCodeIPKey(ip)).Int()
+	if err != nil && err != redis.Nil {
+		return false, WrapRedisError(err)
+	}
+	if hour1Count >= 100 {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// IncrementVerifyCodeCount 增加验证码发送计数。
+func (r *authRepositoryImpl) IncrementVerifyCodeCount(ctx context.Context, email, ip string) error {
+	if r.redisClient == nil {
+		return nil
+	}
+	pipe := r.redisClient.Pipeline()
+	if _, err := pipe.Eval(ctx, luaIncrementWithExpire, []string{rediskey.VerifyCodeMinuteKey(email)}, int(rediskey.VerifyCodeMinuteTTL.Seconds())).Result(); err != nil {
+		return WrapRedisError(err)
+	}
+	if _, err := pipe.Eval(ctx, luaIncrementWithExpire, []string{rediskey.VerifyCode24HKey(email)}, int(rediskey.VerifyCode24HTTL.Seconds())).Result(); err != nil {
+		return WrapRedisError(err)
+	}
+	if _, err := pipe.Eval(ctx, luaIncrementWithExpire, []string{rediskey.VerifyCodeIPKey(ip)}, int(rediskey.VerifyCodeIPTTL.Seconds())).Result(); err != nil {
+		return WrapRedisError(err)
+	}
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return WrapRedisError(err)
+	}
+	return nil
+}
+
+// BatchGetAccountStatus 批量查询账号存在性与状态。
+func (r *authRepositoryImpl) BatchGetAccountStatus(ctx context.Context, userUUIDs []string) ([]*AccountStatusItem, error) {
+	if len(userUUIDs) == 0 {
+		return []*AccountStatusItem{}, nil
+	}
+
+	type rawAccountStatus struct {
+		Uuid      string         `gorm:"column:uuid"`
+		DeletedAt gorm.DeletedAt `gorm:"column:deleted_at"`
+	}
+
+	rows := make([]*rawAccountStatus, 0, len(userUUIDs))
+	err := r.db.WithContext(ctx).Unscoped().Model(&model.UserInfo{}).
+		Select("uuid, deleted_at").
+		Where("uuid IN ?", userUUIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, WrapDBError(err)
+	}
+
+	statusMap := make(map[string]*AccountStatusItem, len(rows))
+	for _, row := range rows {
+		if row == nil || row.Uuid == "" {
+			continue
+		}
+		item := &AccountStatusItem{UserUUID: row.Uuid, Exists: true, Status: 0}
+		if row.DeletedAt.Valid {
+			item.Status = 1
+		}
+		statusMap[row.Uuid] = item
+	}
+
+	items := make([]*AccountStatusItem, 0, len(userUUIDs))
+	seen := make(map[string]struct{}, len(userUUIDs))
+	for _, userUUID := range userUUIDs {
+		if userUUID == "" {
+			continue
+		}
+		if _, ok := seen[userUUID]; ok {
+			continue
+		}
+		seen[userUUID] = struct{}{}
+		if item, ok := statusMap[userUUID]; ok {
+			items = append(items, item)
+			continue
+		}
+		items = append(items, &AccountStatusItem{UserUUID: userUUID, Exists: false, Status: 1})
+	}
+	return items, nil
+}
+
+func (r *authRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID string) {
+	if r.redisClient == nil || userUUID == "" {
+		return
+	}
+	_ = r.redisClient.Del(ctx, rediskey.UserInfoKey(userUUID)).Err()
+}

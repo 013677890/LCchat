@@ -1,13 +1,14 @@
 package svc
 
 import (
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
-	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"context"
 	"os"
 	"strings"
 	"time"
+
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
 const (
@@ -39,7 +40,7 @@ func connectRouteAddr() string {
 // OnConnect 在连接建立后触发。
 // 行为：
 // 1. 立即触发活跃时间同步（不受节流限制）；
-// 2. 异步调用 user-service RPC 将 DeviceSession.status 置为在线。
+// 2. 异步调用 auth-service RPC 将 DeviceSession.status 置为在线。
 func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
 	if s.activeSyncer != nil {
 		// 连接建立时强制刷新：先删除节流记录再 touch，确保本次会入缓冲 map。
@@ -71,7 +72,7 @@ func (s *ConnectService) OnHeartbeat(ctx context.Context, session *Session) {
 // OnDisconnect 在连接断开后触发。
 // 行为：
 // 1. 清理本地节流缓存，避免内存泄漏；
-// 2. 异步调用 user-service RPC 将 DeviceSession.status 置为离线。
+// 2. 异步调用 auth-service RPC 将 DeviceSession.status 置为离线。
 func (s *ConnectService) OnDisconnect(ctx context.Context, session *Session) {
 	if s.activeSyncer != nil {
 		s.activeSyncer.Delete(session.UserUUID, session.DeviceID)
@@ -82,7 +83,7 @@ func (s *ConnectService) OnDisconnect(ctx context.Context, session *Session) {
 
 // updateDeviceStatusAsync 将设备状态更新任务投递到工作队列。
 // 降级策略：
-// - statusQueue 为 nil 时静默跳过（userDeviceClient 不可用）。
+// - statusQueue 为 nil 时静默跳过（authDeviceClient 不可用）。
 // - 队列满时丢弃任务，仅 log Warn，不阻塞调用方。
 func (s *ConnectService) updateDeviceStatusAsync(ctx context.Context, session *Session, status int8) {
 	if s.statusQueue == nil {
@@ -117,7 +118,7 @@ func (s *ConnectService) statusWorker() {
 	for task := range s.statusQueue {
 		rpcCtx, cancel := context.WithTimeout(context.Background(), deviceStatusRPCTimeout)
 
-		_, err := s.userDeviceClient.UpdateDeviceStatus(rpcCtx, &userpb.UpdateDeviceStatusRequest{
+		_, err := s.authDeviceClient.UpdateDeviceStatus(rpcCtx, &authpb.UpdateDeviceStatusRequest{
 			UserUuid: task.userUUID,
 			DeviceId: task.deviceID,
 			Status:   int32(task.status),

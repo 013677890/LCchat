@@ -40,9 +40,9 @@ type userGRPCShutdownTimeout time.Duration
 const userGRPCDefaultTimeout = 300 * time.Millisecond
 
 func provideUserLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
-func provideUserAsyncConfig() config.AsyncConfig { return config.DefaultAsyncConfig() }
-func provideUserMySQLConfig() config.MySQLConfig { return config.DefaultMySQLConfig() }
-func provideUserKafkaConfig() config.KafkaConfig { return config.DefaultKafkaConfig() }
+func provideUserAsyncConfig() config.AsyncConfig   { return config.DefaultAsyncConfig() }
+func provideUserMySQLConfig() config.MySQLConfig   { return config.DefaultMySQLConfig() }
+func provideUserKafkaConfig() config.KafkaConfig   { return config.DefaultKafkaConfig() }
 
 func provideUserRedisConfig() config.RedisConfig {
 	cfg := config.DefaultRedisConfig()
@@ -105,7 +105,7 @@ func provideUserRedisRetryConsumer(redisClient *goredis.Client, producer *kafka.
 func provideUserGRPCAddress() userGRPCAddress {
 	addr := os.Getenv("USER_GRPC_ADDR")
 	if addr == "" {
-		addr = ":9090"
+		addr = ":9094"
 	}
 	return userGRPCAddress(addr)
 }
@@ -113,12 +113,14 @@ func provideUserGRPCAddress() userGRPCAddress {
 func provideUserMetricsAddress() userMetricsAddress {
 	addr := os.Getenv("USER_METRICS_ADDR")
 	if addr == "" {
-		addr = ":9091"
+		addr = ":9194"
 	}
 	return userMetricsAddress(addr)
 }
 
-func provideUserGRPCShutdownTimeout() userGRPCShutdownTimeout { return userGRPCShutdownTimeout(10 * time.Second) }
+func provideUserGRPCShutdownTimeout() userGRPCShutdownTimeout {
+	return userGRPCShutdownTimeout(10 * time.Second)
+}
 
 func provideUserMetricsServer(addr userMetricsAddress, built *grpcx.BuiltServer) *http.Server {
 	metricsMux := http.NewServeMux()
@@ -126,25 +128,29 @@ func provideUserMetricsServer(addr userMetricsAddress, built *grpcx.BuiltServer)
 	return &http.Server{Addr: string(addr), Handler: metricsMux}
 }
 
+func userInternalMethodWhitelist() map[string][]string {
+	return map[string][]string{
+		"/user.InternalProfileService/CreateProfile":         {"auth-service"},
+		"/user.InternalProfileService/BatchGetUserCard":      {"gateway", "relation-service", "group-service"},
+		"/user.InternalProfileService/BatchGetPublicProfile": {"gateway", "relation-service", "group-service"},
+	}
+}
+
 // RegistrationFunc 把“注册哪些 gRPC 服务”从“如何创建 gRPC Server”中拆出来，
 // 这样 Wire 只负责拼装依赖，运行时仍可由 App 统一编排。
 func provideUserRegistration(
-	authHandler *handler.AuthHandler,
 	userHandler *handler.UserHandler,
-	friendHandler *handler.FriendHandler,
-	blacklistHandler *handler.BlacklistHandler,
-	deviceHandler *handler.DeviceHandler,
+	internalProfileHandler *handler.InternalProfileHandler,
 	groupHandler *handler.GroupHandler,
 ) grpcx.RegistrationFunc {
 	return func(s *grpc.Server, hs healthgrpc.HealthServer) {
-		userpb.RegisterAuthServiceServer(s, authHandler)
 		userpb.RegisterUserServiceServer(s, userHandler)
-		userpb.RegisterFriendServiceServer(s, friendHandler)
-		userpb.RegisterBlacklistServiceServer(s, blacklistHandler)
-		userpb.RegisterDeviceServiceServer(s, deviceHandler)
+		userpb.RegisterInternalProfileServiceServer(s, internalProfileHandler)
 		userpb.RegisterGroupServiceServer(s, groupHandler)
 		if hs != nil {
-			if setter, ok := hs.(interface{ SetServingStatus(string, healthgrpc.HealthCheckResponse_ServingStatus) }); ok {
+			if setter, ok := hs.(interface {
+				SetServingStatus(string, healthgrpc.HealthCheckResponse_ServingStatus)
+			}); ok {
 				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
 			}
 		}
@@ -158,6 +164,9 @@ func provideUserGRPCServer(register grpcx.RegistrationFunc, addr userGRPCAddress
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: userGRPCDefaultTimeout},
 		EnableHealth:     true,
 		EnableReflection: true,
+		ExtraUnaryInterceptors: []grpc.UnaryServerInterceptor{
+			grpcx.InternalCallerInterceptor(userInternalMethodWhitelist()),
+		},
 	}, register)
 }
 
@@ -200,6 +209,7 @@ var userRepositoryProviderSet = wire.NewSet(
 var userServiceProviderSet = wire.NewSet(
 	service.NewAuthService,
 	service.NewUserService,
+	service.NewInternalProfileService,
 	service.NewFriendService,
 	service.NewBlacklistService,
 	service.NewDeviceService,
@@ -209,6 +219,7 @@ var userServiceProviderSet = wire.NewSet(
 var userHandlerProviderSet = wire.NewSet(
 	handler.NewAuthHandler,
 	handler.NewUserHandler,
+	handler.NewInternalProfileHandler,
 	handler.NewFriendHandler,
 	handler.NewBlacklistHandler,
 	handler.NewDeviceHandler,

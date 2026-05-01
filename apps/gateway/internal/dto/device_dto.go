@@ -1,7 +1,7 @@
 package dto
 
 import (
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
@@ -75,37 +75,37 @@ type OnlineStatusItem struct {
 // ==================== 设备服务 DTO 转换函数 ====================
 
 // ConvertToProtoGetOnlineStatusRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoGetOnlineStatusRequest(dto *GetOnlineStatusRequest) *userpb.GetOnlineStatusRequest {
+func ConvertToProtoGetOnlineStatusRequest(dto *GetOnlineStatusRequest) *authpb.GetOnlineStatusRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.GetOnlineStatusRequest{
+	return &authpb.GetOnlineStatusRequest{
 		UserUuid: dto.UserUUID,
 	}
 }
 
 // ConvertToProtoBatchGetOnlineStatusRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoBatchGetOnlineStatusRequest(dto *BatchGetOnlineStatusRequest) *userpb.BatchGetOnlineStatusRequest {
+func ConvertToProtoBatchGetOnlineStatusRequest(dto *BatchGetOnlineStatusRequest) *authpb.BatchGetOnlineStatusRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.BatchGetOnlineStatusRequest{
+	return &authpb.BatchGetOnlineStatusRequest{
 		UserUuids: dto.UserUUIDs,
 	}
 }
 
 // ConvertToProtoKickDeviceRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoKickDeviceRequest(dto *KickDeviceRequest) *userpb.KickDeviceRequest {
+func ConvertToProtoKickDeviceRequest(dto *KickDeviceRequest) *authpb.KickDeviceRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.KickDeviceRequest{
+	return &authpb.KickDeviceRequest{
 		DeviceId: dto.DeviceID,
 	}
 }
 
 // ConvertDeviceItemFromProto 将 Protobuf 设备项转换为 DTO
-func ConvertDeviceItemFromProto(pb *userpb.DeviceItem) *DeviceItem {
+func ConvertDeviceItemFromProto(pb *authpb.DeviceItem) *DeviceItem {
 	if pb == nil {
 		return nil
 	}
@@ -121,7 +121,7 @@ func ConvertDeviceItemFromProto(pb *userpb.DeviceItem) *DeviceItem {
 }
 
 // ConvertOnlineStatusFromProto 将 Protobuf 在线状态转换为 DTO
-func ConvertOnlineStatusFromProto(pb *userpb.OnlineStatus) *OnlineStatus {
+func ConvertOnlineStatusFromProto(pb *authpb.OnlineStatus) *OnlineStatus {
 	if pb == nil {
 		return nil
 	}
@@ -134,7 +134,7 @@ func ConvertOnlineStatusFromProto(pb *userpb.OnlineStatus) *OnlineStatus {
 }
 
 // ConvertOnlineStatusItemFromProto 将 Protobuf 在线状态项转换为 DTO
-func ConvertOnlineStatusItemFromProto(pb *userpb.OnlineStatusItem) *OnlineStatusItem {
+func ConvertOnlineStatusItemFromProto(pb *authpb.OnlineStatusItem) *OnlineStatusItem {
 	if pb == nil {
 		return nil
 	}
@@ -146,7 +146,7 @@ func ConvertOnlineStatusItemFromProto(pb *userpb.OnlineStatusItem) *OnlineStatus
 }
 
 // ConvertOnlineStatusItemsFromProto 批量将 Protobuf 在线状态项转换为 DTO
-func ConvertOnlineStatusItemsFromProto(pbs []*userpb.OnlineStatusItem) []*OnlineStatusItem {
+func ConvertOnlineStatusItemsFromProto(pbs []*authpb.OnlineStatusItem) []*OnlineStatusItem {
 	if pbs == nil {
 		return []*OnlineStatusItem{}
 	}
@@ -161,7 +161,7 @@ func ConvertOnlineStatusItemsFromProto(pbs []*userpb.OnlineStatusItem) []*Online
 // ==================== 设备服务 gRPC响应到DTO转换函数 ====================
 
 // ConvertGetDeviceListResponseFromProto 将 Protobuf 获取设备列表响应转换为 DTO
-func ConvertGetDeviceListResponseFromProto(pb *userpb.GetDeviceListResponse) *GetDeviceListResponse {
+func ConvertGetDeviceListResponseFromProto(pb *authpb.GetDeviceListResponse) *GetDeviceListResponse {
 	if pb == nil {
 		return nil
 	}
@@ -177,7 +177,7 @@ func ConvertGetDeviceListResponseFromProto(pb *userpb.GetDeviceListResponse) *Ge
 }
 
 // ConvertKickDeviceResponseFromProto 将 Protobuf 踢出设备响应转换为 DTO
-func ConvertKickDeviceResponseFromProto(pb *userpb.KickDeviceResponse) *KickDeviceResponse {
+func ConvertKickDeviceResponseFromProto(pb *authpb.KickDeviceResponse) *KickDeviceResponse {
 	if pb == nil {
 		return nil
 	}
@@ -185,7 +185,7 @@ func ConvertKickDeviceResponseFromProto(pb *userpb.KickDeviceResponse) *KickDevi
 }
 
 // ConvertGetOnlineStatusResponseFromProto 将 Protobuf 获取在线状态响应转换为 DTO
-func ConvertGetOnlineStatusResponseFromProto(pb *userpb.GetOnlineStatusResponse) *GetOnlineStatusResponse {
+func ConvertGetOnlineStatusResponseFromProto(pb *authpb.GetOnlineStatusResponse) *GetOnlineStatusResponse {
 	if pb == nil {
 		return nil
 	}
@@ -209,7 +209,7 @@ func ConvertGetOnlineStatusResponseFromProto(pb *userpb.GetOnlineStatusResponse)
 }
 
 // ConvertBatchGetOnlineStatusResponseFromProto 将 Protobuf 批量获取在线状态响应转换为 DTO
-func ConvertBatchGetOnlineStatusResponseFromProto(pb *userpb.BatchGetOnlineStatusResponse) *BatchGetOnlineStatusResponse {
+func ConvertBatchGetOnlineStatusResponseFromProto(pb *authpb.BatchGetOnlineStatusResponse) *BatchGetOnlineStatusResponse {
 	if pb == nil {
 		return nil
 	}

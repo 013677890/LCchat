@@ -25,12 +25,12 @@ func initializeConnectApp() (*ConnectApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	mainConnectUserGRPCAddress := provideConnectUserGRPCAddress()
-	clientConn, err := provideUserGRPCConn(logger, mainConnectUserGRPCAddress)
+	mainConnectAuthGRPCAddress := provideConnectAuthGRPCAddress()
+	clientConn, err := provideAuthGRPCConn(logger, mainConnectAuthGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
-	deviceServiceClient := provideUserDeviceClient(clientConn)
+	deviceServiceClient := provideAuthDeviceClient(clientConn)
 	connectService := svc.NewConnectService(client, deviceServiceClient)
 	wsHandler := handler.NewWSHandler(connectionManager, connectService)
 	server := provideConnectHTTPServer(wsHandler, connectionManager)

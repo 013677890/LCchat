@@ -1,7 +1,7 @@
 package dto
 
 import (
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 )
 
 // ==================== 认证服务相关 DTO ====================
@@ -113,11 +113,11 @@ type ResetPasswordResponse struct{}
 // ==================== 认证服务 DTO 转换函数 ====================
 
 // ConvertToProtoRegisterRequest 将 DTO 注册请求转换为 Protobuf 请求
-func ConvertToProtoRegisterRequest(dto *RegisterRequest) *userpb.RegisterRequest {
+func ConvertToProtoRegisterRequest(dto *RegisterRequest) *authpb.RegisterRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.RegisterRequest{
+	return &authpb.RegisterRequest{
 		Email:      dto.Email,
 		Password:   dto.Password,
 		VerifyCode: dto.VerifyCode,
@@ -127,14 +127,14 @@ func ConvertToProtoRegisterRequest(dto *RegisterRequest) *userpb.RegisterRequest
 }
 
 // ConvertToProtoLoginRequest 将 DTO 登录请求转换为 Protobuf 请求
-func ConvertToProtoLoginRequest(dto *LoginRequest) *userpb.LoginRequest {
+func ConvertToProtoLoginRequest(dto *LoginRequest) *authpb.LoginRequest {
 	if dto == nil {
 		return nil
 	}
 
-	var deviceInfo *userpb.DeviceInfo
+	var deviceInfo *authpb.DeviceInfo
 	if dto.DeviceInfo != nil {
-		deviceInfo = &userpb.DeviceInfo{
+		deviceInfo = &authpb.DeviceInfo{
 			DeviceName: dto.DeviceInfo.DeviceName,
 			Platform:   dto.DeviceInfo.Platform,
 			OsVersion:  dto.DeviceInfo.OSVersion,
@@ -142,7 +142,7 @@ func ConvertToProtoLoginRequest(dto *LoginRequest) *userpb.LoginRequest {
 		}
 	}
 
-	return &userpb.LoginRequest{
+	return &authpb.LoginRequest{
 		Account:    dto.Account,
 		Password:   dto.Password,
 		DeviceInfo: deviceInfo,
@@ -150,14 +150,14 @@ func ConvertToProtoLoginRequest(dto *LoginRequest) *userpb.LoginRequest {
 }
 
 // ConvertToProtoLoginByCodeRequest 将 DTO 验证码登录请求转换为 Protobuf 请求
-func ConvertToProtoLoginByCodeRequest(dto *LoginByCodeRequest) *userpb.LoginByCodeRequest {
+func ConvertToProtoLoginByCodeRequest(dto *LoginByCodeRequest) *authpb.LoginByCodeRequest {
 	if dto == nil {
 		return nil
 	}
 
-	var deviceInfo *userpb.DeviceInfo
+	var deviceInfo *authpb.DeviceInfo
 	if dto.DeviceInfo != nil {
-		deviceInfo = &userpb.DeviceInfo{
+		deviceInfo = &authpb.DeviceInfo{
 			DeviceName: dto.DeviceInfo.DeviceName,
 			Platform:   dto.DeviceInfo.Platform,
 			OsVersion:  dto.DeviceInfo.OSVersion,
@@ -165,7 +165,7 @@ func ConvertToProtoLoginByCodeRequest(dto *LoginByCodeRequest) *userpb.LoginByCo
 		}
 	}
 
-	return &userpb.LoginByCodeRequest{
+	return &authpb.LoginByCodeRequest{
 		Email:      dto.Email,
 		VerifyCode: dto.VerifyCode,
 		DeviceInfo: deviceInfo,
@@ -173,22 +173,22 @@ func ConvertToProtoLoginByCodeRequest(dto *LoginByCodeRequest) *userpb.LoginByCo
 }
 
 // ConvertToProtoSendVerifyCodeRequest 将 DTO 发送验证码请求转换为 Protobuf 请求
-func ConvertToProtoSendVerifyCodeRequest(dto *SendVerifyCodeRequest) *userpb.SendVerifyCodeRequest {
+func ConvertToProtoSendVerifyCodeRequest(dto *SendVerifyCodeRequest) *authpb.SendVerifyCodeRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.SendVerifyCodeRequest{
+	return &authpb.SendVerifyCodeRequest{
 		Email: dto.Email,
 		Type:  dto.Type,
 	}
 }
 
 // ConvertToProtoVerifyCodeRequest 将 DTO 校验验证码请求转换为 Protobuf 请求
-func ConvertToProtoVerifyCodeRequest(dto *VerifyCodeRequest) *userpb.VerifyCodeRequest {
+func ConvertToProtoVerifyCodeRequest(dto *VerifyCodeRequest) *authpb.VerifyCodeRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.VerifyCodeRequest{
+	return &authpb.VerifyCodeRequest{
 		Email:      dto.Email,
 		VerifyCode: dto.VerifyCode,
 		Type:       dto.Type,
@@ -196,31 +196,31 @@ func ConvertToProtoVerifyCodeRequest(dto *VerifyCodeRequest) *userpb.VerifyCodeR
 }
 
 // ConvertToProtoRefreshTokenRequest 将 DTO 刷新Token请求转换为 Protobuf 请求
-func ConvertToProtoRefreshTokenRequest(dto *RefreshTokenRequest) *userpb.RefreshTokenRequest {
+func ConvertToProtoRefreshTokenRequest(dto *RefreshTokenRequest) *authpb.RefreshTokenRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.RefreshTokenRequest{
+	return &authpb.RefreshTokenRequest{
 		RefreshToken: dto.RefreshToken,
 	}
 }
 
 // ConvertToProtoLogoutRequest 将 DTO 登出请求转换为 Protobuf 请求
-func ConvertToProtoLogoutRequest(dto *LogoutRequest) *userpb.LogoutRequest {
+func ConvertToProtoLogoutRequest(dto *LogoutRequest) *authpb.LogoutRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.LogoutRequest{
+	return &authpb.LogoutRequest{
 		DeviceId: dto.DeviceID,
 	}
 }
 
 // ConvertToProtoResetPasswordRequest 将 DTO 重置密码请求转换为 Protobuf 请求
-func ConvertToProtoResetPasswordRequest(dto *ResetPasswordRequest) *userpb.ResetPasswordRequest {
+func ConvertToProtoResetPasswordRequest(dto *ResetPasswordRequest) *authpb.ResetPasswordRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.ResetPasswordRequest{
+	return &authpb.ResetPasswordRequest{
 		Email:       dto.Email,
 		VerifyCode:  dto.VerifyCode,
 		NewPassword: dto.NewPassword,
@@ -230,7 +230,7 @@ func ConvertToProtoResetPasswordRequest(dto *ResetPasswordRequest) *userpb.Reset
 // ==================== 认证服务 gRPC响应到DTO转换函数 ====================
 
 // ConvertRegisterResponseFromProto 将 Protobuf 注册响应转换为 DTO
-func ConvertRegisterResponseFromProto(pb *userpb.RegisterResponse) *RegisterResponse {
+func ConvertRegisterResponseFromProto(pb *authpb.RegisterResponse) *RegisterResponse {
 	if pb == nil {
 		return nil
 	}
@@ -243,7 +243,7 @@ func ConvertRegisterResponseFromProto(pb *userpb.RegisterResponse) *RegisterResp
 }
 
 // ConvertLoginResponseFromProto 将 Protobuf 登录响应转换为 DTO
-func ConvertLoginResponseFromProto(pb *userpb.LoginResponse) *LoginResponse {
+func ConvertLoginResponseFromProto(pb *authpb.LoginResponse) *LoginResponse {
 	if pb == nil {
 		return nil
 	}
@@ -252,12 +252,12 @@ func ConvertLoginResponseFromProto(pb *userpb.LoginResponse) *LoginResponse {
 		RefreshToken: pb.RefreshToken,
 		TokenType:    pb.TokenType,
 		ExpiresIn:    pb.ExpiresIn,
-		UserInfo:     ConvertUserInfoFromProto(pb.UserInfo),
+		UserInfo:     ConvertLoginUserInfoFromProto(pb.UserInfo),
 	}
 }
 
 // ConvertLoginByCodeResponseFromProto 将 Protobuf 验证码登录响应转换为 DTO
-func ConvertLoginByCodeResponseFromProto(pb *userpb.LoginByCodeResponse) *LoginByCodeResponse {
+func ConvertLoginByCodeResponseFromProto(pb *authpb.LoginByCodeResponse) *LoginByCodeResponse {
 	if pb == nil {
 		return nil
 	}
@@ -266,12 +266,12 @@ func ConvertLoginByCodeResponseFromProto(pb *userpb.LoginByCodeResponse) *LoginB
 		RefreshToken: pb.RefreshToken,
 		TokenType:    pb.TokenType,
 		ExpiresIn:    pb.ExpiresIn,
-		UserInfo:     ConvertUserInfoFromProto(pb.UserInfo),
+		UserInfo:     ConvertLoginUserInfoFromProto(pb.UserInfo),
 	}
 }
 
 // ConvertSendVerifyCodeResponseFromProto 将 Protobuf 发送验证码响应转换为 DTO
-func ConvertSendVerifyCodeResponseFromProto(pb *userpb.SendVerifyCodeResponse) *SendVerifyCodeResponse {
+func ConvertSendVerifyCodeResponseFromProto(pb *authpb.SendVerifyCodeResponse) *SendVerifyCodeResponse {
 	if pb == nil {
 		return nil
 	}
@@ -281,7 +281,7 @@ func ConvertSendVerifyCodeResponseFromProto(pb *userpb.SendVerifyCodeResponse) *
 }
 
 // ConvertVerifyCodeResponseFromProto 将 Protobuf 校验验证码响应转换为 DTO
-func ConvertVerifyCodeResponseFromProto(pb *userpb.VerifyCodeResponse) *VerifyCodeResponse {
+func ConvertVerifyCodeResponseFromProto(pb *authpb.VerifyCodeResponse) *VerifyCodeResponse {
 	if pb == nil {
 		return nil
 	}
@@ -291,7 +291,7 @@ func ConvertVerifyCodeResponseFromProto(pb *userpb.VerifyCodeResponse) *VerifyCo
 }
 
 // ConvertRefreshTokenResponseFromProto 将 Protobuf 刷新Token响应转换为 DTO
-func ConvertRefreshTokenResponseFromProto(pb *userpb.RefreshTokenResponse) *RefreshTokenResponse {
+func ConvertRefreshTokenResponseFromProto(pb *authpb.RefreshTokenResponse) *RefreshTokenResponse {
 	if pb == nil {
 		return nil
 	}
@@ -303,7 +303,7 @@ func ConvertRefreshTokenResponseFromProto(pb *userpb.RefreshTokenResponse) *Refr
 }
 
 // ConvertLogoutResponseFromProto 将 Protobuf 登出响应转换为 DTO
-func ConvertLogoutResponseFromProto(pb *userpb.LogoutResponse) *LogoutResponse {
+func ConvertLogoutResponseFromProto(pb *authpb.LogoutResponse) *LogoutResponse {
 	if pb == nil {
 		return &LogoutResponse{}
 	}
@@ -311,7 +311,7 @@ func ConvertLogoutResponseFromProto(pb *userpb.LogoutResponse) *LogoutResponse {
 }
 
 // ConvertResetPasswordResponseFromProto 将 Protobuf 重置密码响应转换为 DTO
-func ConvertResetPasswordResponseFromProto(pb *userpb.ResetPasswordResponse) *ResetPasswordResponse {
+func ConvertResetPasswordResponseFromProto(pb *authpb.ResetPasswordResponse) *ResetPasswordResponse {
 	if pb == nil {
 		return &ResetPasswordResponse{}
 	}

@@ -1,6 +1,7 @@
 package dto
 
 import (
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 )
 
@@ -146,33 +147,33 @@ func ConvertToProtoUpdateProfileRequest(dto *UpdateProfileRequest) *userpb.Updat
 }
 
 // ConvertToProtoChangePasswordRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoChangePasswordRequest(dto *ChangePasswordRequest) *userpb.ChangePasswordRequest {
+func ConvertToProtoChangePasswordRequest(dto *ChangePasswordRequest) *authpb.ChangePasswordRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.ChangePasswordRequest{
+	return &authpb.ChangePasswordRequest{
 		OldPassword: dto.OldPassword,
 		NewPassword: dto.NewPassword,
 	}
 }
 
 // ConvertToProtoChangeEmailRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoChangeEmailRequest(dto *ChangeEmailRequest) *userpb.ChangeEmailRequest {
+func ConvertToProtoChangeEmailRequest(dto *ChangeEmailRequest) *authpb.ChangeEmailRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.ChangeEmailRequest{
+	return &authpb.ChangeEmailRequest{
 		NewEmail:   dto.NewEmail,
 		VerifyCode: dto.VerifyCode,
 	}
 }
 
 // ConvertToProtoChangeTelephoneRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoChangeTelephoneRequest(dto *ChangeTelephoneRequest) *userpb.ChangeTelephoneRequest {
+func ConvertToProtoChangeTelephoneRequest(dto *ChangeTelephoneRequest) *authpb.ChangeTelephoneRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.ChangeTelephoneRequest{
+	return &authpb.ChangeTelephoneRequest{
 		NewTelephone: dto.NewTelephone,
 		VerifyCode:   dto.VerifyCode,
 	}
@@ -189,11 +190,11 @@ func ConvertToProtoParseQRCodeRequest(dto *ParseQRCodeRequest) *userpb.ParseQRCo
 }
 
 // ConvertToProtoDeleteAccountRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoDeleteAccountRequest(dto *DeleteAccountRequest) *userpb.DeleteAccountRequest {
+func ConvertToProtoDeleteAccountRequest(dto *DeleteAccountRequest) *authpb.DeleteAccountRequest {
 	if dto == nil {
 		return nil
 	}
-	return &userpb.DeleteAccountRequest{
+	return &authpb.DeleteAccountRequest{
 		Password: dto.Password,
 		Reason:   dto.Reason,
 	}
@@ -253,7 +254,7 @@ func ConvertUploadAvatarResponseFromProto(pb *userpb.UploadAvatarResponse) *Uplo
 }
 
 // ConvertChangePasswordResponseFromProto 将 Protobuf 修改密码响应转换为 DTO
-func ConvertChangePasswordResponseFromProto(pb *userpb.ChangePasswordResponse) *ChangePasswordResponse {
+func ConvertChangePasswordResponseFromProto(pb *authpb.ChangePasswordResponse) *ChangePasswordResponse {
 	if pb == nil {
 		return nil
 	}
@@ -261,7 +262,7 @@ func ConvertChangePasswordResponseFromProto(pb *userpb.ChangePasswordResponse) *
 }
 
 // ConvertChangeEmailResponseFromProto 将 Protobuf 换绑邮箱响应转换为 DTO
-func ConvertChangeEmailResponseFromProto(pb *userpb.ChangeEmailResponse) *ChangeEmailResponse {
+func ConvertChangeEmailResponseFromProto(pb *authpb.ChangeEmailResponse) *ChangeEmailResponse {
 	if pb == nil {
 		return nil
 	}
@@ -271,7 +272,7 @@ func ConvertChangeEmailResponseFromProto(pb *userpb.ChangeEmailResponse) *Change
 }
 
 // ConvertChangeTelephoneResponseFromProto 将 Protobuf 换绑手机响应转换为 DTO
-func ConvertChangeTelephoneResponseFromProto(pb *userpb.ChangeTelephoneResponse) *ChangeTelephoneResponse {
+func ConvertChangeTelephoneResponseFromProto(pb *authpb.ChangeTelephoneResponse) *ChangeTelephoneResponse {
 	if pb == nil {
 		return nil
 	}
@@ -302,7 +303,7 @@ func ConvertParseQRCodeResponseFromProto(pb *userpb.ParseQRCodeResponse) *ParseQ
 }
 
 // ConvertDeleteAccountResponseFromProto 将 Protobuf 注销账号响应转换为 DTO
-func ConvertDeleteAccountResponseFromProto(pb *userpb.DeleteAccountResponse) *DeleteAccountResponse {
+func ConvertDeleteAccountResponseFromProto(pb *authpb.DeleteAccountResponse) *DeleteAccountResponse {
 	if pb == nil {
 		return nil
 	}

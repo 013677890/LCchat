@@ -4,12 +4,12 @@ import (
 	"context"
 	"os"
 
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	connectgrpc "github.com/013677890/LCchat-Backend/apps/connect/internal/grpc"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
 	connectserver "github.com/013677890/LCchat-Backend/apps/connect/internal/server"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/svc"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-type connectUserGRPCAddress string
+type connectAuthGRPCAddress string
 
 type connectGRPCAddress string
 
@@ -48,12 +48,12 @@ func provideConnectRedisClient(log *zap.Logger, cfg config.RedisConfig) (*goredi
 	return client, nil
 }
 
-func provideConnectUserGRPCAddress() connectUserGRPCAddress {
-	addr := os.Getenv("USER_GRPC_ADDR")
+func provideConnectAuthGRPCAddress() connectAuthGRPCAddress {
+	addr := os.Getenv("AUTH_GRPC_ADDR")
 	if addr == "" {
 		addr = ":9090"
 	}
-	return connectUserGRPCAddress(addr)
+	return connectAuthGRPCAddress(addr)
 }
 
 func provideConnectGRPCAddress() connectGRPCAddress {
@@ -64,8 +64,8 @@ func provideConnectGRPCAddress() connectGRPCAddress {
 	return connectGRPCAddress(addr)
 }
 
-// user-service gRPC 连接失败时允许降级运行，因此这里返回 nil 连接和 nil 错误。
-func provideUserGRPCConn(log *zap.Logger, addr connectUserGRPCAddress) (*googlegrpc.ClientConn, error) {
+// auth-service gRPC 连接失败时允许降级运行，因此这里返回 nil 连接和 nil 错误。
+func provideAuthGRPCConn(log *zap.Logger, addr connectAuthGRPCAddress) (*googlegrpc.ClientConn, error) {
 	conn, err := googlegrpc.NewClient(
 		string(addr),
 		googlegrpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -74,7 +74,7 @@ func provideUserGRPCConn(log *zap.Logger, addr connectUserGRPCAddress) (*googleg
 		),
 	)
 	if err != nil {
-		logger.Warn(context.Background(), "user-service gRPC 连接创建失败，降级为无设备状态同步模式",
+		logger.Warn(context.Background(), "auth-service gRPC 连接创建失败，降级为无设备状态同步模式",
 			logger.String("addr", string(addr)),
 			logger.ErrorField("error", err),
 		)
@@ -84,11 +84,11 @@ func provideUserGRPCConn(log *zap.Logger, addr connectUserGRPCAddress) (*googleg
 	return conn, nil
 }
 
-func provideUserDeviceClient(conn *googlegrpc.ClientConn) userpb.DeviceServiceClient {
+func provideAuthDeviceClient(conn *googlegrpc.ClientConn) authpb.DeviceServiceClient {
 	if conn == nil {
 		return nil
 	}
-	return userpb.NewDeviceServiceClient(conn)
+	return authpb.NewDeviceServiceClient(conn)
 }
 
 func provideConnectManager() *manager.ConnectionManager { return manager.NewConnectionManager() }
@@ -107,10 +107,10 @@ var connectProviderSet = wire.NewSet(
 	provideConnectDeviceActiveConfig,
 	provideConnectLogger,
 	provideConnectRedisClient,
-	provideConnectUserGRPCAddress,
+	provideConnectAuthGRPCAddress,
 	provideConnectGRPCAddress,
-	provideUserGRPCConn,
-	provideUserDeviceClient,
+	provideAuthGRPCConn,
+	provideAuthDeviceClient,
 	provideConnectManager,
 	svc.NewConnectService,
 	handler.NewWSHandler,

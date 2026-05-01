@@ -1,6 +1,7 @@
 package dto
 
 import (
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	commonpb "github.com/013677890/LCchat-Backend/pkg/commonpb"
@@ -62,6 +63,18 @@ func ConvertUserInfoFromProto(pb *userpb.UserInfo) *UserInfo {
 		Birthday:  pb.Birthday,
 		// Telephone, Email, Status 已从 UserInfo proto 移除（属于 user_account）
 		// 这些 DTO 字段保留以兼容旧 API 响应格式，待 gateway 迁移后删除
+	}
+}
+
+// ConvertLoginUserInfoFromProto 将 auth 登录返回的最小用户信息转换为 DTO。
+func ConvertLoginUserInfoFromProto(pb *authpb.LoginUserInfo) *UserInfo {
+	if pb == nil {
+		return nil
+	}
+	return &UserInfo{
+		UUID:     pb.Uuid,
+		Nickname: pb.Nickname,
+		Avatar:   pb.Avatar,
 	}
 }
 

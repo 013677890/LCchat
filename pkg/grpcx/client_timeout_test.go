@@ -74,7 +74,7 @@ func TestDefaultClientMethodTimeoutsReturnsClone(t *testing.T) {
 	timeouts := DefaultClientMethodTimeouts()
 	require.NotNil(t, timeouts)
 
-	timeouts["/user.AuthService/Login"] = 42 * time.Second
+	timeouts["/auth.AuthService/Login"] = 42 * time.Second
 
-	assert.Equal(t, 500*time.Millisecond, defaultClientMethodTimeouts["/user.AuthService/Login"])
+	assert.Equal(t, 500*time.Millisecond, defaultClientMethodTimeouts["/auth.AuthService/Login"])
 }
