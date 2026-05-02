@@ -8,6 +8,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/repository"
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
@@ -125,14 +126,23 @@ func (s *accountServiceImpl) DeleteAccount(ctx context.Context, req *authpb.Dele
 		return nil, apperr.New(consts.CodePasswordError)
 	}
 
-	if err := s.authRepo.Delete(ctx, userUUID); err != nil {
+	// 账号注销后需要广播给 user/relation 做清理，因此在软删除事务里同时写入 outbox 事件。
+	deleteAt := time.Now()
+	payload, err := accountevent.Encode(accountevent.AccountDeletedPayload{
+		UserUUID:  userUUID,
+		DeletedAt: deleteAt,
+	})
+	if err != nil {
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "序列化注销事件失败")
+	}
+
+	if err := s.authRepo.DeleteWithOutboxEvent(ctx, userUUID, accountevent.EventTypeAccountDeleted, payload); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "注销账号失败")
 	}
 	if err := s.deviceRepo.DeleteByUserUUID(ctx, userUUID); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "清理用户设备登录态失败")
 	}
 
-	deleteAt := time.Now()
 	recoverDeadline := deleteAt.Add(30 * 24 * time.Hour)
 	return &authpb.DeleteAccountResponse{
 		DeleteAt:        deleteAt.Format(time.RFC3339),

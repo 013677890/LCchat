@@ -7,6 +7,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -54,15 +55,25 @@ func (r *authRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (b
 
 // Create 创建账号记录。
 func (r *authRepositoryImpl) Create(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error) {
-	db := r.db.WithContext(ctx)
-	if user.Telephone == "" {
-		if err := db.Omit("Telephone").Create(user).Error; err != nil {
-			return nil, WrapDBError(err)
-		}
-		return user, nil
+	if err := r.createUser(r.db.WithContext(ctx), user); err != nil {
+		return nil, err
 	}
-	if err := db.Create(user).Error; err != nil {
-		return nil, WrapDBError(err)
+	return user, nil
+}
+
+// CreateWithOutboxEvent 在创建账号的同一事务中追加 Outbox 事件。
+func (r *authRepositoryImpl) CreateWithOutboxEvent(ctx context.Context, user *model.UserInfo, eventType, payload string) (*model.UserInfo, error) {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.createUser(tx, user); err != nil {
+			return err
+		}
+		if err := outbox.InsertEvent(tx, eventType, user.Uuid, payload); err != nil {
+			return WrapDBError(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return user, nil
 }
@@ -120,6 +131,24 @@ func (r *authRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 	return nil
 }
 
+// DeleteWithOutboxEvent 在软删除账号的同一事务中追加 Outbox 事件。
+func (r *authRepositoryImpl) DeleteWithOutboxEvent(ctx context.Context, userUUID, eventType, payload string) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("uuid = ? AND deleted_at IS NULL", userUUID).Delete(&model.UserInfo{}).Error; err != nil {
+			return WrapDBError(err)
+		}
+		if err := outbox.InsertEvent(tx, eventType, userUUID, payload); err != nil {
+			return WrapDBError(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	r.invalidateUserCache(ctx, userUUID)
+	return nil
+}
+
 // VerifyVerifyCode 校验验证码是否匹配。
 func (r *authRepositoryImpl) VerifyVerifyCode(ctx context.Context, email, verifyCode string, codeType int32) (bool, error) {
 	if r.redisClient == nil {
@@ -142,7 +171,8 @@ func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyC
 	if err != nil {
 		// 验证码写入属于高可靠 Redis 写，失败时保留同步报错并追加异步补偿。
 		task := mq.BuildSetTask(key, verifyCode, expireDuration).
-			WithSource("AuthRepository.StoreVerifyCode")
+			WithSource("AuthRepository.StoreVerifyCode").
+			WithMaxRetries(5)
 		LogAndRetryRedisError(ctx, task, err)
 		return WrapRedisError(err)
 	}
@@ -159,7 +189,8 @@ func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string,
 	if err != nil {
 		// 验证码删除允许短暂最终一致，失败后通过补偿任务兜底清理。
 		task := mq.BuildDelTask(key).
-			WithSource("AuthRepository.DeleteVerifyCode")
+			WithSource("AuthRepository.DeleteVerifyCode").
+			WithMaxRetries(5)
 		LogAndRetryRedisError(ctx, task, err)
 		return WrapRedisError(err)
 	}
@@ -285,4 +316,17 @@ func (r *authRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID s
 			WithSource("AuthRepository.invalidateUserCache")
 		LogAndRetryRedisError(ctx, task, err)
 	}
+}
+
+func (r *authRepositoryImpl) createUser(db *gorm.DB, user *model.UserInfo) error {
+	if user.Telephone == "" {
+		if err := db.Omit("Telephone").Create(user).Error; err != nil {
+			return WrapDBError(err)
+		}
+		return nil
+	}
+	if err := db.Create(user).Error; err != nil {
+		return WrapDBError(err)
+	}
+	return nil
 }

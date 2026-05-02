@@ -4,15 +4,15 @@ import (
 	"context"
 	"errors"
 	"strconv"
-		"sync"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"github.com/stretchr/testify/assert"
@@ -34,18 +34,20 @@ func initUserSvcTestLogger() {
 type fakeUserSvcRepo struct {
 	repository.IUserRepository
 
-	getByUUIDFn              func(context.Context, string) (*model.UserInfo, error)
-	searchUserFn             func(context.Context, string, int, int) ([]*model.UserInfo, int64, error)
-	updateBasicInfoFn        func(context.Context, string, string, string, string, int8) error
-	updateAvatarFn           func(context.Context, string, string) error
-	updatePasswordFn         func(context.Context, string, string) error
-	existsByEmailFn          func(context.Context, string) (bool, error)
-	updateEmailFn            func(context.Context, string, string) error
-	getQRCodeByUserUUIDFn    func(context.Context, string) (string, time.Time, error)
-	saveQRCodeFn             func(context.Context, string, string) error
-	getUUIDByQRCodeTokenFn   func(context.Context, string) (string, error)
-	deleteFn                 func(context.Context, string) error
-	batchGetByUUIDsFn        func(context.Context, []string) ([]*model.UserInfo, error)
+	getByUUIDFn                       func(context.Context, string) (*model.UserInfo, error)
+	searchUserFn                      func(context.Context, string, int, int) ([]*model.UserInfo, int64, error)
+	updateBasicInfoFn                 func(context.Context, string, string, string, string, int8) error
+	updateBasicInfoWithDisplayEventFn func(context.Context, string, string, string, string, int8) (*model.UserInfo, error)
+	updateAvatarFn                    func(context.Context, string, string) error
+	updateAvatarWithDisplayEventFn    func(context.Context, string, string) (*model.UserInfo, error)
+	updatePasswordFn                  func(context.Context, string, string) error
+	existsByEmailFn                   func(context.Context, string) (bool, error)
+	updateEmailFn                     func(context.Context, string, string) error
+	getQRCodeByUserUUIDFn             func(context.Context, string) (string, time.Time, error)
+	saveQRCodeFn                      func(context.Context, string, string) error
+	getUUIDByQRCodeTokenFn            func(context.Context, string) (string, error)
+	deleteFn                          func(context.Context, string) error
+	batchGetByUUIDsFn                 func(context.Context, []string) ([]*model.UserInfo, error)
 }
 
 func (f *fakeUserSvcRepo) GetByUUID(ctx context.Context, uuid string) (*model.UserInfo, error) {
@@ -69,11 +71,43 @@ func (f *fakeUserSvcRepo) UpdateBasicInfo(ctx context.Context, userUUID, nicknam
 	return f.updateBasicInfoFn(ctx, userUUID, nickname, signature, birthday, gender)
 }
 
+func (f *fakeUserSvcRepo) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID, nickname, signature, birthday string, gender int8) (*model.UserInfo, error) {
+	if f.updateBasicInfoWithDisplayEventFn != nil {
+		return f.updateBasicInfoWithDisplayEventFn(ctx, userUUID, nickname, signature, birthday, gender)
+	}
+	if f.updateBasicInfoFn != nil {
+		if err := f.updateBasicInfoFn(ctx, userUUID, nickname, signature, birthday, gender); err != nil {
+			return nil, err
+		}
+		if f.getByUUIDFn != nil {
+			return f.getByUUIDFn(ctx, userUUID)
+		}
+		return &model.UserInfo{Uuid: userUUID, Nickname: nickname}, nil
+	}
+	return nil, errors.New("unexpected UpdateBasicInfoWithDisplayEvent call")
+}
+
 func (f *fakeUserSvcRepo) UpdateAvatar(ctx context.Context, userUUID, avatar string) error {
 	if f.updateAvatarFn == nil {
 		return nil
 	}
 	return f.updateAvatarFn(ctx, userUUID, avatar)
+}
+
+func (f *fakeUserSvcRepo) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserInfo, error) {
+	if f.updateAvatarWithDisplayEventFn != nil {
+		return f.updateAvatarWithDisplayEventFn(ctx, userUUID, avatar)
+	}
+	if f.updateAvatarFn != nil {
+		if err := f.updateAvatarFn(ctx, userUUID, avatar); err != nil {
+			return nil, err
+		}
+		if f.getByUUIDFn != nil {
+			return f.getByUUIDFn(ctx, userUUID)
+		}
+		return &model.UserInfo{Uuid: userUUID, Avatar: avatar}, nil
+	}
+	return nil, errors.New("unexpected UpdateAvatarWithDisplayEvent call")
 }
 
 func (f *fakeUserSvcRepo) UpdatePassword(ctx context.Context, userUUID, password string) error {

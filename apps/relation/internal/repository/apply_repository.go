@@ -269,6 +269,76 @@ func (r *applyRepositoryImpl) GetSentList(ctx context.Context, applicantUUID str
 	return applies, total, nil
 }
 
+// CleanupAccountApplies 在账号注销后清理 relation 域中与该用户相关的申请记录。
+//
+// 当前迁移阶段 apply_request 仍是共享表，因此这里先做“软删除 + 相关缓存失效”的清理骨架，
+// 避免已注销账号继续出现在待处理申请列表与未读红点中。
+func (r *applyRepositoryImpl) CleanupAccountApplies(ctx context.Context, userUUID string) error {
+	if userUUID == "" {
+		return nil
+	}
+
+	type affectedTarget struct {
+		TargetUUID string `gorm:"column:target_uuid"`
+	}
+
+	var rows []affectedTarget
+	if err := r.db.WithContext(ctx).
+		Model(&model.ApplyRequest{}).
+		Select("DISTINCT target_uuid").
+		Where("apply_type = ? AND (applicant_uuid = ? OR target_uuid = ?) AND deleted_at IS NULL", 0, userUUID, userUUID).
+		Find(&rows).Error; err != nil {
+		return WrapDBError(err)
+	}
+
+	now := time.Now()
+	if err := r.db.WithContext(ctx).
+		Model(&model.ApplyRequest{}).
+		Where("apply_type = ? AND (applicant_uuid = ? OR target_uuid = ?) AND deleted_at IS NULL", 0, userUUID, userUUID).
+		Updates(map[string]interface{}{
+			"deleted_at": gorm.DeletedAt{Time: now, Valid: true},
+			"updated_at": now,
+		}).Error; err != nil {
+		return WrapDBError(err)
+	}
+
+	affectedTargets := make([]string, 0, len(rows)+1)
+	affectedTargets = append(affectedTargets, userUUID)
+	for _, row := range rows {
+		if row.TargetUUID == "" || row.TargetUUID == userUUID {
+			continue
+		}
+		affectedTargets = append(affectedTargets, row.TargetUUID)
+	}
+	r.invalidateApplyCachesAsync(ctx, affectedTargets)
+	return nil
+}
+
+func (r *applyRepositoryImpl) invalidateApplyCachesAsync(ctx context.Context, targetUUIDs []string) {
+	if r.redisClient == nil || len(targetUUIDs) == 0 {
+		return
+	}
+
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		seen := make(map[string]struct{}, len(targetUUIDs))
+		pipe := r.redisClient.Pipeline()
+		for _, targetUUID := range targetUUIDs {
+			if targetUUID == "" {
+				continue
+			}
+			if _, ok := seen[targetUUID]; ok {
+				continue
+			}
+			seen[targetUUID] = struct{}{}
+			pipe.Del(runCtx, rediskey.ApplyPendingKey(targetUUID))
+			pipe.Del(runCtx, rediskey.ApplyUnreadNotifyKey(targetUUID))
+		}
+		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisPipelineTimeout)
+}
+
 // UpdateStatus 更新申请状态。
 func (r *applyRepositoryImpl) UpdateStatus(ctx context.Context, id int64, status int, remark string) error {
 	updates := map[string]interface{}{"status": status}

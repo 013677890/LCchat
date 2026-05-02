@@ -47,6 +47,7 @@ type fakeFriendRepoForService struct {
 	getFriendRelationFn  func(context.Context, string, string) (*model.UserRelation, error)
 	createRelationFn     func(context.Context, string, string) error
 	deleteRelationFn     func(context.Context, string, string) error
+	cleanupRelationFn    func(context.Context, string) error
 	setRemarkFn          func(context.Context, string, string, string) error
 	setTagFn             func(context.Context, string, string, string) error
 	getTagListFn         func(context.Context, string) ([]string, error)
@@ -83,6 +84,13 @@ func (f *fakeFriendRepoForService) DeleteFriendRelation(ctx context.Context, use
 		return nil
 	}
 	return f.deleteRelationFn(ctx, userUUID, friendUUID)
+}
+
+func (f *fakeFriendRepoForService) CleanupAccountRelations(ctx context.Context, userUUID string) error {
+	if f.cleanupRelationFn == nil {
+		return nil
+	}
+	return f.cleanupRelationFn(ctx, userUUID)
 }
 
 func (f *fakeFriendRepoForService) SetFriendRemark(ctx context.Context, userUUID, friendUUID, remark string) error {
@@ -146,6 +154,7 @@ type fakeApplyRepoForService struct {
 	getByIDFn          func(context.Context, int64) (*model.ApplyRequest, error)
 	getPendingListFn   func(context.Context, string, int, int, int) ([]*model.ApplyRequest, int64, error)
 	getSentListFn      func(context.Context, string, int, int, int) ([]*model.ApplyRequest, int64, error)
+	cleanupAppliesFn   func(context.Context, string) error
 	updateStatusFn     func(context.Context, int64, int, string) error
 	acceptApplyFn      func(context.Context, int64, string, string, string) (bool, error)
 	markAsReadFn       func(context.Context, string, []int64) (int64, error)
@@ -183,6 +192,13 @@ func (f *fakeApplyRepoForService) GetSentList(ctx context.Context, applicantUUID
 		return nil, 0, nil
 	}
 	return f.getSentListFn(ctx, applicantUUID, status, page, pageSize)
+}
+
+func (f *fakeApplyRepoForService) CleanupAccountApplies(ctx context.Context, userUUID string) error {
+	if f.cleanupAppliesFn == nil {
+		return nil
+	}
+	return f.cleanupAppliesFn(ctx, userUUID)
 }
 
 func (f *fakeApplyRepoForService) UpdateStatus(ctx context.Context, id int64, status int, remark string) error {

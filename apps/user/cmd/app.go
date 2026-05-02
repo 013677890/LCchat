@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/user/internal/consumer"
+	"github.com/013677890/LCchat-Backend/apps/user/internal/worker"
 	"github.com/013677890/LCchat-Backend/apps/user/mq"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
@@ -30,17 +32,19 @@ import (
 
 // UserApp 统一管理 user 服务生命周期。
 type UserApp struct {
-	logger              *zap.Logger
-	metricsServer       *http.Server
-	grpcServer          *grpc.Server
-	grpcListener        net.Listener
-	grpcShutdownTimeout time.Duration
-	redisConsumer       *mq.RedisRetryConsumer
-	kafkaProducer       *kafka.Producer
-	asyncPool           *ants.Pool
-	asyncReleaseTimeout time.Duration
-	db                  *gorm.DB
-	redisClient         *goredis.Client
+	logger                 *zap.Logger
+	metricsServer          *http.Server
+	grpcServer             *grpc.Server
+	grpcListener           net.Listener
+	grpcShutdownTimeout    time.Duration
+	redisConsumer          *mq.RedisRetryConsumer
+	profileEventWorker     *worker.ProfileEventWorker
+	accountDeletedConsumer *consumer.AccountDeletedConsumer
+	kafkaProducer          *kafka.Producer
+	asyncPool              *ants.Pool
+	asyncReleaseTimeout    time.Duration
+	db                     *gorm.DB
+	redisClient            *goredis.Client
 }
 
 // NewUserApp 只做资源聚合与合法性校验，不在构造阶段启动任何阻塞逻辑。
@@ -51,6 +55,8 @@ func NewUserApp(
 	grpcListener net.Listener,
 	grpcShutdownTimeout userGRPCShutdownTimeout,
 	redisConsumer *mq.RedisRetryConsumer,
+	profileEventWorker *worker.ProfileEventWorker,
+	accountDeletedConsumer *consumer.AccountDeletedConsumer,
 	kafkaProducer *kafka.Producer,
 	asyncPool *ants.Pool,
 	asyncReleaseTimeout userAsyncReleaseTimeout,
@@ -64,17 +70,19 @@ func NewUserApp(
 		return nil, errors.New("grpc listener 未初始化")
 	}
 	return &UserApp{
-		logger:              log,
-		metricsServer:       metricsServer,
-		grpcServer:          built.Server,
-		grpcListener:        grpcListener,
-		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
-		redisConsumer:       redisConsumer,
-		kafkaProducer:       kafkaProducer,
-		asyncPool:           asyncPool,
-		asyncReleaseTimeout: time.Duration(asyncReleaseTimeout),
-		db:                  db,
-		redisClient:         redisClient,
+		logger:                 log,
+		metricsServer:          metricsServer,
+		grpcServer:             built.Server,
+		grpcListener:           grpcListener,
+		grpcShutdownTimeout:    time.Duration(grpcShutdownTimeout),
+		redisConsumer:          redisConsumer,
+		profileEventWorker:     profileEventWorker,
+		accountDeletedConsumer: accountDeletedConsumer,
+		kafkaProducer:          kafkaProducer,
+		asyncPool:              asyncPool,
+		asyncReleaseTimeout:    time.Duration(asyncReleaseTimeout),
+		db:                     db,
+		redisClient:            redisClient,
 	}, nil
 }
 
@@ -98,6 +106,22 @@ func (a *UserApp) Run(ctx context.Context) error {
 			logger.Info(ctx, "Redis 重试消费者启动中")
 			if err := a.redisConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Error(ctx, "Redis 重试消费者运行错误", logger.ErrorField("error", err))
+			}
+		}()
+	}
+
+	if a.profileEventWorker != nil {
+		go func() {
+			if err := a.profileEventWorker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "User Profile Outbox Worker 运行错误", logger.ErrorField("error", err))
+			}
+		}()
+	}
+
+	if a.accountDeletedConsumer != nil {
+		go func() {
+			if err := a.accountDeletedConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "User account.deleted 消费者运行错误", logger.ErrorField("error", err))
 			}
 		}()
 	}
@@ -133,6 +157,16 @@ func (a *UserApp) Shutdown(ctx context.Context) error {
 	if a.redisConsumer != nil {
 		if err := a.redisConsumer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Redis 重试消费者失败: %w", err))
+		}
+	}
+	if a.profileEventWorker != nil {
+		if err := a.profileEventWorker.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 User Profile Outbox Worker 失败: %w", err))
+		}
+	}
+	if a.accountDeletedConsumer != nil {
+		if err := a.accountDeletedConsumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 User account.deleted 消费者失败: %w", err))
 		}
 	}
 	if a.asyncPool != nil {

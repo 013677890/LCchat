@@ -30,6 +30,8 @@ type IAuthRepository interface {
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	// Create 创建账号。
 	Create(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error)
+	// CreateWithOutboxEvent 在创建账号的同一事务中追加 Outbox 事件。
+	CreateWithOutboxEvent(ctx context.Context, user *model.UserInfo, eventType, payload string) (*model.UserInfo, error)
 	// UpdatePassword 更新密码哈希。
 	UpdatePassword(ctx context.Context, userUUID, password string) error
 	// UpdateEmail 更新邮箱。
@@ -38,6 +40,8 @@ type IAuthRepository interface {
 	UpdateLoginDisplay(ctx context.Context, userUUID, nickname, avatar string) error
 	// Delete 软删除账号。
 	Delete(ctx context.Context, userUUID string) error
+	// DeleteWithOutboxEvent 在软删除账号的同一事务中追加 Outbox 事件。
+	DeleteWithOutboxEvent(ctx context.Context, userUUID, eventType, payload string) error
 
 	// VerifyVerifyCode 校验验证码是否匹配。
 	VerifyVerifyCode(ctx context.Context, email, verifyCode string, codeType int32) (bool, error)

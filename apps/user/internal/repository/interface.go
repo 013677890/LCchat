@@ -1,8 +1,8 @@
 package repository
 
 import (
-	"github.com/013677890/LCchat-Backend/model"
 	"context"
+	"github.com/013677890/LCchat-Backend/model"
 	"time"
 )
 
@@ -75,9 +75,13 @@ type IUserRepository interface {
 
 	// UpdateAvatar 更新用户头像
 	UpdateAvatar(ctx context.Context, userUUID, avatar string) error
+	// UpdateAvatarWithDisplayEvent 更新头像并在同一事务中写入展示字段变更事件。
+	UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserInfo, error)
 
 	// UpdateBasicInfo 更新基本信息（昵称、性别、生日、签名）
 	UpdateBasicInfo(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) error
+	// UpdateBasicInfoWithDisplayEvent 更新基本信息并在同一事务中写入展示字段变更事件。
+	UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) (*model.UserInfo, error)
 
 	// UpdateEmail 更新邮箱
 	UpdateEmail(ctx context.Context, userUUID, email string) error

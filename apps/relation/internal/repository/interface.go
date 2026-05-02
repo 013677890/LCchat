@@ -14,6 +14,7 @@ type IFriendRepository interface {
 	GetFriendRelation(ctx context.Context, userUUID, friendUUID string) (*model.UserRelation, error)
 	CreateFriendRelation(ctx context.Context, userUUID, friendUUID string) error
 	DeleteFriendRelation(ctx context.Context, userUUID, friendUUID string) error
+	CleanupAccountRelations(ctx context.Context, userUUID string) error
 	SetFriendRemark(ctx context.Context, userUUID, friendUUID, remark string) error
 	SetFriendTag(ctx context.Context, userUUID, friendUUID, groupTag string) error
 	GetTagList(ctx context.Context, userUUID string) ([]string, error)
@@ -32,6 +33,7 @@ type IApplyRepository interface {
 	GetByID(ctx context.Context, id int64) (*model.ApplyRequest, error)
 	GetPendingList(ctx context.Context, targetUUID string, status, page, pageSize int) ([]*model.ApplyRequest, int64, error)
 	GetSentList(ctx context.Context, applicantUUID string, status, page, pageSize int) ([]*model.ApplyRequest, int64, error)
+	CleanupAccountApplies(ctx context.Context, userUUID string) error
 	UpdateStatus(ctx context.Context, id int64, status int, remark string) error
 	AcceptApplyAndCreateRelation(ctx context.Context, applyId int64, userUUID, friendUUID, remark string) (alreadyProcessed bool, err error)
 	MarkAsRead(ctx context.Context, targetUUID string, ids []int64) (int64, error)

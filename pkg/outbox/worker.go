@@ -71,6 +71,21 @@ type Worker struct {
 	started  bool
 }
 
+func (w *Worker) registeredEventTypes() []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if len(w.handlers) == 0 {
+		return nil
+	}
+
+	eventTypes := make([]string, 0, len(w.handlers))
+	for eventType := range w.handlers {
+		eventTypes = append(eventTypes, eventType)
+	}
+	return eventTypes
+}
+
 // NewWorker 创建一个 Outbox worker。
 func NewWorker(db *gorm.DB, cfg WorkerConfig) *Worker {
 	cfg.defaults()
@@ -114,10 +129,14 @@ func (w *Worker) Start(ctx context.Context) {
 // poll 执行一次轮询：取出待处理事件并逐个处理。
 func (w *Worker) poll(ctx context.Context) {
 	now := time.Now()
+	eventTypes := w.registeredEventTypes()
+	if len(eventTypes) == 0 {
+		return
+	}
 
 	var events []Event
 	err := w.db.WithContext(ctx).
-		Where("status = ? AND (next_retry_at IS NULL OR next_retry_at <= ?)", EventStatusPending, now).
+		Where("status = ? AND event_type IN ? AND (next_retry_at IS NULL OR next_retry_at <= ?)", EventStatusPending, eventTypes, now).
 		Order("created_at ASC").
 		Limit(w.cfg.BatchSize).
 		Find(&events).Error

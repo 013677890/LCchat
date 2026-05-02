@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/relation/internal/consumer"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
@@ -23,15 +24,16 @@ import (
 
 // RelationApp 统一管理 relation-service 生命周期。
 type RelationApp struct {
-	logger              *zap.Logger
-	metricsServer       *http.Server
-	grpcServer          *grpc.Server
-	grpcListener        net.Listener
-	grpcShutdownTimeout time.Duration
-	asyncPool           *ants.Pool
-	asyncReleaseTimeout relationAsyncReleaseTimeout
-	db                  *gorm.DB
-	redisClient         *goredis.Client
+	logger                 *zap.Logger
+	metricsServer          *http.Server
+	grpcServer             *grpc.Server
+	grpcListener           net.Listener
+	grpcShutdownTimeout    time.Duration
+	asyncPool              *ants.Pool
+	asyncReleaseTimeout    relationAsyncReleaseTimeout
+	accountDeletedConsumer *consumer.AccountDeletedConsumer
+	db                     *gorm.DB
+	redisClient            *goredis.Client
 }
 
 // NewRelationApp 只做资源聚合与合法性校验，不在构造阶段启动任何阻塞逻辑。
@@ -43,6 +45,7 @@ func NewRelationApp(
 	grpcShutdownTimeout relationGRPCShutdownTimeout,
 	asyncPool *ants.Pool,
 	asyncReleaseTimeout relationAsyncReleaseTimeout,
+	accountDeletedConsumer *consumer.AccountDeletedConsumer,
 	db *gorm.DB,
 	redisClient *goredis.Client,
 ) (*RelationApp, error) {
@@ -53,15 +56,16 @@ func NewRelationApp(
 		return nil, errors.New("grpc listener 未初始化")
 	}
 	return &RelationApp{
-		logger:              log,
-		metricsServer:       metricsServer,
-		grpcServer:          built.Server,
-		grpcListener:        grpcListener,
-		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
-		asyncPool:           asyncPool,
-		asyncReleaseTimeout: asyncReleaseTimeout,
-		db:                  db,
-		redisClient:         redisClient,
+		logger:                 log,
+		metricsServer:          metricsServer,
+		grpcServer:             built.Server,
+		grpcListener:           grpcListener,
+		grpcShutdownTimeout:    time.Duration(grpcShutdownTimeout),
+		asyncPool:              asyncPool,
+		asyncReleaseTimeout:    asyncReleaseTimeout,
+		accountDeletedConsumer: accountDeletedConsumer,
+		db:                     db,
+		redisClient:            redisClient,
 	}, nil
 }
 
@@ -74,6 +78,14 @@ func (a *RelationApp) Run(ctx context.Context) error {
 			logger.Info(ctx, "Metrics HTTP Server 启动中", logger.String("address", a.metricsServer.Addr))
 			if err := a.metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error(ctx, "Metrics HTTP Server 启动失败", logger.ErrorField("error", err))
+			}
+		}()
+	}
+
+	if a.accountDeletedConsumer != nil {
+		go func() {
+			if err := a.accountDeletedConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "Relation account.deleted 消费者运行错误", logger.ErrorField("error", err))
 			}
 		}()
 	}
@@ -113,6 +125,11 @@ func (a *RelationApp) Shutdown(ctx context.Context) error {
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("释放 Async 协程池失败: %w", err))
+		}
+	}
+	if a.accountDeletedConsumer != nil {
+		if err := a.accountDeletedConsumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Relation account.deleted 消费者失败: %w", err))
 		}
 	}
 	if a.redisClient != nil {

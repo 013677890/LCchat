@@ -10,6 +10,7 @@ import (
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
@@ -60,7 +61,18 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 		Status:    0,
 		IsAdmin:   0,
 	}
-	createdUser, err := s.authRepo.Create(ctx, user)
+
+	// 注册成功后需要异步打通资料初始化闭环，因此在同一事务里写入 user_created outbox 事件。
+	payload, err := accountevent.Encode(accountevent.UserCreatedPayload{
+		UserUUID: user.Uuid,
+		Nickname: user.Nickname,
+		Avatar:   user.Avatar,
+	})
+	if err != nil {
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "序列化注册事件失败")
+	}
+
+	createdUser, err := s.authRepo.CreateWithOutboxEvent(ctx, user, accountevent.EventTypeUserCreated, payload)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateKey) {
 			return nil, apperr.New(consts.CodeUserAlreadyExist)

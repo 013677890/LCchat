@@ -144,6 +144,53 @@ func (r *friendRepositoryImpl) DeleteFriendRelation(ctx context.Context, userUUI
 	return nil
 }
 
+// CleanupAccountRelations 在账号注销后清理 relation 域中与该用户相关的全部关系记录。
+//
+// 当前迁移阶段好友/黑名单仍共用 user_relation 表，因此这里统一按“软删除 + 缓存失效”处理，
+// 避免继续向外暴露已注销账号的关系数据。
+func (r *friendRepositoryImpl) CleanupAccountRelations(ctx context.Context, userUUID string) error {
+	if userUUID == "" {
+		return nil
+	}
+
+	type affectedRow struct {
+		UserUUID string `gorm:"column:user_uuid"`
+	}
+
+	var rows []affectedRow
+	if err := r.db.WithContext(ctx).
+		Model(&model.UserRelation{}).
+		Select("DISTINCT user_uuid").
+		Where("(user_uuid = ? OR peer_uuid = ?) AND deleted_at IS NULL", userUUID, userUUID).
+		Find(&rows).Error; err != nil {
+		return WrapDBError(err)
+	}
+
+	now := time.Now()
+	if err := r.db.WithContext(ctx).
+		Model(&model.UserRelation{}).
+		Where("(user_uuid = ? OR peer_uuid = ?) AND deleted_at IS NULL", userUUID, userUUID).
+		Updates(map[string]interface{}{
+			"status":         2,
+			"blacklisted_at": nil,
+			"deleted_at":     gorm.DeletedAt{Time: now, Valid: true},
+			"updated_at":     now,
+		}).Error; err != nil {
+		return WrapDBError(err)
+	}
+
+	affectedUsers := make([]string, 0, len(rows)+1)
+	affectedUsers = append(affectedUsers, userUUID)
+	for _, row := range rows {
+		if row.UserUUID == "" || row.UserUUID == userUUID {
+			continue
+		}
+		affectedUsers = append(affectedUsers, row.UserUUID)
+	}
+	r.invalidateRelationCachesAsync(ctx, affectedUsers)
+	return nil
+}
+
 // SetFriendRemark 更新好友备注。
 //
 // 备注是单向属性，只影响当前 userUUID 视角下看到的 peerUUID 展示信息。
@@ -666,6 +713,31 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisPipelineTimeout)
+}
+
+func (r *friendRepositoryImpl) invalidateRelationCachesAsync(ctx context.Context, userUUIDs []string) {
+	if r.redisClient == nil || len(userUUIDs) == 0 {
+		return
+	}
+
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		seen := make(map[string]struct{}, len(userUUIDs))
+		pipe := r.redisClient.Pipeline()
+		for _, userUUID := range userUUIDs {
+			if userUUID == "" {
+				continue
+			}
+			if _, ok := seen[userUUID]; ok {
+				continue
+			}
+			seen[userUUID] = struct{}{}
+			pipe.Del(runCtx, rediskey.FriendRelationKey(userUUID))
+			pipe.Del(runCtx, rediskey.BlacklistRelationKey(userUUID))
+		}
+		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
 			LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisPipelineTimeout)

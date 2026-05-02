@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/relation/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/repository"
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/service"
@@ -37,6 +38,7 @@ const relationGRPCDefaultTimeout = 300 * time.Millisecond
 func provideRelationLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideRelationAsyncConfig() config.AsyncConfig   { return config.DefaultAsyncConfig() }
 func provideRelationMySQLConfig() config.MySQLConfig   { return config.DefaultMySQLConfig() }
+func provideRelationKafkaConfig() config.KafkaConfig   { return config.DefaultKafkaConfig() }
 
 func provideRelationRedisConfig() config.RedisConfig {
 	cfg := config.DefaultRedisConfig()
@@ -92,6 +94,20 @@ func provideRelationGRPCShutdownTimeout() relationGRPCShutdownTimeout {
 	return relationGRPCShutdownTimeout(10 * time.Second)
 }
 
+// provideRelationAccountDeletedConsumer 构造 relation-service 的 account.deleted 消费者。
+func provideRelationAccountDeletedConsumer(
+	cfg config.KafkaConfig,
+	friendRepo repository.IFriendRepository,
+	applyRepo repository.IApplyRepository,
+	db *gorm.DB,
+) *consumer.AccountDeletedConsumer {
+	groupID := cfg.ConsumerConfig.GroupID + "-relation-account-deleted"
+	if cfg.ConsumerConfig.GroupID == "" {
+		groupID = "relation-account-deleted-group"
+	}
+	return consumer.NewAccountDeletedConsumer(cfg.Brokers, cfg.AccountDeletedTopic, groupID, friendRepo, applyRepo, db)
+}
+
 func provideRelationMetricsServer(addr relationMetricsAddress, built *grpcx.BuiltServer) *http.Server {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", built.Metrics.Handler())
@@ -133,6 +149,7 @@ var relationInfraProviderSet = wire.NewSet(
 	provideRelationLoggerConfig,
 	provideRelationAsyncConfig,
 	provideRelationMySQLConfig,
+	provideRelationKafkaConfig,
 	provideRelationRedisConfig,
 	provideRelationLogger,
 	provideRelationAsyncPool,
@@ -167,6 +184,7 @@ var relationHandlerProviderSet = wire.NewSet(
 var relationAppProviderSet = wire.NewSet(
 	relationInfraProviderSet,
 	relationRepositoryProviderSet,
+	provideRelationAccountDeletedConsumer,
 	relationServiceProviderSet,
 	relationHandlerProviderSet,
 	NewRelationApp,

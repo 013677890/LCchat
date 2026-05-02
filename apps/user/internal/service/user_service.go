@@ -1,18 +1,18 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"github.com/013677890/LCchat-Backend/apps/user/internal/converter"
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
 	"github.com/013677890/LCchat-Backend/apps/user/internal/utils"
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
-	"context"
-	"errors"
-	"fmt"
 	"regexp"
 	"time"
 
@@ -199,17 +199,15 @@ func (s *userServiceImpl) UpdateProfile(ctx context.Context, req *pb.UpdateProfi
 	}
 
 	// 3. 更新基本信息
-	err := s.userRepo.UpdateBasicInfo(ctx, userUUID, req.Nickname, req.Signature, req.Birthday, int8(req.Gender))
+	userInfo, err := s.userRepo.UpdateBasicInfoWithDisplayEvent(ctx, userUUID, req.Nickname, req.Signature, req.Birthday, int8(req.Gender))
 	if err != nil {
+		if errors.Is(err, repository.ErrRecordNotFound) {
+			return nil, apperr.New(consts.CodeUserNotFound)
+		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新基本信息失败")
 	}
 
-	// 4. 查询更新后的用户信息
-	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询更新后的用户信息失败")
-	}
-
+	// 4. 仓储层已经返回更新后的资料快照，这里只保留空值兜底判断。
 	if userInfo == nil {
 		return nil, apperr.New(consts.CodeUserNotFound)
 	}
@@ -243,15 +241,21 @@ func (s *userServiceImpl) UploadAvatar(ctx context.Context, req *pb.UploadAvatar
 		return nil, apperr.New(consts.CodeParamError)
 	}
 
-	// 3. 更新数据库中的头像字段
-	err := s.userRepo.UpdateAvatar(ctx, userUUID, req.AvatarUrl)
+	// 3. 更新数据库中的头像字段，并写入登录展示字段回写事件。
+	userInfo, err := s.userRepo.UpdateAvatarWithDisplayEvent(ctx, userUUID, req.AvatarUrl)
 	if err != nil {
+		if errors.Is(err, repository.ErrRecordNotFound) {
+			return nil, apperr.New(consts.CodeUserNotFound)
+		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新头像失败")
+	}
+	if userInfo == nil {
+		return nil, apperr.New(consts.CodeUserNotFound)
 	}
 
 	// 4. 返回新的头像URL
 	return &pb.UploadAvatarResponse{
-		AvatarUrl: req.AvatarUrl,
+		AvatarUrl: userInfo.Avatar,
 	}, nil
 }
 

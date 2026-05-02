@@ -12,74 +12,53 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/service"
 )
 
-// initializeRelationApp 由 Wire 生成的依赖注入函数。
-// 请在修改 wire.go 后运行 wire ./apps/relation/cmd/ 重新生成。
+// Injectors from wire.go:
+
 func initializeRelationApp() (*RelationApp, error) {
 	loggerConfig := provideRelationLoggerConfig()
-	zapLogger, err := provideRelationLogger(loggerConfig)
+	logger, err := provideRelationLogger(loggerConfig)
 	if err != nil {
 		return nil, err
 	}
-	asyncConfig := provideRelationAsyncConfig()
-	pool, err := provideRelationAsyncPool(zapLogger, asyncConfig)
-	if err != nil {
-		return nil, err
-	}
-	timeout := provideRelationAsyncReleaseTimeout(asyncConfig)
-	mysqlConfig := provideRelationMySQLConfig()
-	db, err := provideRelationMySQLDB(zapLogger, mysqlConfig)
+	mainRelationMetricsAddress := provideRelationMetricsAddress()
+	mySQLConfig := provideRelationMySQLConfig()
+	db, err := provideRelationMySQLDB(logger, mySQLConfig)
 	if err != nil {
 		return nil, err
 	}
 	redisConfig := provideRelationRedisConfig()
-	client, err := provideRelationRedisClient(zapLogger, redisConfig)
+	client, err := provideRelationRedisClient(logger, redisConfig)
 	if err != nil {
 		return nil, err
 	}
-
-	// Repository
-	friendRepo := repository.NewFriendRepository(db, client)
-	applyRepo := repository.NewApplyRepository(db, client)
-	blacklistRepo := repository.NewBlacklistRepository(db, client)
-
-	// Service
-	friendService := service.NewFriendService(db, client, friendRepo, applyRepo, blacklistRepo)
-	blacklistService := service.NewBlacklistService(db, client, blacklistRepo, friendRepo)
-
-	// Handler
-	friendHandler := handler.NewFriendHandler(friendService)
-	blacklistHandler := handler.NewBlacklistHandler(blacklistService)
-
-	// gRPC
+	iFriendRepository := repository.NewFriendRepository(db, client)
+	iApplyRepository := repository.NewApplyRepository(db, client)
+	iBlacklistRepository := repository.NewBlacklistRepository(db, client)
+	iFriendService := service.NewFriendService(db, client, iFriendRepository, iApplyRepository, iBlacklistRepository)
+	friendHandler := handler.NewFriendHandler(iFriendService)
+	iBlacklistService := service.NewBlacklistService(db, client, iBlacklistRepository, iFriendRepository)
+	blacklistHandler := handler.NewBlacklistHandler(iBlacklistService)
 	registrationFunc := provideRelationRegistration(friendHandler, blacklistHandler)
-	grpcAddress := provideRelationGRPCAddress()
-	builtServer, err := provideRelationGRPCServer(registrationFunc, grpcAddress)
+	mainRelationGRPCAddress := provideRelationGRPCAddress()
+	builtServer, err := provideRelationGRPCServer(registrationFunc, mainRelationGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
-	listener, err := provideRelationGRPCListener(grpcAddress)
+	server := provideRelationMetricsServer(mainRelationMetricsAddress, builtServer)
+	listener, err := provideRelationGRPCListener(mainRelationGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
-
-	// Metrics
-	metricsAddress := provideRelationMetricsAddress()
-	metricsServer := provideRelationMetricsServer(metricsAddress, builtServer)
-
-	// Timeouts
-	grpcShutdownTimeout := provideRelationGRPCShutdownTimeout()
-
-	relationApp, err := NewRelationApp(
-		zapLogger,
-		metricsServer,
-		builtServer,
-		listener,
-		grpcShutdownTimeout,
-		pool,
-		timeout,
-		db,
-		client,
-	)
+	mainRelationGRPCShutdownTimeout := provideRelationGRPCShutdownTimeout()
+	asyncConfig := provideRelationAsyncConfig()
+	pool, err := provideRelationAsyncPool(logger, asyncConfig)
+	if err != nil {
+		return nil, err
+	}
+	mainRelationAsyncReleaseTimeout := provideRelationAsyncReleaseTimeout(asyncConfig)
+	kafkaConfig := provideRelationKafkaConfig()
+	accountDeletedConsumer := provideRelationAccountDeletedConsumer(kafkaConfig, iFriendRepository, iApplyRepository, db)
+	relationApp, err := NewRelationApp(logger, server, builtServer, listener, mainRelationGRPCShutdownTimeout, pool, mainRelationAsyncReleaseTimeout, accountDeletedConsumer, db, client)
 	if err != nil {
 		return nil, err
 	}

@@ -13,8 +13,9 @@ type KafkaConfig struct {
 	ConsumerConfig KafkaConsumerConfig `json:"consumer" yaml:"consumer"`
 
 	// Redis 重试队列配置
-	RedisRetryTopic string `json:"redisRetryTopic" yaml:"redisRetryTopic"` // Redis 重试队列 topic
-	MsgPushTopic    string `json:"msgPushTopic" yaml:"msgPushTopic"`       // 消息推送 topic（msg-service → Push-Job）
+	RedisRetryTopic     string `json:"redisRetryTopic" yaml:"redisRetryTopic"`         // Redis 重试队列 topic
+	AccountDeletedTopic string `json:"accountDeletedTopic" yaml:"accountDeletedTopic"` // 账号注销事件 topic
+	MsgPushTopic        string `json:"msgPushTopic" yaml:"msgPushTopic"`               // 消息推送 topic（msg-service → Push-Job）
 }
 
 // KafkaProducerConfig Kafka 生产者配置
@@ -46,9 +47,10 @@ func DefaultKafkaConfig() KafkaConfig {
 	}
 
 	return KafkaConfig{
-		Brokers:         brokers,
-		RedisRetryTopic: getenvString("KAFKA_RETRY_TOPIC", "redis-retry-queue"),
-		MsgPushTopic:    getenvString("KAFKA_MSG_PUSH_TOPIC", "msg.push"),
+		Brokers:             brokers,
+		RedisRetryTopic:     getenvString("KAFKA_RETRY_TOPIC", "redis-retry-queue"),
+		AccountDeletedTopic: getenvString("KAFKA_ACCOUNT_DELETED_TOPIC", "account.deleted"),
+		MsgPushTopic:        getenvString("KAFKA_MSG_PUSH_TOPIC", "msg.push"),
 
 		ProducerConfig: KafkaProducerConfig{
 			BatchSize:    100,

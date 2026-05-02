@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/auth/internal/worker"
 	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	"github.com/013677890/LCchat-Backend/config"
 	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
@@ -33,6 +34,7 @@ type AuthApp struct {
 	grpcListener        net.Listener
 	grpcShutdownTimeout time.Duration
 	redisConsumer       *mq.RedisRetryConsumer
+	accountEventWorker  *worker.AccountEventWorker
 	kafkaProducer       *kafka.Producer
 	db                  *gorm.DB
 	redisClient         *goredis.Client
@@ -46,6 +48,7 @@ func NewAuthApp(
 	grpcListener net.Listener,
 	grpcShutdownTimeout authGRPCShutdownTimeout,
 	redisConsumer *mq.RedisRetryConsumer,
+	accountEventWorker *worker.AccountEventWorker,
 	kafkaProducer *kafka.Producer,
 	db *gorm.DB,
 	redisClient *goredis.Client,
@@ -63,6 +66,7 @@ func NewAuthApp(
 		grpcListener:        grpcListener,
 		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
 		redisConsumer:       redisConsumer,
+		accountEventWorker:  accountEventWorker,
 		kafkaProducer:       kafkaProducer,
 		db:                  db,
 		redisClient:         redisClient,
@@ -87,6 +91,14 @@ func (a *AuthApp) Run(ctx context.Context) error {
 			logger.Info(ctx, "Redis 重试消费者启动中")
 			if err := a.redisConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Error(ctx, "Redis 重试消费者运行错误", logger.ErrorField("error", err))
+			}
+		}()
+	}
+
+	if a.accountEventWorker != nil {
+		go func() {
+			if err := a.accountEventWorker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "Auth Outbox Worker 运行错误", logger.ErrorField("error", err))
 			}
 		}()
 	}
@@ -120,6 +132,11 @@ func (a *AuthApp) Shutdown(ctx context.Context) error {
 	if a.redisConsumer != nil {
 		if err := a.redisConsumer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Redis 重试消费者失败: %w", err))
+		}
+	}
+	if a.accountEventWorker != nil {
+		if err := a.accountEventWorker.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Auth Outbox Worker 失败: %w", err))
 		}
 	}
 	if a.kafkaProducer != nil {

@@ -1,13 +1,15 @@
 package repository
 
 import (
-	"github.com/013677890/LCchat-Backend/apps/user/mq"
-	"github.com/013677890/LCchat-Backend/consts/redisKey"
-	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/async"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/013677890/LCchat-Backend/apps/user/mq"
+	"github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/accountevent"
+	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"math/rand"
 	"strings"
 	"time"
@@ -242,60 +244,91 @@ func (r *userRepositoryImpl) UpdateAvatar(ctx context.Context, userUUID, avatar 
 		return WrapDBError(err)
 	}
 
-	// 更新成功后，删除 Redis 缓存
-	cacheKey := rediskey.UserInfoKey(userUUID)
-	err = r.redisClient.Del(ctx, cacheKey).Err()
-	if err != nil {
-		// 发送到重试队列
-		task := mq.BuildDelTask(cacheKey).
-			WithSource("UserRepository.UpdateAvatar")
-		LogAndRetryRedisError(ctx, task, err)
-	}
+	// 更新成功后，删除 Redis 缓存。
+	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateAvatar")
 
 	return nil
 }
 
+// UpdateAvatarWithDisplayEvent 更新头像并写入展示字段变更事件。
+func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserInfo, error) {
+	var user model.UserInfo
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.UserInfo{}).
+			Where("uuid = ? AND deleted_at IS NULL", userUUID).
+			Update("avatar", avatar).Error; err != nil {
+			return WrapDBError(err)
+		}
+
+		if err := tx.Where("uuid = ? AND deleted_at IS NULL", userUUID).First(&user).Error; err != nil {
+			return WrapDBError(err)
+		}
+
+		payload, err := accountevent.Encode(accountevent.ProfileDisplayChangedPayload{
+			UserUUID: user.Uuid,
+			Nickname: user.Nickname,
+			Avatar:   user.Avatar,
+		})
+		if err != nil {
+			return err
+		}
+
+		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, user.Uuid, payload); err != nil {
+			return WrapDBError(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateAvatarWithDisplayEvent")
+	return &user, nil
+}
+
 // UpdateBasicInfo 更新基本信息
 func (r *userRepositoryImpl) UpdateBasicInfo(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) error {
-	// 构造更新字段
-	updates := map[string]interface{}{
-		"updated_at": time.Now(),
-	}
-
-	if nickname != "" {
-		updates["nickname"] = nickname
-	}
-	if signature != "" {
-		updates["signature"] = signature
-	}
-	if birthday != "" {
-		updates["birthday"] = birthday
-	}
-	if gender > 0 {
-		updates["gender"] = gender
-	}
-
-	// 执行更新
-	err := r.db.WithContext(ctx).
-		Model(&model.UserInfo{}).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
-		Updates(updates).
-		Error
+	err := r.applyBasicInfoUpdate(r.db.WithContext(ctx), userUUID, nickname, signature, birthday, gender)
 	if err != nil {
-		return WrapDBError(err)
+		return err
 	}
 
-	// 更新成功后，删除Redis缓存
-	cacheKey := rediskey.UserInfoKey(userUUID)
-	err = r.redisClient.Del(ctx, cacheKey).Err()
-	if err != nil {
-		// 发送到重试队列
-		task := mq.BuildDelTask(cacheKey).
-			WithSource("UserRepository.UpdateNickname")
-		LogAndRetryRedisError(ctx, task, err)
-	}
-
+	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateBasicInfo")
 	return nil
+}
+
+// UpdateBasicInfoWithDisplayEvent 更新基本信息并写入展示字段变更事件。
+func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) (*model.UserInfo, error) {
+	var user model.UserInfo
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.applyBasicInfoUpdate(tx, userUUID, nickname, signature, birthday, gender); err != nil {
+			return err
+		}
+
+		if err := tx.Where("uuid = ? AND deleted_at IS NULL", userUUID).First(&user).Error; err != nil {
+			return WrapDBError(err)
+		}
+
+		payload, err := accountevent.Encode(accountevent.ProfileDisplayChangedPayload{
+			UserUUID: user.Uuid,
+			Nickname: user.Nickname,
+			Avatar:   user.Avatar,
+		})
+		if err != nil {
+			return err
+		}
+
+		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, user.Uuid, payload); err != nil {
+			return WrapDBError(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateBasicInfoWithDisplayEvent")
+	return &user, nil
 }
 
 // UpdateEmail 更新邮箱
@@ -310,15 +343,7 @@ func (r *userRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email st
 		return WrapDBError(err)
 	}
 
-	// 更新成功后，删除Redis缓存
-	cacheKey := rediskey.UserInfoKey(userUUID)
-	err = r.redisClient.Del(ctx, cacheKey).Err()
-	if err != nil {
-		// 发送到重试队列
-		task := mq.BuildDelTask(cacheKey).
-			WithSource("UserRepository.UpdateEmail")
-		LogAndRetryRedisError(ctx, task, err)
-	}
+	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateEmail")
 
 	return nil
 }
@@ -340,15 +365,7 @@ func (r *userRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 		return WrapDBError(err)
 	}
 
-	// 2. 删除 Redis 缓存
-	cacheKey := rediskey.UserInfoKey(userUUID)
-	err = r.redisClient.Del(ctx, cacheKey).Err()
-	if err != nil {
-		// 发送到重试队列
-		task := mq.BuildDelTask(cacheKey).
-			WithSource("UserRepository.Delete")
-		LogAndRetryRedisError(ctx, task, err)
-	}
+	r.invalidateUserCache(ctx, userUUID, "UserRepository.Delete")
 
 	return nil
 }
@@ -384,17 +401,49 @@ func (r *userRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, passw
 		return WrapDBError(err)
 	}
 
-	// 更新成功后，删除Redis缓存
-	cacheKey := rediskey.UserInfoKey(userUUID)
-	err = r.redisClient.Del(ctx, cacheKey).Err()
-	if err != nil {
-		// 发送到重试队列
-		task := mq.BuildDelTask(cacheKey).
-			WithSource("UserRepository.UpdatePassword")
-		LogAndRetryRedisError(ctx, task, err)
-	}
+	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdatePassword")
 
 	return nil
+}
+
+func (r *userRepositoryImpl) applyBasicInfoUpdate(db *gorm.DB, userUUID string, nickname, signature, birthday string, gender int8) error {
+	updates := map[string]interface{}{
+		"updated_at": time.Now(),
+	}
+
+	if nickname != "" {
+		updates["nickname"] = nickname
+	}
+	if signature != "" {
+		updates["signature"] = signature
+	}
+	if birthday != "" {
+		updates["birthday"] = birthday
+	}
+	if gender > 0 {
+		updates["gender"] = gender
+	}
+
+	if err := db.Model(&model.UserInfo{}).
+		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		Updates(updates).
+		Error; err != nil {
+		return WrapDBError(err)
+	}
+	return nil
+}
+
+func (r *userRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID, source string) {
+	if r.redisClient == nil || userUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.UserInfoKey(userUUID)
+	if err := r.redisClient.Del(ctx, cacheKey).Err(); err != nil {
+		task := mq.BuildDelTask(cacheKey).
+			WithSource(source)
+		LogAndRetryRedisError(ctx, task, err)
+	}
 }
 
 // SaveQRCode 保存用户二维码
