@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -58,4 +60,9 @@ func WrapRedisError(err error) error {
 // LogRedisError 记录 Redis 降级日志。
 func LogRedisError(ctx context.Context, err error) {
 	logger.Warn(ctx, "Redis 操作错误，已降级处理", logger.ErrorField("error", err))
+}
+
+// LogAndRetryRedisError 记录 Redis 失败日志并投递异步重试任务。
+func LogAndRetryRedisError(ctx context.Context, task mq.RedisTask, err error) {
+	redisretry.LogAndRetryRedisError(ctx, task, err)
 }

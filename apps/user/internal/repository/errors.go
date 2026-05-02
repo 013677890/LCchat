@@ -1,12 +1,13 @@
 package repository
 
 import (
-	"github.com/013677890/LCchat-Backend/apps/user/mq"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"context"
 	"errors"
 	"fmt"
 
+	"github.com/013677890/LCchat-Backend/apps/user/mq"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -90,23 +91,5 @@ func LogRedisError(ctx context.Context, err error) {
 // LogAndRetryRedisError 日志记录redis错误并发送到kafka重试
 // task: 要重试的 Redis 任务（由调用方构造）
 func LogAndRetryRedisError(ctx context.Context, task mq.RedisTask, err error) {
-	// 1. 记录 Redis 错误日志
-	logger.Warn(ctx, "Redis 操作失败，发送到重试队列",
-		logger.ErrorField("error", err),
-		logger.String("task_type", string(task.Type)),
-		logger.String("command", task.Command),
-	)
-
-	// 2. 为任务添加上下文信息和错误信息
-	task = task.WithContext(ctx).WithError(err)
-
-	// 3. 发送到 Kafka 重试队列
-	if kafkaErr := mq.SendRedisTask(ctx, task); kafkaErr != nil {
-		// Kafka 发送失败，记录错误日志用于监控报警，然后放弃
-		logger.Error(ctx, "发送 Redis 重试任务到 Kafka 失败，放弃处理",
-			logger.ErrorField("kafka_error", kafkaErr),
-			logger.ErrorField("original_error", err),
-			logger.String("task_type", string(task.Type)),
-		)
-	}
+	redisretry.LogAndRetryRedisError(ctx, task, err)
 }

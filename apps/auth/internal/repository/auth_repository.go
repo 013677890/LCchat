@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/redis/go-redis/v9"
@@ -136,7 +137,16 @@ func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyC
 	if r.redisClient == nil {
 		return ErrRedis
 	}
-	return WrapRedisError(r.redisClient.Set(ctx, rediskey.VerifyCodeKey(email, codeType), verifyCode, expireDuration).Err())
+	key := rediskey.VerifyCodeKey(email, codeType)
+	err := r.redisClient.Set(ctx, key, verifyCode, expireDuration).Err()
+	if err != nil {
+		// 验证码写入属于高可靠 Redis 写，失败时保留同步报错并追加异步补偿。
+		task := mq.BuildSetTask(key, verifyCode, expireDuration).
+			WithSource("AuthRepository.StoreVerifyCode")
+		LogAndRetryRedisError(ctx, task, err)
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 // DeleteVerifyCode 删除验证码。
@@ -144,7 +154,16 @@ func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string,
 	if r.redisClient == nil {
 		return nil
 	}
-	return WrapRedisError(r.redisClient.Del(ctx, rediskey.VerifyCodeKey(email, codeType)).Err())
+	key := rediskey.VerifyCodeKey(email, codeType)
+	err := r.redisClient.Del(ctx, key).Err()
+	if err != nil {
+		// 验证码删除允许短暂最终一致，失败后通过补偿任务兜底清理。
+		task := mq.BuildDelTask(key).
+			WithSource("AuthRepository.DeleteVerifyCode")
+		LogAndRetryRedisError(ctx, task, err)
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 // VerifyVerifyCodeRateLimit 校验验证码发送限流。
@@ -185,6 +204,7 @@ func (r *authRepositoryImpl) IncrementVerifyCodeCount(ctx context.Context, email
 	if r.redisClient == nil {
 		return nil
 	}
+	// 验证码限流计数具有强时序语义，失败后直接返回，避免异步重放放大计数。
 	pipe := r.redisClient.Pipeline()
 	if _, err := pipe.Eval(ctx, luaIncrementWithExpire, []string{rediskey.VerifyCodeMinuteKey(email)}, int(rediskey.VerifyCodeMinuteTTL.Seconds())).Result(); err != nil {
 		return WrapRedisError(err)
@@ -253,9 +273,16 @@ func (r *authRepositoryImpl) BatchGetAccountStatus(ctx context.Context, userUUID
 	return items, nil
 }
 
+// invalidateUserCache 删除登录态依赖的用户缓存，并在失败时投递补偿任务。
 func (r *authRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID string) {
 	if r.redisClient == nil || userUUID == "" {
 		return
 	}
-	_ = r.redisClient.Del(ctx, rediskey.UserInfoKey(userUUID)).Err()
+	key := rediskey.UserInfoKey(userUUID)
+	if err := r.redisClient.Del(ctx, key).Err(); err != nil {
+		// 用户信息缓存失效允许最终一致，失败后异步补偿即可。
+		task := mq.BuildDelTask(key).
+			WithSource("AuthRepository.invalidateUserCache")
+		LogAndRetryRedisError(ctx, task, err)
+	}
 }

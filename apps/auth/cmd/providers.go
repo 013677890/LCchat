@@ -7,12 +7,14 @@ import (
 	"os"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/repository"
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/service"
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -33,6 +35,7 @@ const authGRPCDefaultTimeout = 300 * time.Millisecond
 
 func provideAuthLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideAuthMySQLConfig() config.MySQLConfig   { return config.DefaultMySQLConfig() }
+func provideAuthKafkaConfig() config.KafkaConfig   { return config.DefaultKafkaConfig() }
 
 func provideAuthRedisConfig() config.RedisConfig {
 	cfg := config.DefaultRedisConfig()
@@ -58,6 +61,29 @@ func provideAuthRedisClient(log *zap.Logger, cfg config.RedisConfig) (*goredis.C
 		return nil, nil
 	}
 	return client, nil
+}
+
+// Redis 重试链路建立在 Redis 可用前提之上，因此降级模式下不再启动 Kafka producer。
+func provideAuthKafkaProducer(redisClient *goredis.Client, cfg config.KafkaConfig) *kafka.Producer {
+	if redisClient == nil {
+		return nil
+	}
+	return kafka.NewProducer(cfg.Brokers, cfg.RedisRetryTopic)
+}
+
+// Consumer 只在这里构造，真正启动放到 AuthApp.Run，避免 provider 隐式拉起后台 goroutine。
+func provideAuthRedisRetryConsumer(redisClient *goredis.Client, producer *kafka.Producer, cfg config.KafkaConfig, log *zap.Logger) *mq.RedisRetryConsumer {
+	if redisClient == nil || producer == nil {
+		return nil
+	}
+	return mq.NewRedisRetryConsumer(
+		cfg.Brokers,
+		cfg.RedisRetryTopic,
+		cfg.ConsumerConfig.GroupID,
+		redisClient,
+		producer,
+		kafka.NewZapLoggerAdapter(log),
+	)
 }
 
 func provideAuthGRPCAddress() authGRPCAddress {
@@ -139,9 +165,12 @@ var authInfraProviderSet = wire.NewSet(
 	provideAuthLoggerConfig,
 	provideAuthMySQLConfig,
 	provideAuthRedisConfig,
+	provideAuthKafkaConfig,
 	provideAuthLogger,
 	provideAuthMySQLDB,
 	provideAuthRedisClient,
+	provideAuthKafkaProducer,
+	provideAuthRedisRetryConsumer,
 	provideAuthGRPCAddress,
 	provideAuthMetricsAddress,
 	provideAuthGRPCShutdownTimeout,

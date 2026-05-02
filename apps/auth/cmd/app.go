@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	"github.com/013677890/LCchat-Backend/config"
 	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -30,6 +32,8 @@ type AuthApp struct {
 	grpcServer          *grpc.Server
 	grpcListener        net.Listener
 	grpcShutdownTimeout time.Duration
+	redisConsumer       *mq.RedisRetryConsumer
+	kafkaProducer       *kafka.Producer
 	db                  *gorm.DB
 	redisClient         *goredis.Client
 }
@@ -41,6 +45,8 @@ func NewAuthApp(
 	built *grpcx.BuiltServer,
 	grpcListener net.Listener,
 	grpcShutdownTimeout authGRPCShutdownTimeout,
+	redisConsumer *mq.RedisRetryConsumer,
+	kafkaProducer *kafka.Producer,
 	db *gorm.DB,
 	redisClient *goredis.Client,
 ) (*AuthApp, error) {
@@ -56,6 +62,8 @@ func NewAuthApp(
 		grpcServer:          built.Server,
 		grpcListener:        grpcListener,
 		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
+		redisConsumer:       redisConsumer,
+		kafkaProducer:       kafkaProducer,
 		db:                  db,
 		redisClient:         redisClient,
 	}, nil
@@ -70,6 +78,15 @@ func (a *AuthApp) Run(ctx context.Context) error {
 			logger.Info(ctx, "Metrics HTTP Server 启动中", logger.String("address", a.metricsServer.Addr))
 			if err := a.metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error(ctx, "Metrics HTTP Server 启动失败", logger.ErrorField("error", err))
+			}
+		}()
+	}
+
+	if a.redisConsumer != nil {
+		go func() {
+			logger.Info(ctx, "Redis 重试消费者启动中")
+			if err := a.redisConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "Redis 重试消费者运行错误", logger.ErrorField("error", err))
 			}
 		}()
 	}
@@ -98,6 +115,16 @@ func (a *AuthApp) Shutdown(ctx context.Context) error {
 	if a.grpcListener != nil {
 		if err := a.grpcListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			errs = append(errs, fmt.Errorf("关闭 grpc listener 失败: %w", err))
+		}
+	}
+	if a.redisConsumer != nil {
+		if err := a.redisConsumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Redis 重试消费者失败: %w", err))
+		}
+	}
+	if a.kafkaProducer != nil {
+		if err := a.kafkaProducer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Kafka Producer 失败: %w", err))
 		}
 	}
 	if a.redisClient != nil {
@@ -139,6 +166,9 @@ func (a *AuthApp) installProcessGlobals(ctx context.Context) {
 	})
 	deviceCfg := config.DefaultDeviceActiveConfig()
 	pkgdeviceactive.SetOnlineWindow(deviceCfg.OnlineWindow)
+	if a.kafkaProducer != nil {
+		mq.SetGlobalProducer(a.kafkaProducer)
+	}
 	_ = ctx
 }
 

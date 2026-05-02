@@ -53,7 +53,10 @@ func initializeAuthApp() (*AuthApp, error) {
 		return nil, err
 	}
 	mainAuthGRPCShutdownTimeout := provideAuthGRPCShutdownTimeout()
-	authApp, err := NewAuthApp(logger, server, builtServer, listener, mainAuthGRPCShutdownTimeout, db, client)
+	kafkaConfig := provideAuthKafkaConfig()
+	producer := provideAuthKafkaProducer(client, kafkaConfig)
+	v := provideAuthRedisRetryConsumer(client, producer, kafkaConfig, logger)
+	authApp, err := NewAuthApp(logger, server, builtServer, listener, mainAuthGRPCShutdownTimeout, v, producer, db, client)
 	if err != nil {
 		return nil, err
 	}
