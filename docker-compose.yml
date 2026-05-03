@@ -7,9 +7,15 @@ services:
       - --default-authentication-plugin=mysql_native_password
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+      - --binlog-expire-logs-seconds=604800
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-chat_server}
+      MYSQL_ROOT_HOST: "%"
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
@@ -41,7 +47,6 @@ services:
       - chat-network
 
   kafka:
-    # 固定小版本，避免 latest 漂移导致本地/CI 行为不一致
     image: ${KAFKA_IMAGE:-apache/kafka:3.9.2}
     restart: unless-stopped
     environment:
@@ -56,6 +61,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "${KAFKA_PORT:-9092}:9092"
     healthcheck:
@@ -64,6 +70,55 @@ services:
       timeout: 5s
       retries: 20
       start_period: 20s
+    networks:
+      - chat-network
+
+  kafka-connect:
+    image: ${KAFKA_CONNECT_IMAGE:-debezium/connect:3.0}
+    restart: unless-stopped
+    environment:
+      BOOTSTRAP_SERVERS: "kafka:9092"
+      GROUP_ID: "lcchat-kafka-connect"
+      CONFIG_STORAGE_TOPIC: "lcchat_connect_configs"
+      OFFSET_STORAGE_TOPIC: "lcchat_connect_offsets"
+      STATUS_STORAGE_TOPIC: "lcchat_connect_statuses"
+      CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      KEY_CONVERTER: "org.apache.kafka.connect.storage.StringConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      REST_ADVERTISED_HOST_NAME: "kafka-connect"
+      REST_PORT: "8083"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "${KAFKA_CONNECT_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8083' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - chat-network
+
+  cdc-init:
+    image: curlimages/curl:8.13.0
+    restart: "no"
+    env_file:
+      - ./deploy/env/chatserver.env
+    volumes:
+      - ./scripts/cdc/register_outbox_connector.sh:/scripts/register_outbox_connector.sh:ro
+    entrypoint: ["sh", "/scripts/register_outbox_connector.sh"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-connect:
+        condition: service_healthy
     networks:
       - chat-network
 
@@ -87,32 +142,44 @@ services:
     networks:
       - chat-network
 
-  connect:
+  auth:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    working_dir: /app/apps/connect
-    command: ["go", "run", "cmd/main.go"]
+    working_dir: /app/apps/auth
+    command: ["go", "run", "./cmd"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
       TZ: ${TZ:-UTC}
-      GIN_MODE: ${GIN_MODE:-release}
-      # 容器内需访问 user 服务，不可使用默认的 :9090
-      USER_GRPC_ADDR: "user:9090"
-      CONNECT_ADDR: ":8081"
-      CONNECT_GRPC_ADDR: ":9091"
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_USER_CREATED_TOPIC: user_created
+      KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC: profile_display_changed
+      KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
+      AUTH_GRPC_ADDR: ":9090"
+      AUTH_METRICS_ADDR: ":9190"
+      EMAIL_SENDER: ${EMAIL_SENDER:-2315635418@qq.com}
+      EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-LCChat}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-smtp.qq.com}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-465}
+      EMAIL_AUTH_CODE: ${EMAIL_AUTH_CODE}
     depends_on:
-      user:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+      cdc-init:
+        condition: service_completed_successfully
     ports:
-      - "${CONNECT_HTTP_PORT:-8081}:8081"
-      - "${CONNECT_GRPC_PORT:-9092}:9091"
+      - "${AUTH_GRPC_PORT:-19090}:9090"
+      - "${AUTH_METRICS_PORT:-19190}:9190"
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8081' || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9190/metrics >/dev/null || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -131,6 +198,12 @@ services:
       - ./deploy/env/chatserver.env
     environment:
       TZ: ${TZ:-UTC}
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_USER_CREATED_TOPIC: user_created
+      KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC: profile_display_changed
+      KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
       USER_GRPC_ADDR: ":9090"
       USER_METRICS_ADDR: ":9091"
       EMAIL_SENDER: ${EMAIL_SENDER:-2315635418@qq.com}
@@ -145,6 +218,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      cdc-init:
+        condition: service_completed_successfully
     ports:
       - "${USER_GRPC_PORT:-9090}:9090"
       - "${USER_METRICS_PORT:-9091}:9091"
@@ -157,34 +232,37 @@ services:
     networks:
       - chat-network
 
-  gateway:
+  relation:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    working_dir: /app/apps/gateway
+    working_dir: /app/apps/relation
     command: ["go", "run", "./cmd"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
       TZ: ${TZ:-UTC}
-      GIN_MODE: ${GIN_MODE:-release}
-      USER_SERVICE_ADDR: "user:9090"
-      MSG_SERVICE_ADDR: "msg:9092"
-      GATEWAY_ADDR: ":8080"
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
+      RELATION_GRPC_ADDR: ":9093"
+      RELATION_METRICS_ADDR: ":9193"
     depends_on:
-      user:
-        condition: service_healthy
-      msg:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
+      kafka:
         condition: service_healthy
+      cdc-init:
+        condition: service_completed_successfully
     ports:
-      - "${GATEWAY_HTTP_PORT:-8080}:8080"
+      - "${RELATION_GRPC_PORT:-19093}:9093"
+      - "${RELATION_METRICS_PORT:-19193}:9193"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9193/metrics >/dev/null || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -221,6 +299,47 @@ services:
       - "${MSG_METRICS_PORT:-19093}:9093"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9093/metrics >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - chat-network
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    working_dir: /app/apps/gateway
+    command: ["go", "run", "./cmd"]
+    env_file:
+      - ./deploy/env/chatserver.env
+    environment:
+      TZ: ${TZ:-UTC}
+      GIN_MODE: ${GIN_MODE:-release}
+      AUTH_SERVICE_ADDR: "auth:9090"
+      USER_SERVICE_ADDR: "user:9090"
+      RELATION_SERVICE_ADDR: "relation:9093"
+      MSG_SERVICE_ADDR: "msg:9092"
+      GATEWAY_ADDR: ":8080"
+    depends_on:
+      auth:
+        condition: service_healthy
+      user:
+        condition: service_healthy
+      relation:
+        condition: service_healthy
+      msg:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${GATEWAY_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 30

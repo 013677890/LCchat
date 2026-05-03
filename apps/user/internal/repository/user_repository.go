@@ -10,6 +10,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"math/rand"
 	"strings"
 	"time"
@@ -264,7 +265,9 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 			return WrapDBError(err)
 		}
 
+		eventID := util.GenIDString()
 		payload, err := accountevent.Encode(accountevent.ProfileDisplayChangedPayload{
+			EventID:  eventID,
 			UserUUID: user.Uuid,
 			Nickname: user.Nickname,
 			Avatar:   user.Avatar,
@@ -309,7 +312,9 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 			return WrapDBError(err)
 		}
 
+		eventID := util.GenIDString()
 		payload, err := accountevent.Encode(accountevent.ProfileDisplayChangedPayload{
+			EventID:  eventID,
 			UserUUID: user.Uuid,
 			Nickname: user.Nickname,
 			Avatar:   user.Avatar,

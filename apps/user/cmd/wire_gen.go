@@ -56,11 +56,7 @@ func initializeUserApp() (*UserApp, error) {
 	kafkaConfig := provideUserKafkaConfig()
 	producer := provideUserKafkaProducer(client, kafkaConfig)
 	v := provideUserRedisRetryConsumer(client, producer, kafkaConfig, logger)
-	mainUserAuthGRPCAddress := provideUserAuthGRPCAddress()
-	profileEventWorker, err := provideUserProfileEventWorker(mainUserAuthGRPCAddress, db)
-	if err != nil {
-		return nil, err
-	}
+	userCreatedConsumer := provideUserUserCreatedConsumer(kafkaConfig, iInternalProfileService, db)
 	accountDeletedConsumer := provideUserAccountDeletedConsumer(kafkaConfig, iUserRepository, db)
 	asyncConfig := provideUserAsyncConfig()
 	pool, err := provideUserAsyncPool(logger, asyncConfig)
@@ -68,7 +64,7 @@ func initializeUserApp() (*UserApp, error) {
 		return nil, err
 	}
 	mainUserAsyncReleaseTimeout := provideUserAsyncReleaseTimeout(asyncConfig)
-	userApp, err := NewUserApp(logger, server, builtServer, listener, mainUserGRPCShutdownTimeout, v, profileEventWorker, accountDeletedConsumer, producer, pool, mainUserAsyncReleaseTimeout, db, client)
+	userApp, err := NewUserApp(logger, server, builtServer, listener, mainUserGRPCShutdownTimeout, v, userCreatedConsumer, accountDeletedConsumer, producer, pool, mainUserAsyncReleaseTimeout, db, client)
 	if err != nil {
 		return nil, err
 	}

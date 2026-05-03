@@ -7,6 +7,29 @@ CREATE DATABASE IF NOT EXISTS `chat_server`
   COLLATE utf8mb4_unicode_ci;
 USE `chat_server`;
 
+CREATE USER IF NOT EXISTS 'debezium'@'%' IDENTIFIED BY 'debezium';
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'debezium'@'%';
+
+CREATE TABLE IF NOT EXISTS `outbox_events` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增事件ID',
+  `event_type` VARCHAR(128) NOT NULL COMMENT '领域事件类型',
+  `entity_id` VARCHAR(64) NOT NULL COMMENT '事件分区键（通常是 user_uuid）',
+  `payload` LONGTEXT NOT NULL COMMENT '事件负载 JSON',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_outbox_event_type_created` (`event_type`, `created_at`),
+  KEY `idx_outbox_entity_id` (`entity_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CDC Outbox 事件表';
+
+CREATE TABLE IF NOT EXISTS `idempotent_events` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+  `event_type` VARCHAR(64) NOT NULL COMMENT '事件类型',
+  `event_id` VARCHAR(64) NOT NULL COMMENT '事件唯一ID',
+  `processed_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '处理时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_type_event` (`event_type`, `event_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='幂等消费记录表';
+
 CREATE TABLE IF NOT EXISTS `user_info` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `uuid` CHAR(20) NOT NULL COMMENT '用户唯一id',
@@ -199,4 +222,5 @@ CREATE TABLE IF NOT EXISTS `group_conversation` (
   KEY `idx_last_msg_at` (`last_msg_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群会话状态(热数据,每条群消息更新一次)';
 
+FLUSH PRIVILEGES;
 SET FOREIGN_KEY_CHECKS = 1;

@@ -12,10 +12,12 @@ type KafkaConfig struct {
 	// Consumer 配置
 	ConsumerConfig KafkaConsumerConfig `json:"consumer" yaml:"consumer"`
 
-	// Redis 重试队列配置
-	RedisRetryTopic     string `json:"redisRetryTopic" yaml:"redisRetryTopic"`         // Redis 重试队列 topic
-	AccountDeletedTopic string `json:"accountDeletedTopic" yaml:"accountDeletedTopic"` // 账号注销事件 topic
-	MsgPushTopic        string `json:"msgPushTopic" yaml:"msgPushTopic"`               // 消息推送 topic（msg-service → Push-Job）
+	// 业务 Topic 配置
+	RedisRetryTopic            string `json:"redisRetryTopic" yaml:"redisRetryTopic"`                       // Redis 重试队列 topic
+	UserCreatedTopic           string `json:"userCreatedTopic" yaml:"userCreatedTopic"`                     // 注册完成事件 topic
+	ProfileDisplayChangedTopic string `json:"profileDisplayChangedTopic" yaml:"profileDisplayChangedTopic"` // 资料展示字段变更事件 topic
+	AccountDeletedTopic        string `json:"accountDeletedTopic" yaml:"accountDeletedTopic"`               // 账号注销事件 topic
+	MsgPushTopic               string `json:"msgPushTopic" yaml:"msgPushTopic"`                             // 消息推送 topic（msg-service → Push-Job）
 }
 
 // KafkaProducerConfig Kafka 生产者配置
@@ -47,10 +49,12 @@ func DefaultKafkaConfig() KafkaConfig {
 	}
 
 	return KafkaConfig{
-		Brokers:             brokers,
-		RedisRetryTopic:     getenvString("KAFKA_RETRY_TOPIC", "redis-retry-queue"),
-		AccountDeletedTopic: getenvString("KAFKA_ACCOUNT_DELETED_TOPIC", "account.deleted"),
-		MsgPushTopic:        getenvString("KAFKA_MSG_PUSH_TOPIC", "msg.push"),
+		Brokers:                    brokers,
+		RedisRetryTopic:            getenvString("KAFKA_RETRY_TOPIC", "redis-retry-queue"),
+		UserCreatedTopic:           getenvString("KAFKA_USER_CREATED_TOPIC", "user_created"),
+		ProfileDisplayChangedTopic: getenvString("KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC", "profile_display_changed"),
+		AccountDeletedTopic:        getenvString("KAFKA_ACCOUNT_DELETED_TOPIC", "account.deleted"),
+		MsgPushTopic:               getenvString("KAFKA_MSG_PUSH_TOPIC", "msg.push"),
 
 		ProducerConfig: KafkaProducerConfig{
 			BatchSize:    100,

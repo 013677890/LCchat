@@ -128,7 +128,9 @@ func (s *accountServiceImpl) DeleteAccount(ctx context.Context, req *authpb.Dele
 
 	// 账号注销后需要广播给 user/relation 做清理，因此在软删除事务里同时写入 outbox 事件。
 	deleteAt := time.Now()
+	eventID := util.GenIDString()
 	payload, err := accountevent.Encode(accountevent.AccountDeletedPayload{
+		EventID:   eventID,
 		UserUUID:  userUUID,
 		DeletedAt: deleteAt,
 	})

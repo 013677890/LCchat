@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/consumer"
-	"github.com/013677890/LCchat-Backend/apps/user/internal/worker"
 	"github.com/013677890/LCchat-Backend/apps/user/mq"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
@@ -38,7 +37,7 @@ type UserApp struct {
 	grpcListener           net.Listener
 	grpcShutdownTimeout    time.Duration
 	redisConsumer          *mq.RedisRetryConsumer
-	profileEventWorker     *worker.ProfileEventWorker
+	userCreatedConsumer    *consumer.UserCreatedConsumer
 	accountDeletedConsumer *consumer.AccountDeletedConsumer
 	kafkaProducer          *kafka.Producer
 	asyncPool              *ants.Pool
@@ -55,7 +54,7 @@ func NewUserApp(
 	grpcListener net.Listener,
 	grpcShutdownTimeout userGRPCShutdownTimeout,
 	redisConsumer *mq.RedisRetryConsumer,
-	profileEventWorker *worker.ProfileEventWorker,
+	userCreatedConsumer *consumer.UserCreatedConsumer,
 	accountDeletedConsumer *consumer.AccountDeletedConsumer,
 	kafkaProducer *kafka.Producer,
 	asyncPool *ants.Pool,
@@ -76,7 +75,7 @@ func NewUserApp(
 		grpcListener:           grpcListener,
 		grpcShutdownTimeout:    time.Duration(grpcShutdownTimeout),
 		redisConsumer:          redisConsumer,
-		profileEventWorker:     profileEventWorker,
+		userCreatedConsumer:    userCreatedConsumer,
 		accountDeletedConsumer: accountDeletedConsumer,
 		kafkaProducer:          kafkaProducer,
 		asyncPool:              asyncPool,
@@ -110,10 +109,10 @@ func (a *UserApp) Run(ctx context.Context) error {
 		}()
 	}
 
-	if a.profileEventWorker != nil {
+	if a.userCreatedConsumer != nil {
 		go func() {
-			if err := a.profileEventWorker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "User Profile Outbox Worker 运行错误", logger.ErrorField("error", err))
+			if err := a.userCreatedConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "User user_created 消费者运行错误", logger.ErrorField("error", err))
 			}
 		}()
 	}
@@ -159,9 +158,9 @@ func (a *UserApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 Redis 重试消费者失败: %w", err))
 		}
 	}
-	if a.profileEventWorker != nil {
-		if err := a.profileEventWorker.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("关闭 User Profile Outbox Worker 失败: %w", err))
+	if a.userCreatedConsumer != nil {
+		if err := a.userCreatedConsumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 User user_created 消费者失败: %w", err))
 		}
 	}
 	if a.accountDeletedConsumer != nil {

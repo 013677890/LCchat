@@ -11,7 +11,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/user/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
 	"github.com/013677890/LCchat-Backend/apps/user/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/user/internal/worker"
 	"github.com/013677890/LCchat-Backend/apps/user/mq"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/config"
@@ -33,7 +32,6 @@ import (
 // 这两个别名用于避免 Wire 在同为 string 的地址参数之间发生误绑定。
 type userGRPCAddress string
 type userMetricsAddress string
-type userAuthGRPCAddress string
 type userAsyncReleaseTimeout time.Duration
 type userGRPCShutdownTimeout time.Duration
 
@@ -110,14 +108,6 @@ func provideUserGRPCAddress() userGRPCAddress {
 	return userGRPCAddress(addr)
 }
 
-func provideUserAuthGRPCAddress() userAuthGRPCAddress {
-	addr := os.Getenv("AUTH_GRPC_ADDR")
-	if addr == "" {
-		addr = ":9090"
-	}
-	return userAuthGRPCAddress(addr)
-}
-
 func provideUserMetricsAddress() userMetricsAddress {
 	addr := os.Getenv("USER_METRICS_ADDR")
 	if addr == "" {
@@ -130,9 +120,13 @@ func provideUserGRPCShutdownTimeout() userGRPCShutdownTimeout {
 	return userGRPCShutdownTimeout(10 * time.Second)
 }
 
-// provideUserProfileEventWorker 构造 user-service 的资料展示 Outbox Worker。
-func provideUserProfileEventWorker(addr userAuthGRPCAddress, db *gorm.DB) (*worker.ProfileEventWorker, error) {
-	return worker.NewProfileEventWorker(string(addr), db)
+// provideUserUserCreatedConsumer 构造 user-service 的 user_created 消费者。
+func provideUserUserCreatedConsumer(cfg config.KafkaConfig, internalProfileSvc service.InternalProfileService, db *gorm.DB) *consumer.UserCreatedConsumer {
+	groupID := cfg.ConsumerConfig.GroupID + "-user-created"
+	if cfg.ConsumerConfig.GroupID == "" {
+		groupID = "user-created-group"
+	}
+	return consumer.NewUserCreatedConsumer(cfg.Brokers, cfg.UserCreatedTopic, groupID, internalProfileSvc, db)
 }
 
 // provideUserAccountDeletedConsumer 构造 user-service 的 account.deleted 消费者。
@@ -210,11 +204,8 @@ var userInfraProviderSet = wire.NewSet(
 	provideUserKafkaProducer,
 	provideUserRedisRetryConsumer,
 	provideUserGRPCAddress,
-	provideUserAuthGRPCAddress,
 	provideUserMetricsAddress,
 	provideUserGRPCShutdownTimeout,
-	provideUserProfileEventWorker,
-	provideUserAccountDeletedConsumer,
 	provideUserMetricsServer,
 	provideUserRegistration,
 	provideUserGRPCServer,
@@ -255,6 +246,8 @@ var userAppProviderSet = wire.NewSet(
 	userInfraProviderSet,
 	userRepositoryProviderSet,
 	userServiceProviderSet,
+	provideUserUserCreatedConsumer,
+	provideUserAccountDeletedConsumer,
 	userHandlerProviderSet,
 	NewUserApp,
 )

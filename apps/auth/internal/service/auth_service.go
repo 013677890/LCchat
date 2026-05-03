@@ -63,7 +63,9 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 	}
 
 	// 注册成功后需要异步打通资料初始化闭环，因此在同一事务里写入 user_created outbox 事件。
+	eventID := util.GenIDString()
 	payload, err := accountevent.Encode(accountevent.UserCreatedPayload{
+		EventID:  eventID,
 		UserUUID: user.Uuid,
 		Nickname: user.Nickname,
 		Avatar:   user.Avatar,

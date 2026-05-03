@@ -65,12 +65,12 @@ func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) err
 		logger.Warn(ctx, "解析 relation account.deleted 事件失败，按不可重试消息跳过", logger.ErrorField("error", err))
 		return nil
 	}
-	if payload.UserUUID == "" {
-		logger.Warn(ctx, "relation account.deleted 事件缺少 user_uuid，按不可重试消息跳过")
+	if payload.EventID == "" || payload.UserUUID == "" {
+		logger.Warn(ctx, "relation account.deleted 事件缺少 event_id 或 user_uuid，按不可重试消息跳过")
 		return nil
 	}
 
-	processed, err := outbox.CheckIdempotent(c.db, relationAccountDeletedIdempotentEventType, payload.UserUUID)
+	processed, err := outbox.CheckIdempotent(c.db, relationAccountDeletedIdempotentEventType, payload.EventID)
 	if err != nil {
 		return fmt.Errorf("检查 relation account.deleted 幂等记录失败: %w", err)
 	}
@@ -85,7 +85,7 @@ func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) err
 	if err := c.applyRepo.CleanupAccountApplies(ctx, payload.UserUUID); err != nil {
 		return fmt.Errorf("清理 relation 用户申请失败: %w", err)
 	}
-	if err := outbox.MarkIdempotent(c.db, relationAccountDeletedIdempotentEventType, payload.UserUUID); err != nil {
+	if err := outbox.MarkIdempotent(c.db, relationAccountDeletedIdempotentEventType, payload.EventID); err != nil {
 		return fmt.Errorf("写入 relation account.deleted 幂等记录失败: %w", err)
 	}
 	return nil

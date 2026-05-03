@@ -5,30 +5,24 @@
 
 -- ==================== 1. Outbox 事件表 ====================
 CREATE TABLE IF NOT EXISTS `outbox_events` (
-    `id`            BIGINT       NOT NULL AUTO_INCREMENT,
-    `event_type`    VARCHAR(64)  NOT NULL COMMENT '事件类型: user_created / account_deleted / profile_display_changed',
-    `entity_id`     VARCHAR(64)  NOT NULL COMMENT '关联实体 ID（通常是 user_uuid）',
-    `payload`       TEXT         NULL     COMMENT '事件负载 JSON',
-    `status`        TINYINT      NOT NULL DEFAULT 0 COMMENT '0=pending 1=processing 2=done 3=failed(DLQ)',
-    `retry_count`   INT          NOT NULL DEFAULT 0 COMMENT '已重试次数',
-    `max_retries`   INT          NOT NULL DEFAULT 10 COMMENT '最大重试次数',
-    `last_error`    TEXT         NULL     COMMENT '最近一次失败的错误信息',
-    `created_at`    DATETIME(3)  NOT NULL COMMENT '创建时间',
-    `processed_at`  DATETIME(3)  NULL     COMMENT '处理完成时间',
-    `next_retry_at` DATETIME(3)  NULL     COMMENT '下次重试时间（指数退避）',
+    `id`            BIGINT        NOT NULL AUTO_INCREMENT,
+    `event_type`    VARCHAR(128)  NOT NULL COMMENT '领域事件类型: user_created / profile_display_changed / account.deleted',
+    `entity_id`     VARCHAR(64)   NOT NULL COMMENT '事件分区键（通常是 user_uuid）',
+    `payload`       LONGTEXT      NOT NULL COMMENT '事件负载 JSON',
+    `created_at`    DATETIME(3)   NOT NULL COMMENT '创建时间',
     PRIMARY KEY (`id`),
-    INDEX `idx_status_created` (`status`, `created_at`),
-    INDEX `idx_type_entity` (`event_type`, `entity_id`)
+    INDEX `idx_outbox_event_type_created` (`event_type`, `created_at`),
+    INDEX `idx_outbox_entity_id` (`entity_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='Outbox 事件表';
 
 -- ==================== 2. 幂等消费记录表 ====================
 CREATE TABLE IF NOT EXISTS `idempotent_events` (
     `id`           BIGINT      NOT NULL AUTO_INCREMENT,
     `event_type`   VARCHAR(64) NOT NULL COMMENT '事件类型',
-    `entity_id`    VARCHAR(64) NOT NULL COMMENT '实体 ID',
+    `event_id`     VARCHAR(64) NOT NULL COMMENT '事件唯一 ID',
     `processed_at` DATETIME(3) NOT NULL COMMENT '处理时间',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_type_entity` (`event_type`, `entity_id`)
+    UNIQUE KEY `uk_type_event` (`event_type`, `event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='幂等消费记录表';
 
 -- ==================== 3. user_account 表（auth-service 归属）====================

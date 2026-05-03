@@ -57,12 +57,12 @@ func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) err
 		logger.Warn(ctx, "解析 account.deleted 事件失败，按不可重试消息跳过", logger.ErrorField("error", err))
 		return nil
 	}
-	if payload.UserUUID == "" {
-		logger.Warn(ctx, "account.deleted 事件缺少 user_uuid，按不可重试消息跳过")
+	if payload.EventID == "" || payload.UserUUID == "" {
+		logger.Warn(ctx, "account.deleted 事件缺少 event_id 或 user_uuid，按不可重试消息跳过")
 		return nil
 	}
 
-	processed, err := outbox.CheckIdempotent(c.db, userAccountDeletedIdempotentEventType, payload.UserUUID)
+	processed, err := outbox.CheckIdempotent(c.db, userAccountDeletedIdempotentEventType, payload.EventID)
 	if err != nil {
 		return fmt.Errorf("检查 account.deleted 幂等记录失败: %w", err)
 	}
@@ -74,7 +74,7 @@ func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) err
 	if err := c.userRepo.Delete(ctx, payload.UserUUID); err != nil {
 		return fmt.Errorf("执行 user-service 资料清理失败: %w", err)
 	}
-	if err := outbox.MarkIdempotent(c.db, userAccountDeletedIdempotentEventType, payload.UserUUID); err != nil {
+	if err := outbox.MarkIdempotent(c.db, userAccountDeletedIdempotentEventType, payload.EventID); err != nil {
 		return fmt.Errorf("写入 account.deleted 幂等记录失败: %w", err)
 	}
 	return nil

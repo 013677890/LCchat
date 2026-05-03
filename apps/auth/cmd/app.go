@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/013677890/LCchat-Backend/apps/auth/internal/worker"
+	"github.com/013677890/LCchat-Backend/apps/auth/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	"github.com/013677890/LCchat-Backend/config"
 	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
@@ -28,16 +28,16 @@ import (
 
 // AuthApp 统一管理 auth 服务生命周期。
 type AuthApp struct {
-	logger              *zap.Logger
-	metricsServer       *http.Server
-	grpcServer          *grpc.Server
-	grpcListener        net.Listener
-	grpcShutdownTimeout time.Duration
-	redisConsumer       *mq.RedisRetryConsumer
-	accountEventWorker  *worker.AccountEventWorker
-	kafkaProducer       *kafka.Producer
-	db                  *gorm.DB
-	redisClient         *goredis.Client
+	logger                        *zap.Logger
+	metricsServer                 *http.Server
+	grpcServer                    *grpc.Server
+	grpcListener                  net.Listener
+	grpcShutdownTimeout           time.Duration
+	redisConsumer                 *mq.RedisRetryConsumer
+	profileDisplayChangedConsumer *consumer.ProfileDisplayChangedConsumer
+	kafkaProducer                 *kafka.Producer
+	db                            *gorm.DB
+	redisClient                   *goredis.Client
 }
 
 // NewAuthApp 只做资源聚合与合法性校验，不在构造阶段启动阻塞逻辑。
@@ -48,7 +48,7 @@ func NewAuthApp(
 	grpcListener net.Listener,
 	grpcShutdownTimeout authGRPCShutdownTimeout,
 	redisConsumer *mq.RedisRetryConsumer,
-	accountEventWorker *worker.AccountEventWorker,
+	profileDisplayChangedConsumer *consumer.ProfileDisplayChangedConsumer,
 	kafkaProducer *kafka.Producer,
 	db *gorm.DB,
 	redisClient *goredis.Client,
@@ -60,16 +60,16 @@ func NewAuthApp(
 		return nil, errors.New("grpc listener 未初始化")
 	}
 	return &AuthApp{
-		logger:              log,
-		metricsServer:       metricsServer,
-		grpcServer:          built.Server,
-		grpcListener:        grpcListener,
-		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
-		redisConsumer:       redisConsumer,
-		accountEventWorker:  accountEventWorker,
-		kafkaProducer:       kafkaProducer,
-		db:                  db,
-		redisClient:         redisClient,
+		logger:                        log,
+		metricsServer:                 metricsServer,
+		grpcServer:                    built.Server,
+		grpcListener:                  grpcListener,
+		grpcShutdownTimeout:           time.Duration(grpcShutdownTimeout),
+		redisConsumer:                 redisConsumer,
+		profileDisplayChangedConsumer: profileDisplayChangedConsumer,
+		kafkaProducer:                 kafkaProducer,
+		db:                            db,
+		redisClient:                   redisClient,
 	}, nil
 }
 
@@ -95,10 +95,10 @@ func (a *AuthApp) Run(ctx context.Context) error {
 		}()
 	}
 
-	if a.accountEventWorker != nil {
+	if a.profileDisplayChangedConsumer != nil {
 		go func() {
-			if err := a.accountEventWorker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "Auth Outbox Worker 运行错误", logger.ErrorField("error", err))
+			if err := a.profileDisplayChangedConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "Auth profile_display_changed 消费者运行错误", logger.ErrorField("error", err))
 			}
 		}()
 	}
@@ -134,9 +134,9 @@ func (a *AuthApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 Redis 重试消费者失败: %w", err))
 		}
 	}
-	if a.accountEventWorker != nil {
-		if err := a.accountEventWorker.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("关闭 Auth Outbox Worker 失败: %w", err))
+	if a.profileDisplayChangedConsumer != nil {
+		if err := a.profileDisplayChangedConsumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Auth profile_display_changed 消费者失败: %w", err))
 		}
 	}
 	if a.kafkaProducer != nil {

@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/auth/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/repository"
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/auth/internal/worker"
 	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/config"
@@ -30,7 +30,6 @@ import (
 // 这些别名用于避免 Wire 在同类型参数之间发生误绑定。
 type authGRPCAddress string
 type authMetricsAddress string
-type authUserGRPCAddress string
 type authGRPCShutdownTimeout time.Duration
 
 const authGRPCDefaultTimeout = 300 * time.Millisecond
@@ -88,17 +87,17 @@ func provideAuthRedisRetryConsumer(redisClient *goredis.Client, producer *kafka.
 	)
 }
 
-func provideAuthUserGRPCAddress() authUserGRPCAddress {
-	addr := os.Getenv("USER_GRPC_ADDR")
-	if addr == "" {
-		addr = ":9094"
+// provideAuthProfileDisplayChangedConsumer 构造 auth-service 的 profile_display_changed 消费者。
+func provideAuthProfileDisplayChangedConsumer(
+	cfg config.KafkaConfig,
+	internalAuthSvc service.InternalAuthService,
+	db *gorm.DB,
+) *consumer.ProfileDisplayChangedConsumer {
+	groupID := cfg.ConsumerConfig.GroupID + "-auth-profile-display-changed"
+	if cfg.ConsumerConfig.GroupID == "" {
+		groupID = "auth-profile-display-changed-group"
 	}
-	return authUserGRPCAddress(addr)
-}
-
-// provideAuthAccountEventWorker 构造 auth-service 的 Outbox 事件 Worker。
-func provideAuthAccountEventWorker(addr authUserGRPCAddress, db *gorm.DB, cfg config.KafkaConfig, log *zap.Logger) (*worker.AccountEventWorker, error) {
-	return worker.NewAccountEventWorker(string(addr), db, cfg.Brokers, cfg.AccountDeletedTopic, log)
+	return consumer.NewProfileDisplayChangedConsumer(cfg.Brokers, cfg.ProfileDisplayChangedTopic, groupID, internalAuthSvc, db)
 }
 
 func provideAuthGRPCAddress() authGRPCAddress {
@@ -186,8 +185,6 @@ var authInfraProviderSet = wire.NewSet(
 	provideAuthRedisClient,
 	provideAuthKafkaProducer,
 	provideAuthRedisRetryConsumer,
-	provideAuthUserGRPCAddress,
-	provideAuthAccountEventWorker,
 	provideAuthGRPCAddress,
 	provideAuthMetricsAddress,
 	provideAuthGRPCShutdownTimeout,
@@ -220,6 +217,7 @@ var authAppProviderSet = wire.NewSet(
 	authInfraProviderSet,
 	authRepositoryProviderSet,
 	authServiceProviderSet,
+	provideAuthProfileDisplayChangedConsumer,
 	authHandlerProviderSet,
 	NewAuthApp,
 )
