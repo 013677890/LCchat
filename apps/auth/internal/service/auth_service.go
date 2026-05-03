@@ -51,24 +51,25 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成密码哈希失败")
 	}
 
-	// 沿用当前 user_info 模型完成账号创建，避免在服务拆分阶段额外引入表迁移风险。
-	user := &model.UserInfo{
-		Uuid:      util.GenIDString(),
-		Email:     req.Email,
-		Password:  string(hashedPassword),
-		Nickname:  req.Nickname,
-		Telephone: strings.TrimSpace(req.Telephone),
-		Status:    0,
-		IsAdmin:   0,
+	// 注册时由 auth-service 直接写入 user_account，并冗余登录所需展示字段。
+	user := &model.UserAccount{
+		UserUuid:      util.GenIDString(),
+		Email:         req.Email,
+		PasswordHash:  string(hashedPassword),
+		Telephone:     strings.TrimSpace(req.Telephone),
+		Status:        0,
+		IsAdmin:       0,
+		LoginNickname: req.Nickname,
+		LoginAvatar:   "",
 	}
 
 	// 注册成功后需要异步打通资料初始化闭环，因此在同一事务里写入 user_created outbox 事件。
 	eventID := util.GenIDString()
 	payload, err := accountevent.Encode(accountevent.UserCreatedPayload{
 		EventID:  eventID,
-		UserUUID: user.Uuid,
-		Nickname: user.Nickname,
-		Avatar:   user.Avatar,
+		UserUUID: user.UserUuid,
+		Nickname: user.LoginNickname,
+		Avatar:   user.LoginAvatar,
 	})
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "序列化注册事件失败")
@@ -83,8 +84,8 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 	}
 
 	return &authpb.RegisterResponse{
-		UserUuid:  createdUser.Uuid,
-		Nickname:  createdUser.Nickname,
+		UserUuid:  createdUser.UserUuid,
+		Nickname:  createdUser.LoginNickname,
 		Email:     createdUser.Email,
 		Telephone: createdUser.Telephone,
 	}, nil
@@ -107,8 +108,8 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		return nil, apperr.New(consts.CodeUserDisabled)
 	}
 
-	ctx = ctxmeta.WithUserUUID(ctx, user.Uuid)
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+	ctx = ctxmeta.WithUserUUID(ctx, user.UserUuid)
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		return nil, apperr.New(consts.CodePasswordError)
 	}
 
@@ -118,22 +119,22 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	}
 	clientIP := util.GetClientIPFromContext(ctx)
 
-	accessToken, err := util.GenerateToken(user.Uuid, deviceID)
+	accessToken, err := util.GenerateToken(user.UserUuid, deviceID)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成访问令牌失败")
 	}
 	refreshToken := util.GenIDString()
 
 	// 登录成功后优先写入 token，再尽力补充设备会话与在线态信息。
-	if err := s.deviceRepo.StoreAccessToken(ctx, user.Uuid, deviceID, accessToken, util.AccessExpire); err != nil {
+	if err := s.deviceRepo.StoreAccessToken(ctx, user.UserUuid, deviceID, accessToken, util.AccessExpire); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 AccessToken 失败")
 	}
-	if err := s.deviceRepo.StoreRefreshToken(ctx, user.Uuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
+	if err := s.deviceRepo.StoreRefreshToken(ctx, user.UserUuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 RefreshToken 失败")
 	}
 
 	deviceSession := &model.DeviceSession{
-		UserUuid:   user.Uuid,
+		UserUuid:   user.UserUuid,
 		DeviceId:   deviceID,
 		DeviceName: req.DeviceInfo.GetDeviceName(),
 		Platform:   req.DeviceInfo.GetPlatform(),
@@ -145,9 +146,9 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
 		logger.Warn(ctx, "设备会话落库失败，按降级处理继续登录", logger.ErrorField("error", err))
 	}
-	if err := s.deviceRepo.SetActiveTimestamp(ctx, user.Uuid, deviceID, time.Now().Unix()); err != nil {
+	if err := s.deviceRepo.SetActiveTimestamp(ctx, user.UserUuid, deviceID, time.Now().Unix()); err != nil {
 		logger.Warn(ctx, "写入设备活跃时间失败",
-			logger.String("user_uuid", user.Uuid),
+			logger.String("user_uuid", user.UserUuid),
 			logger.String("device_id", deviceID),
 			logger.ErrorField("error", err),
 		)
@@ -198,23 +199,23 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 		logger.Warn(ctx, "删除验证码失败", logger.ErrorField("error", err))
 	}
 
-	ctx = ctxmeta.WithUserUUID(ctx, user.Uuid)
+	ctx = ctxmeta.WithUserUUID(ctx, user.UserUuid)
 	clientIP := util.GetClientIPFromContext(ctx)
-	accessToken, err := util.GenerateToken(user.Uuid, deviceID)
+	accessToken, err := util.GenerateToken(user.UserUuid, deviceID)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成访问令牌失败")
 	}
 	refreshToken := util.GenIDString()
 
-	if err := s.deviceRepo.StoreAccessToken(ctx, user.Uuid, deviceID, accessToken, util.AccessExpire); err != nil {
+	if err := s.deviceRepo.StoreAccessToken(ctx, user.UserUuid, deviceID, accessToken, util.AccessExpire); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 AccessToken 失败")
 	}
-	if err := s.deviceRepo.StoreRefreshToken(ctx, user.Uuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
+	if err := s.deviceRepo.StoreRefreshToken(ctx, user.UserUuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 RefreshToken 失败")
 	}
 
 	deviceSession := &model.DeviceSession{
-		UserUuid:   user.Uuid,
+		UserUuid:   user.UserUuid,
 		DeviceId:   deviceID,
 		DeviceName: req.DeviceInfo.GetDeviceName(),
 		Platform:   req.DeviceInfo.GetPlatform(),
@@ -226,9 +227,9 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
 		logger.Warn(ctx, "设备会话落库失败，按降级处理继续登录", logger.ErrorField("error", err))
 	}
-	if err := s.deviceRepo.SetActiveTimestamp(ctx, user.Uuid, deviceID, time.Now().Unix()); err != nil {
+	if err := s.deviceRepo.SetActiveTimestamp(ctx, user.UserUuid, deviceID, time.Now().Unix()); err != nil {
 		logger.Warn(ctx, "写入设备活跃时间失败",
-			logger.String("user_uuid", user.Uuid),
+			logger.String("user_uuid", user.UserUuid),
 			logger.String("device_id", deviceID),
 			logger.ErrorField("error", err),
 		)
@@ -382,7 +383,7 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *authpb.ResetPa
 	if !isValid {
 		return apperr.New(consts.CodeVerifyCodeError)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.NewPassword)); err == nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.NewPassword)); err == nil {
 		return apperr.New(consts.CodePasswordSameAsOld)
 	}
 
@@ -390,7 +391,7 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *authpb.ResetPa
 	if err != nil {
 		return apperr.Wrap(err, consts.CodeInternalError, "生成密码哈希失败")
 	}
-	if err := s.authRepo.UpdatePassword(ctx, user.Uuid, string(hashedPassword)); err != nil {
+	if err := s.authRepo.UpdatePassword(ctx, user.UserUuid, string(hashedPassword)); err != nil {
 		return apperr.Wrap(err, consts.CodeInternalError, "更新密码失败")
 	}
 	if err := s.authRepo.DeleteVerifyCode(ctx, req.Email, 3); err != nil {

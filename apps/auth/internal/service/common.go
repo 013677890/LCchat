@@ -52,14 +52,14 @@ func getRequiredDeviceID(ctx context.Context) (string, error) {
 	return deviceID, nil
 }
 
-// buildLoginUserInfo 将统一用户模型转换为 auth 登录返回的最小展示信息。
-func buildLoginUserInfo(user *model.UserInfo) *authpb.LoginUserInfo {
+// buildLoginUserInfo 将账号模型转换为 auth 登录返回的最小展示信息。
+func buildLoginUserInfo(user *model.UserAccount) *authpb.LoginUserInfo {
 	if user == nil {
 		return nil
 	}
 	return &authpb.LoginUserInfo{
-		Uuid:     user.Uuid,
-		Nickname: user.Nickname,
-		Avatar:   user.Avatar,
+		Uuid:     user.UserUuid,
+		Nickname: user.LoginNickname,
+		Avatar:   user.LoginAvatar,
 	}
 }

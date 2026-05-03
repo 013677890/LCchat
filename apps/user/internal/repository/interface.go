@@ -64,6 +64,9 @@ type IUserRepository interface {
 	// GetByUUID 根据UUID查询用户信息
 	GetByUUID(ctx context.Context, uuid string) (*model.UserInfo, error)
 
+	// CreateProfile 创建或确认用户资料存在。
+	CreateProfile(ctx context.Context, userUUID, nickname, avatar string) (*model.UserInfo, error)
+
 	// GetByPhone 根据手机号查询用户信息
 	GetByPhone(ctx context.Context, telephone string) (*model.UserInfo, error)
 

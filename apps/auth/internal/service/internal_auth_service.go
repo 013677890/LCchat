@@ -31,8 +31,8 @@ func (s *internalAuthServiceImpl) FindAccountByEmail(ctx context.Context, req *a
 	}
 
 	return &authpb.FindAccountByEmailResponse{
-		UserUuid: user.Uuid,
-		Status:   0,
+		UserUuid: user.UserUuid,
+		Status:   int32(user.Status),
 		Found:    true,
 	}, nil
 }

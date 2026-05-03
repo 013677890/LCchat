@@ -25,13 +25,9 @@ func (s *internalProfileServiceImpl) CreateProfile(ctx context.Context, req *pb.
 		return nil, apperr.New(consts.CodeParamError)
 	}
 
-	// 当前迁移阶段仍由注册流程直接写入 user_info，因此这里只做存在性确认。
-	userInfo, err := s.userRepo.GetByUUID(ctx, req.UserUuid)
+	_, err := s.userRepo.CreateProfile(ctx, req.UserUuid, req.Nickname, req.Avatar)
 	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "确认用户资料失败")
-	}
-	if userInfo == nil {
-		return nil, apperr.New(consts.CodeUserNotFound)
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建用户资料失败")
 	}
 
 	return &pb.CreateProfileResponse{}, nil

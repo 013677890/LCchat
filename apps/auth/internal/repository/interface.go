@@ -23,15 +23,15 @@ type AccountStatusItem struct {
 // IAuthRepository 定义认证与账号安全相关的数据访问能力。
 type IAuthRepository interface {
 	// GetByEmail 根据邮箱查询账号。
-	GetByEmail(ctx context.Context, email string) (*model.UserInfo, error)
+	GetByEmail(ctx context.Context, email string) (*model.UserAccount, error)
 	// GetByUserUUID 根据用户 UUID 查询账号。
-	GetByUserUUID(ctx context.Context, userUUID string) (*model.UserInfo, error)
+	GetByUserUUID(ctx context.Context, userUUID string) (*model.UserAccount, error)
 	// ExistsByEmail 检查邮箱是否已被占用。
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	// Create 创建账号。
-	Create(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error)
+	Create(ctx context.Context, user *model.UserAccount) (*model.UserAccount, error)
 	// CreateWithOutboxEvent 在创建账号的同一事务中追加 Outbox 事件。
-	CreateWithOutboxEvent(ctx context.Context, user *model.UserInfo, eventType, payload string) (*model.UserInfo, error)
+	CreateWithOutboxEvent(ctx context.Context, user *model.UserAccount, eventType, payload string) (*model.UserAccount, error)
 	// UpdatePassword 更新密码哈希。
 	UpdatePassword(ctx context.Context, userUUID, password string) error
 	// UpdateEmail 更新邮箱。

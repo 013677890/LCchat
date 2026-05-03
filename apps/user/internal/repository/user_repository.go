@@ -12,7 +12,6 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"math/rand"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -28,6 +27,22 @@ type userRepositoryImpl struct {
 // NewUserRepository 创建用户信息仓储实例
 func NewUserRepository(db *gorm.DB, redisClient *redis.Client) IUserRepository {
 	return &userRepositoryImpl{db: db, redisClient: redisClient}
+}
+
+func profileToUserInfo(profile *model.UserProfile) *model.UserInfo {
+	if profile == nil {
+		return nil
+	}
+	return &model.UserInfo{
+		Uuid:      profile.UserUuid,
+		Nickname:  profile.Nickname,
+		Avatar:    profile.Avatar,
+		Gender:    profile.Gender,
+		Signature: profile.Signature,
+		Birthday:  profile.Birthday,
+		CreatedAt: profile.CreatedAt,
+		UpdatedAt: profile.UpdatedAt,
+	}
 }
 
 // GetByUUID 根据UUID查询用户信息
@@ -51,8 +66,8 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	}
 
 	// ==================== 2. 缓存未命中，查询 MySQL ====================
-	var user model.UserInfo
-	err = r.db.WithContext(ctx).Where("uuid = ? AND deleted_at IS NULL", uuid).First(&user).Error
+	var profile model.UserProfile
+	err = r.db.WithContext(ctx).Where("user_uuid = ?", uuid).First(&profile).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 存一份空到redis 5min过期
@@ -70,10 +85,11 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 
 	// ==================== 3. 存入 Redis 缓存 ====================
 	// 序列化用户信息
-	userJSON, err := json.Marshal(user)
+	userInfo := profileToUserInfo(&profile)
+	userJSON, err := json.Marshal(userInfo)
 	if err != nil {
 		// 序列化失败，不影响主流程，只返回数据库数据
-		return &user, nil
+		return userInfo, nil
 	}
 
 	// 存入缓存，设置过期时间为 1 小时（+-5min缓冲）
@@ -86,7 +102,41 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 		}
 	}, async.AsyncRedisTimeout)
 
-	return &user, nil
+	return userInfo, nil
+}
+
+// CreateProfile 创建或确认用户资料存在。
+func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickname, avatar string) (*model.UserInfo, error) {
+	var profile model.UserProfile
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return WrapDBError(err)
+		}
+
+		profile = model.UserProfile{
+			UserUuid:  userUUID,
+			Nickname:  nickname,
+			Avatar:    avatar,
+			Gender:    3,
+			Signature: "",
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		if err := tx.Create(&profile).Error; err != nil {
+			return WrapDBError(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	r.invalidateUserCache(ctx, userUUID, "UserRepository.CreateProfile")
+	return profileToUserInfo(&profile), nil
 }
 
 // GetByPhone 根据手机号查询用户信息
@@ -160,18 +210,19 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 
 	// ==================== 2. 对未命中部分回源 MySQL ====================
 	if len(missUUIDs) > 0 {
-		var dbUsers []*model.UserInfo
+		var dbProfiles []*model.UserProfile
 		err = r.db.WithContext(ctx).
-			Where("uuid IN ? AND deleted_at IS NULL", missUUIDs).
-			Find(&dbUsers).
+			Where("user_uuid IN ?", missUUIDs).
+			Find(&dbProfiles).
 			Error
 		if err != nil {
 			return nil, WrapDBError(err)
 		}
 
 		// 将 DB 结果放入 Map
-		foundUUIDs := make(map[string]struct{}, len(dbUsers))
-		for _, user := range dbUsers {
+		foundUUIDs := make(map[string]struct{}, len(dbProfiles))
+		for _, profile := range dbProfiles {
+			user := profileToUserInfo(profile)
 			if user != nil && user.Uuid != "" {
 				userMap[user.Uuid] = user
 				foundUUIDs[user.Uuid] = struct{}{}
@@ -189,7 +240,8 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 		async.RunSafe(ctx, func(runCtx context.Context) {
 			pipe := r.redisClient.Pipeline()
 
-			for _, user := range dbUsers {
+			for _, profile := range dbProfiles {
+				user := profileToUserInfo(profile)
 				if user == nil || user.Uuid == "" {
 					continue
 				}
@@ -237,8 +289,8 @@ func (r *userRepositoryImpl) Update(ctx context.Context, user *model.UserInfo) (
 func (r *userRepositoryImpl) UpdateAvatar(ctx context.Context, userUUID, avatar string) error {
 	// 更新头像到数据库
 	err := r.db.WithContext(ctx).
-		Model(&model.UserInfo{}).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		Model(&model.UserProfile{}).
+		Where("user_uuid = ?", userUUID).
 		Update("avatar", avatar).
 		Error
 	if err != nil {
@@ -253,30 +305,30 @@ func (r *userRepositoryImpl) UpdateAvatar(ctx context.Context, userUUID, avatar 
 
 // UpdateAvatarWithDisplayEvent 更新头像并写入展示字段变更事件。
 func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserInfo, error) {
-	var user model.UserInfo
+	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.UserInfo{}).
-			Where("uuid = ? AND deleted_at IS NULL", userUUID).
+		if err := tx.Model(&model.UserProfile{}).
+			Where("user_uuid = ?", userUUID).
 			Update("avatar", avatar).Error; err != nil {
 			return WrapDBError(err)
 		}
 
-		if err := tx.Where("uuid = ? AND deleted_at IS NULL", userUUID).First(&user).Error; err != nil {
+		if err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error; err != nil {
 			return WrapDBError(err)
 		}
 
 		eventID := util.GenIDString()
 		payload, err := accountevent.Encode(accountevent.ProfileDisplayChangedPayload{
 			EventID:  eventID,
-			UserUUID: user.Uuid,
-			Nickname: user.Nickname,
-			Avatar:   user.Avatar,
+			UserUUID: profile.UserUuid,
+			Nickname: profile.Nickname,
+			Avatar:   profile.Avatar,
 		})
 		if err != nil {
 			return err
 		}
 
-		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, user.Uuid, payload); err != nil {
+		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, profile.UserUuid, payload); err != nil {
 			return WrapDBError(err)
 		}
 		return nil
@@ -286,7 +338,7 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 	}
 
 	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateAvatarWithDisplayEvent")
-	return &user, nil
+	return profileToUserInfo(&profile), nil
 }
 
 // UpdateBasicInfo 更新基本信息
@@ -302,28 +354,28 @@ func (r *userRepositoryImpl) UpdateBasicInfo(ctx context.Context, userUUID strin
 
 // UpdateBasicInfoWithDisplayEvent 更新基本信息并写入展示字段变更事件。
 func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) (*model.UserInfo, error) {
-	var user model.UserInfo
+	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := r.applyBasicInfoUpdate(tx, userUUID, nickname, signature, birthday, gender); err != nil {
 			return err
 		}
 
-		if err := tx.Where("uuid = ? AND deleted_at IS NULL", userUUID).First(&user).Error; err != nil {
+		if err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error; err != nil {
 			return WrapDBError(err)
 		}
 
 		eventID := util.GenIDString()
 		payload, err := accountevent.Encode(accountevent.ProfileDisplayChangedPayload{
 			EventID:  eventID,
-			UserUUID: user.Uuid,
-			Nickname: user.Nickname,
-			Avatar:   user.Avatar,
+			UserUUID: profile.UserUuid,
+			Nickname: profile.Nickname,
+			Avatar:   profile.Avatar,
 		})
 		if err != nil {
 			return err
 		}
 
-		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, user.Uuid, payload); err != nil {
+		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, profile.UserUuid, payload); err != nil {
 			return WrapDBError(err)
 		}
 		return nil
@@ -333,7 +385,7 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 	}
 
 	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateBasicInfoWithDisplayEvent")
-	return &user, nil
+	return profileToUserInfo(&profile), nil
 }
 
 // UpdateEmail 更新邮箱
@@ -361,10 +413,10 @@ func (r *userRepositoryImpl) UpdateTelephone(ctx context.Context, userUUID, tele
 // Delete 软删除用户（注销账号）
 // 设置 deleted_at 字段，删除 Redis 缓存
 func (r *userRepositoryImpl) Delete(ctx context.Context, userUUID string) error {
-	// 1. 软删除用户（GORM 会自动设置 deleted_at 时间戳）
+	// 资料表不保留 deleted_at，收到账号注销事件后直接删除 profile。
 	err := r.db.WithContext(ctx).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
-		Delete(&model.UserInfo{}).
+		Where("user_uuid = ?", userUUID).
+		Delete(&model.UserProfile{}).
 		Error
 	if err != nil {
 		return WrapDBError(err)
@@ -429,8 +481,8 @@ func (r *userRepositoryImpl) applyBasicInfoUpdate(db *gorm.DB, userUUID string, 
 		updates["gender"] = gender
 	}
 
-	if err := db.Model(&model.UserInfo{}).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+	if err := db.Model(&model.UserProfile{}).
+		Where("user_uuid = ?", userUUID).
 		Updates(updates).
 		Error; err != nil {
 		return WrapDBError(err)
@@ -506,23 +558,12 @@ func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, pag
 	// 计算偏移量
 	offset := (page - 1) * pageSize
 
-	// 判断关键词是否为邮箱格式（简单判断：包含@符号）
-	isEmail := strings.Contains(keyword, "@")
-
 	// 构建查询条件
 	query := r.db.WithContext(ctx).
-		Model(&model.UserInfo{}).
-		Where("deleted_at IS NULL")
-
-	if isEmail {
-		// 邮箱格式：全匹配
-		query = query.Where("email = ?", keyword)
-	} else {
-		// 非邮箱格式：模糊搜索（昵称、UUID）
-		query = query.Where("(nickname LIKE ? OR uuid LIKE ?)",
+		Model(&model.UserProfile{}).
+		Where("nickname LIKE ? OR user_uuid LIKE ?",
 			keyword+"%",
 			keyword+"%")
-	}
 
 	// 先查询总数
 	var total int64
@@ -531,14 +572,21 @@ func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, pag
 	}
 
 	// 查询用户列表
-	var users []*model.UserInfo
+	var profiles []*model.UserProfile
 	if err := query.
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
-		Find(&users).
+		Find(&profiles).
 		Error; err != nil {
 		return nil, 0, WrapDBError(err)
+	}
+
+	users := make([]*model.UserInfo, 0, len(profiles))
+	for _, profile := range profiles {
+		if user := profileToUserInfo(profile); user != nil {
+			users = append(users, user)
+		}
 	}
 
 	return users, total, nil

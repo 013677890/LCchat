@@ -41,10 +41,10 @@ func (s *accountServiceImpl) ChangePassword(ctx context.Context, req *authpb.Cha
 		return apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
 		return apperr.New(consts.CodePasswordError)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.NewPassword)); err == nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.NewPassword)); err == nil {
 		return apperr.New(consts.CodePasswordSameAsOld)
 	}
 
@@ -122,7 +122,7 @@ func (s *accountServiceImpl) DeleteAccount(ctx context.Context, req *authpb.Dele
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		return nil, apperr.New(consts.CodePasswordError)
 	}
 

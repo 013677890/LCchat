@@ -1,9 +1,10 @@
 package handler
 
 import (
+	"context"
+
 	"github.com/013677890/LCchat-Backend/apps/user/internal/service"
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
-	"context"
 )
 
 // UserHandler 用户信息服务Handler
@@ -45,21 +46,6 @@ func (h *UserHandler) UploadAvatar(ctx context.Context, req *pb.UploadAvatarRequ
 	return h.userService.UploadAvatar(ctx, req)
 }
 
-// ChangePassword 修改密码
-func (h *UserHandler) ChangePassword(ctx context.Context, req *pb.ChangePasswordRequest) (*pb.ChangePasswordResponse, error) {
-	return &pb.ChangePasswordResponse{}, h.userService.ChangePassword(ctx, req)
-}
-
-// ChangeEmail 绑定/换绑邮箱
-func (h *UserHandler) ChangeEmail(ctx context.Context, req *pb.ChangeEmailRequest) (*pb.ChangeEmailResponse, error) {
-	return h.userService.ChangeEmail(ctx, req)
-}
-
-// ChangeTelephone 绑定/换绑手机
-func (h *UserHandler) ChangeTelephone(ctx context.Context, req *pb.ChangeTelephoneRequest) (*pb.ChangeTelephoneResponse, error) {
-	return h.userService.ChangeTelephone(ctx, req)
-}
-
 // GetQRCode 获取用户二维码
 func (h *UserHandler) GetQRCode(ctx context.Context, req *pb.GetQRCodeRequest) (*pb.GetQRCodeResponse, error) {
 	return h.userService.GetQRCode(ctx, req)
@@ -68,11 +54,6 @@ func (h *UserHandler) GetQRCode(ctx context.Context, req *pb.GetQRCodeRequest) (
 // ParseQRCode 解析二维码
 func (h *UserHandler) ParseQRCode(ctx context.Context, req *pb.ParseQRCodeRequest) (*pb.ParseQRCodeResponse, error) {
 	return h.userService.ParseQRCode(ctx, req)
-}
-
-// DeleteAccount 注销账号
-func (h *UserHandler) DeleteAccount(ctx context.Context, req *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error) {
-	return h.userService.DeleteAccount(ctx, req)
 }
 
 // BatchGetProfile 批量获取用户信息

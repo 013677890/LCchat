@@ -336,103 +336,6 @@ func TestUserServiceUpdateAndAvatar(t *testing.T) {
 	})
 }
 
-func TestUserServiceChangePasswordAndEmail(t *testing.T) {
-	initUserSvcTestLogger()
-	oldHash := hashUserSvcPassword(t, "oldpass123")
-
-	t.Run("change_password_old_password_wrong", func(t *testing.T) {
-		svc := NewUserService(&fakeUserSvcRepo{
-			getByUUIDFn: func(_ context.Context, _ string) (*model.UserInfo, error) {
-				return &model.UserInfo{Uuid: "u1", Password: oldHash}, nil
-			},
-		}, &fakeUserSvcAuthRepo{}, &fakeUserSvcDeviceRepo{})
-		err := svc.ChangePassword(userSvcCtx("u1"), &pb.ChangePasswordRequest{OldPassword: "wrong", NewPassword: "newpass123"})
-		requireUserSvcStatus(t, err, codes.Unauthenticated, consts.CodePasswordError)
-	})
-
-	t.Run("change_password_same_as_old", func(t *testing.T) {
-		svc := NewUserService(&fakeUserSvcRepo{
-			getByUUIDFn: func(_ context.Context, _ string) (*model.UserInfo, error) {
-				return &model.UserInfo{Uuid: "u1", Password: oldHash}, nil
-			},
-		}, &fakeUserSvcAuthRepo{}, &fakeUserSvcDeviceRepo{})
-		err := svc.ChangePassword(userSvcCtx("u1"), &pb.ChangePasswordRequest{OldPassword: "oldpass123", NewPassword: "oldpass123"})
-		requireUserSvcStatus(t, err, codes.FailedPrecondition, consts.CodePasswordSameAsOld)
-	})
-
-	t.Run("change_password_success", func(t *testing.T) {
-		updated := false
-		svc := NewUserService(&fakeUserSvcRepo{
-			getByUUIDFn: func(_ context.Context, _ string) (*model.UserInfo, error) {
-				return &model.UserInfo{Uuid: "u1", Password: oldHash}, nil
-			},
-			updatePasswordFn: func(_ context.Context, userUUID, password string) error {
-				updated = true
-				require.Equal(t, "u1", userUUID)
-				require.NotEmpty(t, password)
-				return nil
-			},
-		}, &fakeUserSvcAuthRepo{}, &fakeUserSvcDeviceRepo{})
-		err := svc.ChangePassword(userSvcCtx("u1"), &pb.ChangePasswordRequest{OldPassword: "oldpass123", NewPassword: "newpass123"})
-		require.NoError(t, err)
-		assert.True(t, updated)
-	})
-
-	t.Run("change_email_already_exists", func(t *testing.T) {
-		svc := NewUserService(&fakeUserSvcRepo{
-			existsByEmailFn: func(_ context.Context, _ string) (bool, error) {
-				return true, nil
-			},
-		}, &fakeUserSvcAuthRepo{}, &fakeUserSvcDeviceRepo{})
-		resp, err := svc.ChangeEmail(userSvcCtx("u1"), &pb.ChangeEmailRequest{NewEmail: "a@test.com", VerifyCode: "123456"})
-		require.Nil(t, resp)
-		requireUserSvcStatus(t, err, codes.AlreadyExists, consts.CodeEmailAlreadyExist)
-	})
-
-	t.Run("change_email_verify_code_expired", func(t *testing.T) {
-		svc := NewUserService(&fakeUserSvcRepo{
-			existsByEmailFn: func(_ context.Context, _ string) (bool, error) {
-				return false, nil
-			},
-		}, &fakeUserSvcAuthRepo{
-			verifyVerifyCodeFn: func(_ context.Context, _, _ string, _ int32) (bool, error) {
-				return false, repository.ErrRedisNil
-			},
-		}, &fakeUserSvcDeviceRepo{})
-		resp, err := svc.ChangeEmail(userSvcCtx("u1"), &pb.ChangeEmailRequest{NewEmail: "a@test.com", VerifyCode: "123456"})
-		require.Nil(t, resp)
-		requireUserSvcStatus(t, err, codes.Unauthenticated, consts.CodeVerifyCodeExpire)
-	})
-
-	t.Run("change_email_success_with_delete_code_error", func(t *testing.T) {
-		svc := NewUserService(&fakeUserSvcRepo{
-			existsByEmailFn: func(_ context.Context, _ string) (bool, error) {
-				return false, nil
-			},
-			getByUUIDFn: func(_ context.Context, _ string) (*model.UserInfo, error) {
-				return &model.UserInfo{Uuid: "u1", Email: "old@test.com"}, nil
-			},
-			updateEmailFn: func(_ context.Context, userUUID, email string) error {
-				require.Equal(t, "u1", userUUID)
-				require.Equal(t, "a@test.com", email)
-				return nil
-			},
-		}, &fakeUserSvcAuthRepo{
-			verifyVerifyCodeFn: func(_ context.Context, _, _ string, codeType int32) (bool, error) {
-				require.Equal(t, int32(4), codeType)
-				return true, nil
-			},
-			deleteVerifyCodeFn: func(_ context.Context, _ string, _ int32) error {
-				return errors.New("delete code failed")
-			},
-		}, &fakeUserSvcDeviceRepo{})
-		resp, err := svc.ChangeEmail(userSvcCtx("u1"), &pb.ChangeEmailRequest{NewEmail: "a@test.com", VerifyCode: "123456"})
-		require.NoError(t, err)
-		require.NotNil(t, resp)
-		assert.Equal(t, "a@test.com", resp.Email)
-	})
-}
-
 func TestUserServiceQRCodeDeleteAndBatch(t *testing.T) {
 	initUserSvcTestLogger()
 
@@ -488,32 +391,6 @@ func TestUserServiceQRCodeDeleteAndBatch(t *testing.T) {
 		require.NoError(t, err3)
 		require.NotNil(t, resp3)
 		assert.Equal(t, "u1", resp3.UserUuid)
-	})
-
-	t.Run("delete_account_password_wrong_and_success", func(t *testing.T) {
-		hash := hashUserSvcPassword(t, "pass123456")
-		svcWrong := NewUserService(&fakeUserSvcRepo{
-			getByUUIDFn: func(_ context.Context, _ string) (*model.UserInfo, error) {
-				return &model.UserInfo{Uuid: "u1", Password: hash}, nil
-			},
-		}, &fakeUserSvcAuthRepo{}, &fakeUserSvcDeviceRepo{})
-		respWrong, errWrong := svcWrong.DeleteAccount(userSvcCtx("u1"), &pb.DeleteAccountRequest{Password: "wrong"})
-		require.Nil(t, respWrong)
-		requireUserSvcStatus(t, errWrong, codes.Unauthenticated, consts.CodePasswordError)
-
-		svcOK := NewUserService(&fakeUserSvcRepo{
-			getByUUIDFn: func(_ context.Context, _ string) (*model.UserInfo, error) {
-				return &model.UserInfo{Uuid: "u1", Password: hash}, nil
-			},
-			deleteFn: func(_ context.Context, userUUID string) error {
-				require.Equal(t, "u1", userUUID)
-				return nil
-			},
-		}, &fakeUserSvcAuthRepo{}, &fakeUserSvcDeviceRepo{})
-		respOK, errOK := svcOK.DeleteAccount(userSvcCtx("u1"), &pb.DeleteAccountRequest{Password: "pass123456"})
-		require.NoError(t, errOK)
-		require.NotNil(t, respOK)
-		assert.NotEmpty(t, respOK.DeleteAt)
 	})
 
 	t.Run("batch_get_profile_empty_too_many_success", func(t *testing.T) {

@@ -24,8 +24,8 @@ func NewAuthRepository(db *gorm.DB, redisClient *redis.Client) IAuthRepository {
 }
 
 // GetByEmail 根据邮箱查询可登录账号。
-func (r *authRepositoryImpl) GetByEmail(ctx context.Context, email string) (*model.UserInfo, error) {
-	var user model.UserInfo
+func (r *authRepositoryImpl) GetByEmail(ctx context.Context, email string) (*model.UserAccount, error) {
+	var user model.UserAccount
 	err := r.db.WithContext(ctx).Where("email = ? AND deleted_at IS NULL", email).First(&user).Error
 	if err != nil {
 		return nil, WrapDBError(err)
@@ -34,9 +34,9 @@ func (r *authRepositoryImpl) GetByEmail(ctx context.Context, email string) (*mod
 }
 
 // GetByUserUUID 根据用户 UUID 查询可登录账号。
-func (r *authRepositoryImpl) GetByUserUUID(ctx context.Context, userUUID string) (*model.UserInfo, error) {
-	var user model.UserInfo
-	err := r.db.WithContext(ctx).Where("uuid = ? AND deleted_at IS NULL", userUUID).First(&user).Error
+func (r *authRepositoryImpl) GetByUserUUID(ctx context.Context, userUUID string) (*model.UserAccount, error) {
+	var user model.UserAccount
+	err := r.db.WithContext(ctx).Where("user_uuid = ? AND deleted_at IS NULL", userUUID).First(&user).Error
 	if err != nil {
 		return nil, WrapDBError(err)
 	}
@@ -46,7 +46,7 @@ func (r *authRepositoryImpl) GetByUserUUID(ctx context.Context, userUUID string)
 // ExistsByEmail 检查邮箱是否已被占用。
 func (r *authRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).Where("email = ? AND deleted_at IS NULL", email).Count(&count).Error
+	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).Where("email = ? AND deleted_at IS NULL", email).Count(&count).Error
 	if err != nil {
 		return false, WrapDBError(err)
 	}
@@ -54,7 +54,7 @@ func (r *authRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (b
 }
 
 // Create 创建账号记录。
-func (r *authRepositoryImpl) Create(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error) {
+func (r *authRepositoryImpl) Create(ctx context.Context, user *model.UserAccount) (*model.UserAccount, error) {
 	if err := r.createUser(r.db.WithContext(ctx), user); err != nil {
 		return nil, err
 	}
@@ -62,12 +62,12 @@ func (r *authRepositoryImpl) Create(ctx context.Context, user *model.UserInfo) (
 }
 
 // CreateWithOutboxEvent 在创建账号的同一事务中追加 Outbox 事件。
-func (r *authRepositoryImpl) CreateWithOutboxEvent(ctx context.Context, user *model.UserInfo, eventType, payload string) (*model.UserInfo, error) {
+func (r *authRepositoryImpl) CreateWithOutboxEvent(ctx context.Context, user *model.UserAccount, eventType, payload string) (*model.UserAccount, error) {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := r.createUser(tx, user); err != nil {
 			return err
 		}
-		if err := outbox.InsertEvent(tx, eventType, user.Uuid, payload); err != nil {
+		if err := outbox.InsertEvent(tx, eventType, user.UserUuid, payload); err != nil {
 			return WrapDBError(err)
 		}
 		return nil
@@ -80,9 +80,9 @@ func (r *authRepositoryImpl) CreateWithOutboxEvent(ctx context.Context, user *mo
 
 // UpdatePassword 更新密码哈希。
 func (r *authRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, password string) error {
-	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
-		Update("password", password).Error
+	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).
+		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
+		Update("password_hash", password).Error
 	if err != nil {
 		return WrapDBError(err)
 	}
@@ -92,8 +92,8 @@ func (r *authRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, passw
 
 // UpdateEmail 更新邮箱。
 func (r *authRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email string) error {
-	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).
+		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
 		Update("email", email).Error
 	if err != nil {
 		return WrapDBError(err)
@@ -106,13 +106,13 @@ func (r *authRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email st
 func (r *authRepositoryImpl) UpdateLoginDisplay(ctx context.Context, userUUID, nickname, avatar string) error {
 	updates := map[string]interface{}{"updated_at": time.Now()}
 	if nickname != "" {
-		updates["nickname"] = nickname
+		updates["login_nickname"] = nickname
 	}
 	if avatar != "" {
-		updates["avatar"] = avatar
+		updates["login_avatar"] = avatar
 	}
-	err := r.db.WithContext(ctx).Model(&model.UserInfo{}).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
+	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).
+		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
 		Updates(updates).Error
 	if err != nil {
 		return WrapDBError(err)
@@ -123,7 +123,10 @@ func (r *authRepositoryImpl) UpdateLoginDisplay(ctx context.Context, userUUID, n
 
 // Delete 软删除账号。
 func (r *authRepositoryImpl) Delete(ctx context.Context, userUUID string) error {
-	err := r.db.WithContext(ctx).Where("uuid = ? AND deleted_at IS NULL", userUUID).Delete(&model.UserInfo{}).Error
+	now := time.Now()
+	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).
+		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
+		Updates(map[string]interface{}{"status": 1, "deleted_at": now, "updated_at": now}).Error
 	if err != nil {
 		return WrapDBError(err)
 	}
@@ -134,7 +137,10 @@ func (r *authRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 // DeleteWithOutboxEvent 在软删除账号的同一事务中追加 Outbox 事件。
 func (r *authRepositoryImpl) DeleteWithOutboxEvent(ctx context.Context, userUUID, eventType, payload string) error {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("uuid = ? AND deleted_at IS NULL", userUUID).Delete(&model.UserInfo{}).Error; err != nil {
+		now := time.Now()
+		if err := tx.Model(&model.UserAccount{}).
+			Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
+			Updates(map[string]interface{}{"status": 1, "deleted_at": now, "updated_at": now}).Error; err != nil {
 			return WrapDBError(err)
 		}
 		if err := outbox.InsertEvent(tx, eventType, userUUID, payload); err != nil {
@@ -260,14 +266,15 @@ func (r *authRepositoryImpl) BatchGetAccountStatus(ctx context.Context, userUUID
 	}
 
 	type rawAccountStatus struct {
-		Uuid      string         `gorm:"column:uuid"`
+		UserUUID  string         `gorm:"column:user_uuid"`
+		Status    int8           `gorm:"column:status"`
 		DeletedAt gorm.DeletedAt `gorm:"column:deleted_at"`
 	}
 
 	rows := make([]*rawAccountStatus, 0, len(userUUIDs))
-	err := r.db.WithContext(ctx).Unscoped().Model(&model.UserInfo{}).
-		Select("uuid, deleted_at").
-		Where("uuid IN ?", userUUIDs).
+	err := r.db.WithContext(ctx).Unscoped().Model(&model.UserAccount{}).
+		Select("user_uuid, status, deleted_at").
+		Where("user_uuid IN ?", userUUIDs).
 		Find(&rows).Error
 	if err != nil {
 		return nil, WrapDBError(err)
@@ -275,14 +282,14 @@ func (r *authRepositoryImpl) BatchGetAccountStatus(ctx context.Context, userUUID
 
 	statusMap := make(map[string]*AccountStatusItem, len(rows))
 	for _, row := range rows {
-		if row == nil || row.Uuid == "" {
+		if row == nil || row.UserUUID == "" {
 			continue
 		}
-		item := &AccountStatusItem{UserUUID: row.Uuid, Exists: true, Status: 0}
-		if row.DeletedAt.Valid {
+		item := &AccountStatusItem{UserUUID: row.UserUUID, Exists: true, Status: int32(row.Status)}
+		if row.DeletedAt.Valid && item.Status == 0 {
 			item.Status = 1
 		}
-		statusMap[row.Uuid] = item
+		statusMap[row.UserUUID] = item
 	}
 
 	items := make([]*AccountStatusItem, 0, len(userUUIDs))
@@ -318,7 +325,7 @@ func (r *authRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID s
 	}
 }
 
-func (r *authRepositoryImpl) createUser(db *gorm.DB, user *model.UserInfo) error {
+func (r *authRepositoryImpl) createUser(db *gorm.DB, user *model.UserAccount) error {
 	if user.Telephone == "" {
 		if err := db.Omit("Telephone").Create(user).Error; err != nil {
 			return WrapDBError(err)

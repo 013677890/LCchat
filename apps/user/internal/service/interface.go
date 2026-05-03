@@ -5,36 +5,6 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 )
 
-// ==================== 认证服务接口 ====================
-
-// IAuthService 认证服务接口
-// 职责：用户注册、登录、登出、Token管理、验证码
-type IAuthService interface {
-	// Register 用户注册
-	Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error)
-
-	// Login 用户登录（密码）
-	Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error)
-
-	// LoginByCode 验证码登录
-	LoginByCode(ctx context.Context, req *pb.LoginByCodeRequest) (*pb.LoginByCodeResponse, error)
-
-	// SendVerifyCode 发送验证码
-	SendVerifyCode(ctx context.Context, req *pb.SendVerifyCodeRequest) (*pb.SendVerifyCodeResponse, error)
-
-	// VerifyCode 校验验证码
-	VerifyCode(ctx context.Context, req *pb.VerifyCodeRequest) (*pb.VerifyCodeResponse, error)
-
-	// RefreshToken 刷新Token
-	RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) (*pb.RefreshTokenResponse, error)
-
-	// Logout 用户登出
-	Logout(ctx context.Context, req *pb.LogoutRequest) error
-
-	// ResetPassword 重置密码
-	ResetPassword(ctx context.Context, req *pb.ResetPasswordRequest) error
-}
-
 // ==================== 用户信息服务接口 ====================
 
 // IUserService 用户信息服务接口
@@ -55,23 +25,11 @@ type IUserService interface {
 	// UploadAvatar 上传头像
 	UploadAvatar(ctx context.Context, req *pb.UploadAvatarRequest) (*pb.UploadAvatarResponse, error)
 
-	// ChangePassword 修改密码
-	ChangePassword(ctx context.Context, req *pb.ChangePasswordRequest) error
-
-	// ChangeEmail 绑定/换绑邮箱
-	ChangeEmail(ctx context.Context, req *pb.ChangeEmailRequest) (*pb.ChangeEmailResponse, error)
-
-	// ChangeTelephone 绑定/换绑手机
-	ChangeTelephone(ctx context.Context, req *pb.ChangeTelephoneRequest) (*pb.ChangeTelephoneResponse, error)
-
 	// GetQRCode 获取用户二维码
 	GetQRCode(ctx context.Context, req *pb.GetQRCodeRequest) (*pb.GetQRCodeResponse, error)
 
 	// ParseQRCode 解析二维码
 	ParseQRCode(ctx context.Context, req *pb.ParseQRCodeRequest) (*pb.ParseQRCodeResponse, error)
-
-	// DeleteAccount 注销账号
-	DeleteAccount(ctx context.Context, req *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error)
 
 	// BatchGetProfile 批量获取用户信息
 	BatchGetProfile(ctx context.Context, req *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error)
@@ -159,41 +117,12 @@ type IBlacklistService interface {
 	CheckIsBlacklist(ctx context.Context, req *pb.CheckIsBlacklistRequest) (*pb.CheckIsBlacklistResponse, error)
 }
 
-// ==================== 设备会话服务接口 ====================
-
 type IGroupService interface {
 	// GetGroupMembers 获取群组有效成员列表。
 	GetGroupMembers(ctx context.Context, req *pb.GetGroupMembersRequest) (*pb.GetGroupMembersResponse, error)
 }
 
-// IDeviceService 设备会话服务接口
-// 职责：设备列表、踢出设备、在线状态查询
-type IDeviceService interface {
-	// GetDeviceList 获取设备列表
-	GetDeviceList(ctx context.Context, req *pb.GetDeviceListRequest) (*pb.GetDeviceListResponse, error)
-
-	// KickDevice 踢出设备
-	KickDevice(ctx context.Context, req *pb.KickDeviceRequest) error
-
-	// GetOnlineStatus 获取用户在线状态
-	GetOnlineStatus(ctx context.Context, req *pb.GetOnlineStatusRequest) (*pb.GetOnlineStatusResponse, error)
-
-	// BatchGetOnlineStatus 批量获取在线状态
-	BatchGetOnlineStatus(ctx context.Context, req *pb.BatchGetOnlineStatusRequest) (*pb.BatchGetOnlineStatusResponse, error)
-
-	// UpdateDeviceActive 批量更新设备活跃时间（内部调用）
-	// 由 gateway/connect 在本地节流命中后调用，仅更新 Redis 活跃时间。
-	UpdateDeviceActive(ctx context.Context, req *pb.UpdateDeviceActiveRequest) error
-
-	// UpdateDeviceStatus 更新设备在线状态（内部调用）
-	// 由 connect 服务在连接建立/断开时调用。
-	UpdateDeviceStatus(ctx context.Context, req *pb.UpdateDeviceStatusRequest) error
-}
-
 // ==================== 别名类型定义（用于向后兼容）====================
-
-// AuthService 别名 IAuthService
-type AuthService = IAuthService
 
 // UserService 别名 IUserService
 type UserService = IUserService
@@ -209,6 +138,3 @@ type BlacklistService = IBlacklistService
 
 // GroupService 别名 IGroupService
 type GroupService = IGroupService
-
-// DeviceService 别名 IDeviceService
-type DeviceService = IDeviceService

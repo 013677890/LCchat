@@ -47,12 +47,6 @@ service UserService {
 	// BatchGetProfile 批量获取用户信息
 	// 建议调用超时：800ms。
 	rpc BatchGetProfile(BatchGetProfileRequest) returns (BatchGetProfileResponse);
-
-	// === 以下 RPC 已迁移到 auth.AccountService，此处保留仅为旧 gateway 编译通过 ===
-	rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
-	rpc ChangeEmail(ChangeEmailRequest) returns (ChangeEmailResponse);
-	rpc ChangeTelephone(ChangeTelephoneRequest) returns (ChangeTelephoneResponse);
-	rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
 }
 
 // ==================== 通用用户类型 ====================
@@ -181,43 +175,4 @@ message BatchGetProfileRequest {
 // BatchGetProfileResponse 批量获取用户信息响应
 message BatchGetProfileResponse {
 	repeated SimpleUserInfo users = 1;
-}
-
-// ==================== 已迁移接口类型（向后兼容，Phase 3 后删除）====================
-// 以下类型已迁移到 proto/auth/account_service.proto，
-// 此处保留仅为旧 gateway/user-service 编译通过。
-
-// ChangePasswordRequest [deprecated: use auth.AccountService]
-message ChangePasswordRequest {
-	string old_password = 1 [(validate.rules).string = {min_len: 6, max_len: 20}];
-	string new_password = 2 [(validate.rules).string = {min_len: 6, max_len: 20}];
-}
-message ChangePasswordResponse {}
-
-// ChangeEmailRequest [deprecated: use auth.AccountService]
-message ChangeEmailRequest {
-	string new_email = 1 [(validate.rules).string.email = true];
-	string verify_code = 2 [(validate.rules).string.len = 6];
-}
-message ChangeEmailResponse {
-	string email = 1;
-}
-
-// ChangeTelephoneRequest [deprecated: use auth.AccountService]
-message ChangeTelephoneRequest {
-	string new_telephone = 1 [(validate.rules).string.len = 11];
-	string verify_code = 2 [(validate.rules).string.len = 6];
-}
-message ChangeTelephoneResponse {
-	string telephone = 1;
-}
-
-// DeleteAccountRequest [deprecated: use auth.AccountService]
-message DeleteAccountRequest {
-	string password = 1 [(validate.rules).string = {min_len: 6, max_len: 20}];
-	string reason = 2 [(validate.rules).string.max_len = 255];
-}
-message DeleteAccountResponse {
-	string delete_at = 1;
-	string recover_deadline = 2;
 }

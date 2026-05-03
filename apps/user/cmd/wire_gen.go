@@ -32,9 +32,7 @@ func initializeUserApp() (*UserApp, error) {
 		return nil, err
 	}
 	iUserRepository := repository.NewUserRepository(db, client)
-	iAuthRepository := repository.NewAuthRepository(db, client)
-	iDeviceRepository := repository.NewDeviceRepository(db, client)
-	iUserService := service.NewUserService(iUserRepository, iAuthRepository, iDeviceRepository)
+	iUserService := service.NewProfileUserService(iUserRepository)
 	userHandler := handler.NewUserHandler(iUserService)
 	iInternalProfileService := service.NewInternalProfileService(iUserRepository)
 	internalProfileHandler := handler.NewInternalProfileHandler(iInternalProfileService)

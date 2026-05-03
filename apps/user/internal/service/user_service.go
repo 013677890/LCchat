@@ -6,17 +6,12 @@ import (
 	"fmt"
 	"github.com/013677890/LCchat-Backend/apps/user/internal/converter"
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
-	"github.com/013677890/LCchat-Backend/apps/user/internal/utils"
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
-	"github.com/013677890/LCchat-Backend/pkg/async"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"regexp"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 // userServiceImpl 用户信息服务实现
@@ -33,6 +28,11 @@ func NewUserService(userRepo repository.IUserRepository, authRepo repository.IAu
 		authRepo:   authRepo,
 		deviceRepo: deviceRepo,
 	}
+}
+
+// NewProfileUserService 创建仅包含资料域职责的用户服务实例。
+func NewProfileUserService(userRepo repository.IUserRepository) UserService {
+	return &userServiceImpl{userRepo: userRepo}
 }
 
 // GetProfile 获取个人信息
@@ -259,151 +259,6 @@ func (s *userServiceImpl) UploadAvatar(ctx context.Context, req *pb.UploadAvatar
 	}, nil
 }
 
-// ChangePassword 修改密码
-// 业务流程：
-//  1. 从context中获取用户UUID
-//  2. 查询用户信息
-//  3. 验证旧密码是否正确
-//  4. 验证新密码不能与旧密码相同
-//  5. 生成新密码哈希
-//  6. 更新密码
-//  7. 踢出其他所有设备的登录态
-//
-// 错误码映射：
-//   - codes.NotFound: 用户不存在
-//   - codes.Unauthenticated: 旧密码错误
-//   - codes.FailedPrecondition: 新密码不能与旧密码相同
-//   - codes.Internal: 系统内部错误
-func (s *userServiceImpl) ChangePassword(ctx context.Context, req *pb.ChangePasswordRequest) error {
-	// 1. 从context中获取用户UUID
-	userUUID := util.GetUserUUIDFromContext(ctx)
-	if userUUID == "" {
-		return apperr.New(consts.CodeUnauthorized)
-	}
-
-	// 2. 查询用户信息
-	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
-	if err != nil {
-		return apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
-	}
-
-	if userInfo == nil {
-		return apperr.New(consts.CodeUserNotFound)
-	}
-
-	// 3. 校验旧密码是否正确
-	err = bcrypt.CompareHashAndPassword([]byte(userInfo.Password), []byte(req.OldPassword))
-	if err != nil {
-		return apperr.New(consts.CodePasswordError)
-	}
-
-	// 4. 校验新密码是否与旧密码相同
-	err = bcrypt.CompareHashAndPassword([]byte(userInfo.Password), []byte(req.NewPassword))
-	if err == nil {
-		// 密码相同
-		return apperr.New(consts.CodePasswordSameAsOld)
-	}
-
-	// 5. 生成新密码哈希
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return apperr.Wrap(err, consts.CodeInternalError, "生成密码哈希失败")
-	}
-
-	// 6. 更新密码
-	err = s.userRepo.UpdatePassword(ctx, userUUID, string(hashedPassword))
-	if err != nil {
-		return apperr.Wrap(err, consts.CodeInternalError, "更新密码失败")
-	}
-
-	// 7. 踢出其他所有设备的登录态（删除所有设备的token）
-	// 注意：当前设备保持登录态，其他设备被踢出
-	// 这里需要在repository中实现踢出其他设备的方法，暂时跳过
-	// TODO: 实现踢出其他设备登录态
-
-	return nil
-}
-
-// ChangeEmail 绑定/换绑邮箱
-// 业务流程：
-//  1. 从context中获取用户UUID
-//  2. 检查新邮箱是否已被使用
-//  3. 校验验证码是否正确
-//  4. 更新邮箱
-//  5. 删除验证码
-//
-// 错误码映射：
-//   - codes.NotFound: 用户不存在
-//   - codes.AlreadyExists: 邮箱已被使用
-//   - codes.Unauthenticated: 验证码错误或已过期
-//   - codes.Internal: 系统内部错误
-func (s *userServiceImpl) ChangeEmail(ctx context.Context, req *pb.ChangeEmailRequest) (*pb.ChangeEmailResponse, error) {
-	// 1. 从context中获取用户UUID
-	userUUID := util.GetUserUUIDFromContext(ctx)
-	if userUUID == "" {
-		return nil, apperr.New(consts.CodeUnauthorized)
-	}
-
-	// 访问日志已经由统一拦截器记录，这里不重复记录换绑邮箱入口日志。
-	// 保留下方业务校验、错误处理和成功结果日志即可。
-
-	// 2. 检查新邮箱是否已被使用
-	exists, err := s.userRepo.ExistsByEmail(ctx, req.NewEmail)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查邮箱是否存在失败")
-	}
-	if exists {
-		return nil, apperr.New(consts.CodeEmailAlreadyExist)
-	}
-
-	// 3. 校验验证码（type=4: 换绑邮箱）
-	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.NewEmail, req.VerifyCode, 4)
-	if err != nil {
-		// 判断是 Redis Key 不存在还是其他错误
-		if errors.Is(err, repository.ErrRedisNil) {
-			return nil, apperr.New(consts.CodeVerifyCodeExpire)
-		}
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
-	}
-	if !isValid {
-		return nil, apperr.New(consts.CodeVerifyCodeError)
-	}
-
-	// 4. 查询用户当前信息，获取旧邮箱用于日志记录
-	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
-	}
-	if userInfo == nil {
-		return nil, apperr.New(consts.CodeUserNotFound)
-	}
-
-	// 5. 更新邮箱
-	err = s.userRepo.UpdateEmail(ctx, userUUID, req.NewEmail)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新邮箱失败")
-	}
-
-	// 6. 删除验证码（type=4: 换绑邮箱）
-	if err := s.authRepo.DeleteVerifyCode(ctx, req.NewEmail, 4); err != nil {
-		logger.Warn(ctx, "删除验证码失败",
-			logger.String("email", utils.MaskEmail(req.NewEmail)),
-			logger.ErrorField("error", err),
-		)
-		// 删除失败不影响换绑邮箱流程，只记录警告日志
-	}
-
-	// 7. 换绑成功
-	return &pb.ChangeEmailResponse{
-		Email: req.NewEmail,
-	}, nil
-}
-
-// ChangeTelephone 绑定/换绑手机
-func (s *userServiceImpl) ChangeTelephone(ctx context.Context, req *pb.ChangeTelephoneRequest) (*pb.ChangeTelephoneResponse, error) {
-	return nil, apperr.NewWithMessage(consts.CodeInternalError, "绑定/换绑手机功能暂未实现")
-}
-
 // GetQRCode 获取用户二维码
 // 业务流程：
 //  1. 从context中获取用户UUID
@@ -454,69 +309,6 @@ func (s *userServiceImpl) GetQRCode(ctx context.Context, req *pb.GetQRCodeReques
 	return &pb.GetQRCodeResponse{
 		Qrcode:   qrcodeURL,
 		ExpireAt: expireAt,
-	}, nil
-}
-
-// DeleteAccount 注销账号
-// 业务流程：
-//  1. 从context中获取用户UUID
-//  2. 查询用户信息
-//  3. 验证密码是否正确
-//  4. 软删除用户（设置 deleted_at 时间戳）
-//  5. 删除用户的所有设备会话（登出所有设备）
-//  6. 返回注销时间和恢复截止时间
-//
-// 错误码映射：
-//   - codes.NotFound: 用户不存在
-//   - codes.Unauthenticated: 密码错误
-//   - codes.Internal: 系统内部错误
-func (s *userServiceImpl) DeleteAccount(ctx context.Context, req *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error) {
-	// 1. 从context中获取用户UUID
-	userUUID := util.GetUserUUIDFromContext(ctx)
-	if userUUID == "" {
-		return nil, apperr.New(consts.CodeUnauthorized)
-	}
-
-	// 2. 查询用户信息
-	userInfo, err := s.userRepo.GetByUUID(ctx, userUUID)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
-	}
-
-	if userInfo == nil {
-		return nil, apperr.New(consts.CodeUserNotFound)
-	}
-
-	// 3. 校验密码是否正确
-	err = bcrypt.CompareHashAndPassword([]byte(userInfo.Password), []byte(req.Password))
-	if err != nil {
-		return nil, apperr.New(consts.CodePasswordError)
-	}
-
-	// 4. 软删除用户（设置 deleted_at 时间戳）
-	err = s.userRepo.Delete(ctx, userUUID)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "注销账号失败")
-	}
-
-	// 5. 异步清理用户所有设备的 Redis 会话（不阻塞返回）
-	async.RunSafe(ctx, func(asyncCtx context.Context) {
-		if err := s.deviceRepo.DeleteByUserUUID(asyncCtx, userUUID); err != nil {
-			logger.Warn(asyncCtx, "清理用户 Redis 会话失败",
-				logger.String("user_uuid", userUUID),
-				logger.ErrorField("error", err),
-			)
-		}
-	}, 5*time.Second)
-
-	// 6. 计算恢复截止时间（30天后）
-	deleteAt := time.Now()
-	recoverDeadline := deleteAt.Add(30 * 24 * time.Hour)
-
-	// 7. 返回注销时间和恢复截止时间
-	return &pb.DeleteAccountResponse{
-		DeleteAt:        deleteAt.Format(time.RFC3339),
-		RecoverDeadline: recoverDeadline.Format(time.RFC3339),
 	}, nil
 }
 

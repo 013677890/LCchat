@@ -20,12 +20,8 @@ type fakeUserHandlerService struct {
 	searchUserFn      func(context.Context, *pb.SearchUserRequest) (*pb.SearchUserResponse, error)
 	updateProfileFn   func(context.Context, *pb.UpdateProfileRequest) (*pb.UpdateProfileResponse, error)
 	uploadAvatarFn    func(context.Context, *pb.UploadAvatarRequest) (*pb.UploadAvatarResponse, error)
-	changePasswordFn  func(context.Context, *pb.ChangePasswordRequest) error
-	changeEmailFn     func(context.Context, *pb.ChangeEmailRequest) (*pb.ChangeEmailResponse, error)
-	changeTelFn       func(context.Context, *pb.ChangeTelephoneRequest) (*pb.ChangeTelephoneResponse, error)
 	getQRCodeFn       func(context.Context, *pb.GetQRCodeRequest) (*pb.GetQRCodeResponse, error)
 	parseQRCodeFn     func(context.Context, *pb.ParseQRCodeRequest) (*pb.ParseQRCodeResponse, error)
-	deleteAccountFn   func(context.Context, *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error)
 	batchGetProfileFn func(context.Context, *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error)
 }
 
@@ -66,27 +62,6 @@ func (f *fakeUserHandlerService) UploadAvatar(ctx context.Context, req *pb.Uploa
 	return f.uploadAvatarFn(ctx, req)
 }
 
-func (f *fakeUserHandlerService) ChangePassword(ctx context.Context, req *pb.ChangePasswordRequest) error {
-	if f.changePasswordFn == nil {
-		return nil
-	}
-	return f.changePasswordFn(ctx, req)
-}
-
-func (f *fakeUserHandlerService) ChangeEmail(ctx context.Context, req *pb.ChangeEmailRequest) (*pb.ChangeEmailResponse, error) {
-	if f.changeEmailFn == nil {
-		return &pb.ChangeEmailResponse{}, nil
-	}
-	return f.changeEmailFn(ctx, req)
-}
-
-func (f *fakeUserHandlerService) ChangeTelephone(ctx context.Context, req *pb.ChangeTelephoneRequest) (*pb.ChangeTelephoneResponse, error) {
-	if f.changeTelFn == nil {
-		return &pb.ChangeTelephoneResponse{}, nil
-	}
-	return f.changeTelFn(ctx, req)
-}
-
 func (f *fakeUserHandlerService) GetQRCode(ctx context.Context, req *pb.GetQRCodeRequest) (*pb.GetQRCodeResponse, error) {
 	if f.getQRCodeFn == nil {
 		return &pb.GetQRCodeResponse{}, nil
@@ -99,13 +74,6 @@ func (f *fakeUserHandlerService) ParseQRCode(ctx context.Context, req *pb.ParseQ
 		return &pb.ParseQRCodeResponse{}, nil
 	}
 	return f.parseQRCodeFn(ctx, req)
-}
-
-func (f *fakeUserHandlerService) DeleteAccount(ctx context.Context, req *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error) {
-	if f.deleteAccountFn == nil {
-		return &pb.DeleteAccountResponse{}, nil
-	}
-	return f.deleteAccountFn(ctx, req)
 }
 
 func (f *fakeUserHandlerService) BatchGetProfile(ctx context.Context, req *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error) {
@@ -209,69 +177,19 @@ func TestUserHandlerForwardingContracts(t *testing.T) {
 		require.ErrorIs(t, err3, wantErr)
 	})
 
-	t.Run("change_password_empty_response_contract", func(t *testing.T) {
-		wantErr := errors.New("change password failed")
-		h := NewUserHandler(&fakeUserHandlerService{
-			changePasswordFn: func(_ context.Context, req *pb.ChangePasswordRequest) error {
-				require.Equal(t, "oldpass123", req.OldPassword)
-				return nil
-			},
-		})
-
-		resp, err := h.ChangePassword(context.Background(), &pb.ChangePasswordRequest{
-			OldPassword: "oldpass123",
-			NewPassword: "newpass123",
-		})
-		require.NoError(t, err)
-		require.NotNil(t, resp)
-		assert.IsType(t, &pb.ChangePasswordResponse{}, resp)
-
-		hErr := NewUserHandler(&fakeUserHandlerService{
-			changePasswordFn: func(_ context.Context, _ *pb.ChangePasswordRequest) error {
-				return wantErr
-			},
-		})
-		respErr, errGot := hErr.ChangePassword(context.Background(), &pb.ChangePasswordRequest{
-			OldPassword: "oldpass123",
-			NewPassword: "newpass123",
-		})
-		require.ErrorIs(t, errGot, wantErr)
-		require.NotNil(t, respErr)
-		assert.IsType(t, &pb.ChangePasswordResponse{}, respErr)
-	})
-
-	t.Run("email_telephone_qrcode_batch_delete_success_and_error", func(t *testing.T) {
+	t.Run("qrcode_batch_delete_success_and_error", func(t *testing.T) {
 		wantErr := errors.New("service failed")
 		h := NewUserHandler(&fakeUserHandlerService{
-			changeEmailFn: func(_ context.Context, req *pb.ChangeEmailRequest) (*pb.ChangeEmailResponse, error) {
-				return &pb.ChangeEmailResponse{Email: req.NewEmail}, nil
-			},
-			changeTelFn: func(_ context.Context, req *pb.ChangeTelephoneRequest) (*pb.ChangeTelephoneResponse, error) {
-				return &pb.ChangeTelephoneResponse{Telephone: req.NewTelephone}, nil
-			},
 			getQRCodeFn: func(_ context.Context, _ *pb.GetQRCodeRequest) (*pb.GetQRCodeResponse, error) {
 				return &pb.GetQRCodeResponse{Qrcode: "q"}, nil
 			},
 			parseQRCodeFn: func(_ context.Context, req *pb.ParseQRCodeRequest) (*pb.ParseQRCodeResponse, error) {
 				return &pb.ParseQRCodeResponse{UserUuid: req.Token}, nil
 			},
-			deleteAccountFn: func(_ context.Context, _ *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error) {
-				return &pb.DeleteAccountResponse{DeleteAt: "now"}, nil
-			},
 			batchGetProfileFn: func(_ context.Context, _ *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error) {
 				return &pb.BatchGetProfileResponse{}, nil
 			},
 		})
-
-		emailResp, emailErr := h.ChangeEmail(context.Background(), &pb.ChangeEmailRequest{NewEmail: "a@test.com", VerifyCode: "123456"})
-		require.NoError(t, emailErr)
-		require.NotNil(t, emailResp)
-		assert.Equal(t, "a@test.com", emailResp.Email)
-
-		telResp, telErr := h.ChangeTelephone(context.Background(), &pb.ChangeTelephoneRequest{NewTelephone: "13800138000", VerifyCode: "123456"})
-		require.NoError(t, telErr)
-		require.NotNil(t, telResp)
-		assert.Equal(t, "13800138000", telResp.Telephone)
 
 		qrResp, qrErr := h.GetQRCode(context.Background(), &pb.GetQRCodeRequest{})
 		require.NoError(t, qrErr)
@@ -283,47 +201,26 @@ func TestUserHandlerForwardingContracts(t *testing.T) {
 		require.NotNil(t, parseResp)
 		assert.Equal(t, "u1", parseResp.UserUuid)
 
-		delResp, delErr := h.DeleteAccount(context.Background(), &pb.DeleteAccountRequest{Password: "pass"})
-		require.NoError(t, delErr)
-		require.NotNil(t, delResp)
-
 		batchResp, batchErr := h.BatchGetProfile(context.Background(), &pb.BatchGetProfileRequest{UserUuids: []string{"u1"}})
 		require.NoError(t, batchErr)
 		require.NotNil(t, batchResp)
 
 		hErr := NewUserHandler(&fakeUserHandlerService{
-			changeEmailFn: func(_ context.Context, _ *pb.ChangeEmailRequest) (*pb.ChangeEmailResponse, error) {
-				return nil, wantErr
-			},
-			changeTelFn: func(_ context.Context, _ *pb.ChangeTelephoneRequest) (*pb.ChangeTelephoneResponse, error) {
-				return nil, wantErr
-			},
 			getQRCodeFn: func(_ context.Context, _ *pb.GetQRCodeRequest) (*pb.GetQRCodeResponse, error) {
 				return nil, wantErr
 			},
 			parseQRCodeFn: func(_ context.Context, _ *pb.ParseQRCodeRequest) (*pb.ParseQRCodeResponse, error) {
 				return nil, wantErr
 			},
-			deleteAccountFn: func(_ context.Context, _ *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error) {
-				return nil, wantErr
-			},
 			batchGetProfileFn: func(_ context.Context, _ *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error) {
 				return nil, wantErr
 			},
 		})
-
-		_, err1 := hErr.ChangeEmail(context.Background(), &pb.ChangeEmailRequest{})
+		_, err1 := hErr.GetQRCode(context.Background(), &pb.GetQRCodeRequest{})
 		require.ErrorIs(t, err1, wantErr)
-		_, err2 := hErr.ChangeTelephone(context.Background(), &pb.ChangeTelephoneRequest{})
+		_, err2 := hErr.ParseQRCode(context.Background(), &pb.ParseQRCodeRequest{})
 		require.ErrorIs(t, err2, wantErr)
-		_, err3 := hErr.GetQRCode(context.Background(), &pb.GetQRCodeRequest{})
+		_, err3 := hErr.BatchGetProfile(context.Background(), &pb.BatchGetProfileRequest{})
 		require.ErrorIs(t, err3, wantErr)
-		_, err4 := hErr.ParseQRCode(context.Background(), &pb.ParseQRCodeRequest{})
-		require.ErrorIs(t, err4, wantErr)
-		_, err5 := hErr.DeleteAccount(context.Background(), &pb.DeleteAccountRequest{})
-		require.ErrorIs(t, err5, wantErr)
-		_, err6 := hErr.BatchGetProfile(context.Background(), &pb.BatchGetProfileRequest{})
-		require.ErrorIs(t, err6, wantErr)
 	})
 }
-

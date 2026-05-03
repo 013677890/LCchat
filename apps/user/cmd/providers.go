@@ -213,32 +213,19 @@ var userInfraProviderSet = wire.NewSet(
 )
 
 var userRepositoryProviderSet = wire.NewSet(
-	repository.NewAuthRepository,
 	repository.NewUserRepository,
-	repository.NewFriendRepository,
-	repository.NewApplyRepository,
-	repository.NewBlacklistRepository,
-	repository.NewDeviceRepository,
 	repository.NewGroupRepository,
 )
 
 var userServiceProviderSet = wire.NewSet(
-	service.NewAuthService,
-	service.NewUserService,
+	service.NewProfileUserService,
 	service.NewInternalProfileService,
-	service.NewFriendService,
-	service.NewBlacklistService,
-	service.NewDeviceService,
 	service.NewGroupService,
 )
 
 var userHandlerProviderSet = wire.NewSet(
-	handler.NewAuthHandler,
 	handler.NewUserHandler,
 	handler.NewInternalProfileHandler,
-	handler.NewFriendHandler,
-	handler.NewBlacklistHandler,
-	handler.NewDeviceHandler,
 	handler.NewGroupHandler,
 )
 
