@@ -24,11 +24,18 @@ type userRepositoryImpl struct {
 	redisClient *redis.Client
 }
 
-// NewUserRepository 创建用户信息仓储实例
+// NewUserRepository 创建用户资料仓储实例。
+//
+// 该仓储统一承接 user_profile 的读写、二维码映射和资料展示事件出箱，
+// 并通过 Redis 缓存降低高频资料查询对 MySQL 的压力。
 func NewUserRepository(db *gorm.DB, redisClient *redis.Client) IUserRepository {
 	return &userRepositoryImpl{db: db, redisClient: redisClient}
 }
 
+// profileToUserInfo 将 user_profile 模型转换为对外统一的资料聚合模型。
+//
+// user-service 内部实际持久化的是 UserProfile，但 service / proto 映射链路统一使用
+// UserInfo，因此在仓储层先做一次字段裁剪与别名归一。
 func profileToUserInfo(profile *model.UserProfile) *model.UserInfo {
 	if profile == nil {
 		return nil
@@ -45,7 +52,12 @@ func profileToUserInfo(profile *model.UserProfile) *model.UserInfo {
 	}
 }
 
-// GetByUUID 根据UUID查询用户信息
+// GetByUUID 根据 UUID 查询用户资料。
+//
+// 查询链路采用“缓存优先 + 空值占位 + 异步回填”策略：
+//  1. 先查 Redis，命中则直接返回；
+//  2. 命中 "{}" 占位时视为用户不存在，避免缓存穿透；
+//  3. 缓存 miss 时回源 MySQL，并把结果异步写回缓存。
 func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model.UserInfo, error) {
 	// ==================== 1. 先从 Redis 缓存中查询 ====================
 	cacheKey := rediskey.UserInfoKey(uuid)
@@ -106,6 +118,9 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 }
 
 // CreateProfile 创建或确认用户资料存在。
+//
+// 该方法服务于账号注册后的资料域初始化：若 profile 已存在则直接复用，
+// 否则在事务内创建默认资料记录，保证重复消费注册事件时仍然幂等。
 func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickname, avatar string) (*model.UserInfo, error) {
 	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -139,8 +154,12 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 	return profileToUserInfo(&profile), nil
 }
 
-// BatchGetByUUIDs 批量查询用户信息
-// 返回结果按传入的 uuids 顺序排列，不存在的用户不包含在结果中
+// BatchGetByUUIDs 批量查询用户资料。
+//
+// 返回结果按传入 uuids 的顺序排列，不存在的用户不会出现在结果中。实现上会：
+//  1. 先批量读取 Redis；
+//  2. 对 miss 部分回源 MySQL；
+//  3. 异步回填命中和空占位，兼顾性能与防穿透。
 func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string) ([]*model.UserInfo, error) {
 	if len(uuids) == 0 {
 		return []*model.UserInfo{}, nil
@@ -349,8 +368,10 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 	return profileToUserInfo(&profile), nil
 }
 
-// Delete 软删除用户（注销账号）
-// 设置 deleted_at 字段，删除 Redis 缓存
+// Delete 删除用户资料。
+//
+// 资料域不保留 deleted_at 软删除标记；收到账号注销事件后直接删除 profile 记录，
+// 同时失效资料缓存，避免上游继续读取到已注销用户的资料快照。
 func (r *userRepositoryImpl) Delete(ctx context.Context, userUUID string) error {
 	// 资料表不保留 deleted_at，收到账号注销事件后直接删除 profile。
 	err := r.db.WithContext(ctx).
@@ -366,6 +387,10 @@ func (r *userRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 	return nil
 }
 
+// applyBasicInfoUpdate 按“仅更新有值字段”的规则写入资料基础字段。
+//
+// 该帮助函数只负责构造更新集和执行 SQL，不承担事件写入；展示字段变更事件由外层事务
+// 在拿到最新快照后统一写入 outbox。
 func (r *userRepositoryImpl) applyBasicInfoUpdate(db *gorm.DB, userUUID string, nickname, signature, birthday string, gender int8) error {
 	updates := map[string]interface{}{
 		"updated_at": time.Now(),
@@ -393,6 +418,7 @@ func (r *userRepositoryImpl) applyBasicInfoUpdate(db *gorm.DB, userUUID string, 
 	return nil
 }
 
+// invalidateUserCache 删除单用户资料缓存，并在失败时投递补偿任务。
 func (r *userRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID, source string) {
 	if r.redisClient == nil || userUUID == "" {
 		return
@@ -406,10 +432,10 @@ func (r *userRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID, 
 	}
 }
 
-// SaveQRCode 保存用户二维码
-// 将二维码 token 与用户 UUID 的映射关系存储到 Redis
-// 同时保存反向映射: user:qrcode:user:{userUUID} -> token
-// 过期时间: 48小时
+// SaveQRCode 保存用户二维码映射。
+//
+// 这里同时维护 token -> userUUID 与 userUUID -> token 两个方向的 Redis Key，
+// 便于“扫码解析”和“复用已有二维码”两个场景共用一份 48 小时有效期数据。
 func (r *userRepositoryImpl) SaveQRCode(ctx context.Context, userUUID, token string) error {
 	// 1. 保存 token -> userUUID 映射
 	tokenKey := rediskey.QRCodeTokenKey(token)
@@ -428,7 +454,9 @@ func (r *userRepositoryImpl) SaveQRCode(ctx context.Context, userUUID, token str
 	return nil
 }
 
-// GetUUIDByQRCodeToken 根据 token 获取用户 UUID
+// GetUUIDByQRCodeToken 根据二维码 token 反查用户 UUID。
+//
+// 当 token 过期或不存在时返回 ErrRedisNil，供 service 层映射为二维码失效类业务反馈。
 func (r *userRepositoryImpl) GetUUIDByQRCodeToken(ctx context.Context, token string) (string, error) {
 	tokenKey := rediskey.QRCodeTokenKey(token)
 	userUUID, err := r.redisClient.Get(ctx, tokenKey).Result()
@@ -441,7 +469,9 @@ func (r *userRepositoryImpl) GetUUIDByQRCodeToken(ctx context.Context, token str
 	return userUUID, nil
 }
 
-// GetQRCodeTokenByUserUUID 根据用户 UUID 获取二维码 token和剩余时间
+// GetQRCodeTokenByUserUUID 根据用户 UUID 获取当前二维码 token 与剩余有效期。
+//
+// 通过一次 pipeline 同时读取 token 和 TTL，避免 service 层再发第二次 Redis 请求拼接过期时间。
 func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userUUID string) (string, time.Time, error) {
 	userKey := rediskey.QRCodeUserKey(userUUID)
 	pipe := r.redisClient.Pipeline()
@@ -456,7 +486,10 @@ func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userU
 	return token, expireTime, nil
 }
 
-// SearchUser 搜索用户（按邮箱、昵称、UUID）
+// SearchUser 搜索用户资料。
+//
+// 当前资料域只支持按 nickname 前缀或 user_uuid 前缀搜索，不跨到 auth 域检索邮箱，
+// 以保持四拆后的边界清晰。
 func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserInfo, int64, error) {
 	// 计算偏移量
 	offset := (page - 1) * pageSize

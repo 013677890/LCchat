@@ -22,11 +22,26 @@ type deviceServiceImpl struct {
 }
 
 // NewDeviceService 创建设备服务实例。
+//
+// 该服务聚焦“设备会话 / 在线状态”两个高频读写场景：
+//  1. 读取当前用户的设备列表与在线态；
+//  2. 执行踢设备、状态刷新、活跃时间回写；
+//  3. 统一把仓储层的设备状态结果组装成 auth proto。
 func NewDeviceService(deviceRepo repository.IDeviceRepository) DeviceService {
 	return &deviceServiceImpl{deviceRepo: deviceRepo}
 }
 
 // GetDeviceList 获取当前登录用户的设备列表。
+// 业务流程：
+//  1. 从上下文中提取当前用户 UUID 与当前设备 ID；
+//  2. 批量查询该用户的设备会话快照；
+//  3. 按 device_id 查询各设备最近活跃时间；
+//  4. 组装 DeviceItem 并按最近活跃时间倒序排序；
+//  5. 返回设备列表给上游网关。
+//
+// 错误码映射：
+//   - codes.Unauthenticated: 未登录
+//   - codes.Internal: 系统内部错误
 func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *authpb.GetDeviceListRequest) (*authpb.GetDeviceListResponse, error) {
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
@@ -75,6 +90,18 @@ func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *authpb.GetDe
 }
 
 // KickDevice 踢出指定设备。
+// 业务流程：
+//  1. 从上下文中提取当前用户 UUID；
+//  2. 校验目标 device_id 合法且不是当前设备；
+//  3. 查询目标设备会话并确认其存在；
+//  4. 删除该设备的 AccessToken / RefreshToken；
+//  5. 将设备状态更新为 kicked，完成远端登录态失效。
+//
+// 错误码映射：
+//   - codes.Unauthenticated: 未登录
+//   - codes.InvalidArgument: device_id 缺失或试图踢出当前设备
+//   - codes.NotFound: 设备不存在
+//   - codes.Internal: 系统内部错误
 func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *authpb.KickDeviceRequest) error {
 	userUUID := util.GetUserUUIDFromContext(ctx)
 	if userUUID == "" {
@@ -115,6 +142,16 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *authpb.KickDevi
 }
 
 // GetOnlineStatus 获取单用户在线状态。
+// 业务流程：
+//  1. 校验请求中的 user_uuid；
+//  2. 查询该用户当前所有设备会话；
+//  3. 读取用户最近活跃时间与各设备活跃时间；
+//  4. 按在线窗口计算是否在线，并汇总在线平台；
+//  5. 返回单用户在线状态视图。
+//
+// 错误码映射：
+//   - codes.InvalidArgument: 参数错误
+//   - codes.Internal: 系统内部错误
 func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *authpb.GetOnlineStatusRequest) (*authpb.GetOnlineStatusResponse, error) {
 	if req == nil || req.UserUuid == "" {
 		return nil, apperr.New(consts.CodeParamError)
@@ -186,6 +223,16 @@ func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *authpb.Get
 }
 
 // BatchGetOnlineStatus 批量获取在线状态。
+// 业务流程：
+//  1. 校验 user_uuids 非空且数量不超过上限；
+//  2. 对请求 UUID 去重，批量查询设备会话；
+//  3. 批量读取设备活跃时间与最近活跃时间；
+//  4. 逐个用户按在线窗口计算在线状态；
+//  5. 按原始请求顺序返回在线状态列表。
+//
+// 错误码映射：
+//   - codes.InvalidArgument: 参数错误
+//   - codes.Internal: 系统内部错误
 func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *authpb.BatchGetOnlineStatusRequest) (*authpb.BatchGetOnlineStatusResponse, error) {
 	if req == nil || len(req.UserUuids) == 0 || len(req.UserUuids) > 100 {
 		return nil, apperr.New(consts.CodeParamError)
@@ -279,6 +326,15 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *authp
 }
 
 // UpdateDeviceActive 批量更新设备活跃时间。
+// 业务流程：
+//  1. 校验请求体与活跃项列表非空；
+//  2. 将 proto 活跃项转换为仓储层批量写入结构；
+//  3. 使用统一的当前秒级时间戳回写设备活跃时间；
+//  4. 由仓储层负责 Redis ZSet 的批量更新与过期清理。
+//
+// 错误码映射：
+//   - codes.InvalidArgument: 参数错误
+//   - codes.Internal: 系统内部错误
 func (s *deviceServiceImpl) UpdateDeviceActive(ctx context.Context, req *authpb.UpdateDeviceActiveRequest) error {
 	if req == nil || len(req.Items) == 0 {
 		return apperr.New(consts.CodeParamError)
@@ -299,6 +355,15 @@ func (s *deviceServiceImpl) UpdateDeviceActive(ctx context.Context, req *authpb.
 }
 
 // UpdateDeviceStatus 更新设备在线状态。
+// 业务流程：
+//  1. 校验 user_uuid、device_id 与目标状态；
+//  2. 仅允许 online / offline 两种在线态更新；
+//  3. 调用仓储层更新设备会话状态；
+//  4. 若设备不存在则按幂等成功处理。
+//
+// 错误码映射：
+//   - codes.InvalidArgument: 参数错误或状态非法
+//   - codes.Internal: 系统内部错误
 func (s *deviceServiceImpl) UpdateDeviceStatus(ctx context.Context, req *authpb.UpdateDeviceStatusRequest) error {
 	if req == nil || req.UserUuid == "" || req.DeviceId == "" {
 		return apperr.New(consts.CodeParamError)

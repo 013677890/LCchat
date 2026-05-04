@@ -31,6 +31,7 @@ func NewFriendRepository(db *gorm.DB, redisClient *goredis.Client) IFriendReposi
 // relation-service 的多个查询接口都共享相同的分页兜底规则，因此抽成仓储内帮助函数，
 // 避免在每个查询方法中重复编写相同逻辑。
 func normalizePage(page, pageSize int) (int, int, int) {
+	// page/pageSize 都采用最小兜底值，避免上层遗漏参数时生成负 offset。
 	if page <= 0 {
 		page = 1
 	}
@@ -51,16 +52,19 @@ func (r *friendRepositoryImpl) GetFriendList(ctx context.Context, userUUID, grou
 	query := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, 0)
+	// group_tag 非空时继续收窄到某个分组视图。
 	if groupTag != "" {
 		query = query.Where("group_tag = ?", groupTag)
 	}
 
 	var total int64
+	// 先 count 再分页查询，让上层能直接返回完整分页信息。
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, 0, WrapDBError(err)
 	}
 
 	var relations []*model.UserRelation
+	// 按 created_at/id 倒序返回，兼容旧单体好友列表的展示顺序。
 	if err := query.
 		Order("created_at DESC, id DESC").
 		Offset(offset).
@@ -97,11 +101,13 @@ func (r *friendRepositoryImpl) GetFriendRelation(ctx context.Context, userUUID, 
 //  3. 在重复同意好友申请时保持幂等。
 func (r *friendRepositoryImpl) CreateFriendRelation(ctx context.Context, userUUID, friendUUID string) error {
 	now := time.Now()
+	// 好友关系是双向模型，因此一次性准备 A->B 与 B->A 两条记录。
 	relations := []*model.UserRelation{
 		{UserUuid: userUUID, PeerUuid: friendUUID, Status: 0, CreatedAt: now, UpdatedAt: now},
 		{UserUuid: friendUUID, PeerUuid: userUUID, Status: 0, CreatedAt: now, UpdatedAt: now},
 	}
 
+	// Upsert 时统一恢复 status / deleted_at / blacklisted_at，兼容“删好友后重新添加”场景。
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_uuid"}, {Name: "peer_uuid"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
@@ -124,6 +130,7 @@ func (r *friendRepositoryImpl) CreateFriendRelation(ctx context.Context, userUUI
 // relation 表是单向关系模型，因此删除好友时需要由上层分别处理 A->B 与 B->A 两条记录。
 func (r *friendRepositoryImpl) DeleteFriendRelation(ctx context.Context, userUUID, friendUUID string) error {
 	now := time.Now()
+	// 删除好友本质上是把单向关系标记为 status=2 + deleted_at，有历史可追溯但不再算有效好友。
 	result := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
@@ -135,6 +142,7 @@ func (r *friendRepositoryImpl) DeleteFriendRelation(ctx context.Context, userUUI
 	if result.Error != nil {
 		return WrapDBError(result.Error)
 	}
+	// 没有命中任何有效好友关系时，返回 ErrRecordNotFound 供 service 层映射业务错误。
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
@@ -271,6 +279,7 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
 	pipe := r.redisClient.Pipeline()
+	// exists 用来区分“整个 Hash 不存在”和“Hash 存在但 field 缺失”两种情况。
 	existsCmd := pipe.Exists(ctx, cacheKey)
 	metaCmd := pipe.HGet(ctx, cacheKey, friendUUID)
 
@@ -281,6 +290,7 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 
 	_, err := pipe.Exec(ctx)
 	if err != nil && err != goredis.Nil {
+		// key 类型错乱时直接删除，让后续读路径重新回源重建正确结构。
 		if isRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
@@ -330,6 +340,7 @@ func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID,
 
 	_, err := pipe.Exec(ctx)
 	if err != nil && err != goredis.Nil {
+		// 和 checkFriendCache 一样，类型错乱时直接删 key，让后续读路径做全量修复。
 		if isRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
@@ -343,8 +354,10 @@ func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID,
 	}
 
 	if metaCmd.Err() == nil {
+		// field 存在时进一步解析出 remark/group_tag/source 等元数据供状态接口复用。
 		meta, parseErr := parseFriendMetaJSON(metaCmd.Val())
 		if parseErr != nil {
+			// JSON 坏掉时仍把“是好友”这个事实返回给上层，避免状态判断被缓存脏数据完全打断。
 			return true, nil, true
 		}
 		return true, meta, true
@@ -381,6 +394,7 @@ func (r *friendRepositoryImpl) checkBlacklistCache(ctx context.Context, userUUID
 
 	_, err := pipe.Exec(ctx)
 	if err != nil && err != goredis.Nil {
+		// blacklist ZSet 类型异常时同样删 key，让后续读路径重建。
 		if isRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
@@ -417,6 +431,7 @@ func (r *friendRepositoryImpl) CheckIsFriendRelation(ctx context.Context, userUU
 	}
 
 	var count int64
+	// 缓存整体缺失时才回源 DB；单侧关系判断仍只看 userUUID 当前视角这条记录。
 	if err := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, peerUUID, 0).
@@ -437,6 +452,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 	if len(peerUUIDs) == 0 {
 		return result, nil
 	}
+	// 先把所有请求对象初始化成 false，后续命中缓存或数据库时再改成 true。
 	for _, peerUUID := range peerUUIDs {
 		result[peerUUID] = false
 	}
@@ -458,6 +474,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 		_, err := pipe.Exec(ctx)
 		if err == nil {
 			if existsCmd.Val() > 0 {
+				// Hash 已存在时，HMGet 中非 nil 的 field 统一视为好友命中。
 				for index, value := range valuesCmd.Val() {
 					if value != nil {
 						result[peerUUIDs[index]] = true
@@ -475,6 +492,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 	}
 
 	var relations []model.UserRelation
+	// 缓存没命中时，按 peer_uuid IN 批量回源数据库，再把命中的关系回填到结果 map。
 	if err := r.db.WithContext(ctx).
 		Select("peer_uuid").
 		Where("user_uuid = ? AND peer_uuid IN ? AND status = ? AND deleted_at IS NULL", userUUID, peerUUIDs, 0).
@@ -499,6 +517,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, peerUUID string) (*model.UserRelation, error) {
 	friendHit, meta, isFriend := r.getFriendMetaCache(ctx, userUUID, peerUUID)
 	if friendHit && isFriend {
+		// 好友缓存命中时直接构造 status=0 的关系对象，避免继续访问数据库。
 		relation := &model.UserRelation{
 			UserUuid: userUUID,
 			PeerUuid: peerUUID,
@@ -514,6 +533,7 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 
 	blacklistHit, isBlacklist := r.checkBlacklistCache(ctx, userUUID, peerUUID)
 	if blacklistHit && isBlacklist {
+		// 黑名单缓存命中时只需要返回 status=1 的最小关系视图。
 		return &model.UserRelation{UserUuid: userUUID, PeerUuid: peerUUID, Status: 1}, nil
 	}
 
@@ -523,6 +543,7 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 	}
 
 	var relation model.UserRelation
+	// 缓存无法给出确定答案时，最后再 Unscoped 回源数据库拿历史关系真值。
 	if err := r.db.WithContext(ctx).
 		Unscoped().
 		Where("user_uuid = ? AND peer_uuid = ?", userUUID, peerUUID).
@@ -540,6 +561,7 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 // 该方法返回按 updated_at 升序排列的变更集，供 service 层转成 add/update/delete 三类
 // 变化事件。limit 额外多查一条以判断是否还有下一页，从而避免单独执行 count 查询。
 func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID string, version int64, limit int) ([]*model.UserRelation, int64, bool, error) {
+	// 同步窗口默认值与上限都在仓储内收口，避免上层把过大 limit 直接打进数据库。
 	if limit <= 0 {
 		limit = 100
 	}
@@ -549,6 +571,7 @@ func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID stri
 
 	changedAfter := time.UnixMilli(0)
 	if version > 0 {
+		// version>0 时表示增量同步，从该时间点之后开始找变化。
 		changedAfter = time.UnixMilli(version)
 	}
 
@@ -591,6 +614,7 @@ func (r *friendRepositoryImpl) rebuildFriendCacheFromDBAsync(ctx context.Context
 
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		var relations []model.UserRelation
+		// 全量取出当前用户所有有效好友关系，作为重建整份 Hash 的唯一事实来源。
 		err := r.db.WithContext(runCtx).
 			Select("peer_uuid", "remark", "group_tag", "source", "updated_at").
 			Where("user_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, 0).
@@ -625,6 +649,7 @@ func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, u
 		luaScript := goredis.NewScript(luaInsertFriendMetaIfExists)
 
 		for _, pair := range pairs {
+			// 只有 key 已存在时才补丁插入 field；否则让下一次读路径统一做全量重建。
 			_, err := luaScript.Run(runCtx, r.redisClient,
 				[]string{pair.userKey},
 				pair.newFriend,
@@ -705,6 +730,7 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 			if len(fields) > 0 {
 				pipe.HSet(runCtx, cacheKey, fields)
 			}
+			// 非空好友集使用常规 TTL，后续靠小概率续期维持热点 key。
 			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
 		}
 

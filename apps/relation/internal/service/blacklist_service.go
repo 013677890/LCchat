@@ -46,6 +46,12 @@ func NewBlacklistService(
 //  2. 不能拉黑自己；
 //  3. 若已在黑名单中则直接返回业务错误；
 //  4. 否则调用 repository 写入黑名单关系。
+//
+// 错误码映射：
+//   - codes.Unauthenticated: 未登录
+//   - codes.InvalidArgument: 参数错误或拉黑自己
+//   - codes.AlreadyExists: 已在黑名单中
+//   - codes.Internal: 系统内部错误
 func (s *blacklistServiceImpl) AddBlacklist(ctx context.Context, req *pb.AddBlacklistRequest) error {
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
@@ -76,6 +82,12 @@ func (s *blacklistServiceImpl) AddBlacklist(ctx context.Context, req *pb.AddBlac
 //
 // 为了保持业务反馈一致，service 层会先判定当前是否真的处于黑名单中，
 // 不在黑名单时直接返回 CodeNotInBlacklist，而不是让下层返回通用数据库错误。
+//
+// 错误码映射：
+//   - codes.Unauthenticated: 未登录
+//   - codes.InvalidArgument: 参数错误
+//   - codes.NotFound: 当前不在黑名单中
+//   - codes.Internal: 系统内部错误
 func (s *blacklistServiceImpl) RemoveBlacklist(ctx context.Context, req *pb.RemoveBlacklistRequest) error {
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
@@ -106,6 +118,10 @@ func (s *blacklistServiceImpl) RemoveBlacklist(ctx context.Context, req *pb.Remo
 //
 // 当前仅返回 relation 域持有的字段：uuid 与 blacklisted_at；昵称、头像后续通过 profile
 // 内部接口批量补齐，避免 relation-service 跨表越权查询。
+//
+// 错误码映射：
+//   - codes.Unauthenticated: 未登录
+//   - codes.Internal: 系统内部错误
 func (s *blacklistServiceImpl) GetBlacklistList(ctx context.Context, req *pb.GetBlacklistListRequest) (*pb.GetBlacklistListResponse, error) {
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
@@ -146,6 +162,10 @@ func (s *blacklistServiceImpl) GetBlacklistList(ctx context.Context, req *pb.Get
 //
 // 该接口不依赖登录态上下文，而是直接以请求中的 user_uuid / target_uuid 为判断输入，
 // 便于被网关、消息服务或其他内部调用链复用。
+//
+// 错误码映射：
+//   - codes.InvalidArgument: 参数错误
+//   - codes.Internal: 系统内部错误
 func (s *blacklistServiceImpl) CheckIsBlacklist(ctx context.Context, req *pb.CheckIsBlacklistRequest) (*pb.CheckIsBlacklistResponse, error) {
 	if req == nil || req.UserUuid == "" || req.TargetUuid == "" {
 		return nil, apperr.New(consts.CodeParamError)

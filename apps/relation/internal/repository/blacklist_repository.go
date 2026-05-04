@@ -53,6 +53,7 @@ func (r *blacklistRepositoryImpl) AddBlacklist(ctx context.Context, userUUID, ta
 			status = 1
 		}
 
+		// relation 里把本次拉黑时刻写进 blacklisted_at，供后续列表排序和缓存 score 使用。
 		relation := &model.UserRelation{
 			UserUuid:      userUUID,
 			PeerUuid:      targetUUID,
@@ -78,6 +79,7 @@ func (r *blacklistRepositoryImpl) AddBlacklist(ctx context.Context, userUUID, ta
 	}
 
 	// 黑名单 ZSet 与好友 Hash 都只维护当前用户视角，因此这里只更新单侧缓存。
+	// 先补黑名单缓存，再删好友缓存，保证后续权限判断优先命中新黑名单状态。
 	r.updateBlacklistCacheAsync(ctx, userUUID, targetUUID, now.UnixMilli())
 	r.removeFriendCacheAsync(ctx, userUUID, targetUUID)
 	return nil
@@ -93,6 +95,7 @@ func (r *blacklistRepositoryImpl) RemoveBlacklist(ctx context.Context, userUUID,
 	}
 
 	var relation model.UserRelation
+	// 先用 Unscoped 查出当前黑名单关系的历史 status，决定取消拉黑后该恢复成什么状态。
 	if err := r.db.WithContext(ctx).
 		Unscoped().
 		Select("status").
@@ -110,6 +113,7 @@ func (r *blacklistRepositoryImpl) RemoveBlacklist(ctx context.Context, userUUID,
 		"updated_at":     now,
 	}
 	restoreFriend := relation.Status == 1
+	// status=1 代表拉黑前是好友；status=3 代表拉黑前本就不是好友。
 	if restoreFriend {
 		// 拉黑前是好友：取消拉黑后恢复好友关系。
 		updates["status"] = 0
@@ -132,6 +136,7 @@ func (r *blacklistRepositoryImpl) RemoveBlacklist(ctx context.Context, userUUID,
 		return ErrRecordNotFound
 	}
 
+	// 先删黑名单缓存，再根据恢复结果选择补回好友缓存或继续维持“非好友”状态。
 	r.removeBlacklistCacheAsync(ctx, userUUID, targetUUID)
 	if restoreFriend {
 		r.restoreFriendCacheAsync(ctx, userUUID, targetUUID)
@@ -151,6 +156,7 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 	if r.redisClient != nil {
 		cacheKey := rediskey.BlacklistRelationKey(userUUID)
 		pipe := r.redisClient.Pipeline()
+		// exists/count/range/emptyScore 一起查，尽量一次 RTT 拿到分页和占位符信息。
 		existsCmd := pipe.Exists(ctx, cacheKey)
 		countCmd := pipe.ZCard(ctx, cacheKey)
 		rangeCmd := pipe.ZRevRangeWithScores(ctx, cacheKey, int64(offset), int64(offset+pageSize-1))
@@ -163,12 +169,14 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 		if err == nil {
 			if existsCmd.Val() > 0 {
 				total := countCmd.Val()
+				// 只有 __EMPTY__ 占位时，直接返回空列表，不再回源数据库。
 				if total == 1 && emptyScoreCmd.Err() == nil {
 					return []*model.UserRelation{}, 0, nil
 				}
 
 				relations := make([]*model.UserRelation, 0, len(rangeCmd.Val()))
 				for _, z := range rangeCmd.Val() {
+					// 跳过空 member 和 __EMPTY__ 占位，只保留真实黑名单用户。
 					member, ok := z.Member.(string)
 					if !ok || member == "" || member == "__EMPTY__" {
 						continue
@@ -183,6 +191,7 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 				}
 
 				realTotal := total
+				// 若存在占位符，需要把它从总数里扣掉再返回给上层分页。
 				if emptyScoreCmd.Err() == nil && realTotal > 0 {
 					realTotal--
 				}
@@ -202,6 +211,7 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 		Where("user_uuid = ? AND status IN ? AND deleted_at IS NULL", userUUID, []int{1, 3})
 
 	var total int64
+	// 缓存 miss 时先走数据库 count，再做分页查询，最后异步重建整份 ZSet。
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, WrapDBError(err)
 	}
@@ -228,6 +238,7 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 	if r.redisClient != nil {
 		cacheKey := rediskey.BlacklistRelationKey(userUUID)
 		pipe := r.redisClient.Pipeline()
+		// exists + zscore 一起执行，用于区分“key 不存在”和“目标不在集合里”。
 		existsCmd := pipe.Exists(ctx, cacheKey)
 		scoreCmd := pipe.ZScore(ctx, cacheKey, targetUUID)
 		if getRandomBool(0.01) {
@@ -259,6 +270,7 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 	}
 
 	var count int64
+	// 缓存无法给出结论时，最终仍以数据库里 status IN (1,3) 的有效黑名单关系为准。
 	if err := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND peer_uuid = ? AND status IN ? AND deleted_at IS NULL", userUUID, targetUUID, []int{1, 3}).
@@ -342,6 +354,7 @@ func (r *blacklistRepositoryImpl) rebuildBlacklistCacheAsync(ctx context.Context
 			if len(members) > 0 {
 				pipe.ZAdd(runCtx, cacheKey, members...)
 			}
+			// 非空黑名单集合使用常规 TTL，热点 key 后续靠读路径小概率续期维持。
 			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
 		}
 
@@ -368,6 +381,7 @@ func (r *blacklistRepositoryImpl) updateBlacklistCacheAsync(ctx context.Context,
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaAddBlacklistIfExists)
 		expireSeconds := int(getRandomExpireTime(rediskey.BlacklistTTL).Seconds())
+		// 仅在 key 已存在时做补丁写入；缓存整体缺失时交给后续读路径统一全量重建。
 		_, err := luaScript.Run(runCtx, r.redisClient,
 			[]string{cacheKey},
 			blockedAt,

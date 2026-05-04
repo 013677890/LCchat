@@ -21,11 +21,19 @@ type applyRepositoryImpl struct {
 }
 
 // NewApplyRepository 创建好友申请仓储实例。
+//
+// 该仓储同时维护 MySQL 申请记录、Redis 待处理申请列表以及未读红点计数，
+// 是 relation 域里“申请流转 + 缓存补丁写入”的核心数据入口。
 func NewApplyRepository(db *gorm.DB, redisClient *goredis.Client) IApplyRepository {
 	return &applyRepositoryImpl{db: db, redisClient: redisClient}
 }
 
 // Create 创建好友申请。
+//
+// 写路径遵循“数据库先成功，缓存尽力补丁刷新”的策略：
+//  1. 先落 MySQL，保证申请事实可追溯；
+//  2. 若待处理列表缓存已存在，则增量补入 ZSet；
+//  3. 对好友申请额外增加未读通知计数。
 func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequest) (*model.ApplyRequest, error) {
 	// 先落库，再以“缓存存在才增量更新”的策略做 best-effort 缓存维护，避免把局部写入误当成完整列表。
 	if err := r.db.WithContext(ctx).Create(apply).Error; err != nil {
@@ -69,6 +77,8 @@ func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequ
 }
 
 // GetByID 根据主键查询一条好友申请。
+//
+// 这里只读取好友申请(apply_type=0)且未被删除的记录，保持 relation-service 当前最小职责边界。
 func (r *applyRepositoryImpl) GetByID(ctx context.Context, id int64) (*model.ApplyRequest, error) {
 	var apply model.ApplyRequest
 	if err := r.db.WithContext(ctx).
@@ -98,6 +108,10 @@ func (r *applyRepositoryImpl) GetPendingList(ctx context.Context, targetUUID str
 	return r.getPendingListFromDB(ctx, targetUUID, status, page, pageSize)
 }
 
+// getPendingListFromCache 从 Redis 待处理申请缓存读取分页结果。
+//
+// ZSet 只保存 applicant_uuid 和创建时间，因此命中缓存后仍需回源 MySQL 拉取完整申请记录；
+// 若 key 缺失，则返回 redis.Nil 让上层走数据库全量查询并触发缓存重建。
 func (r *applyRepositoryImpl) getPendingListFromCache(ctx context.Context, targetUUID string, page, pageSize int) ([]*model.ApplyRequest, int64, error) {
 	if r.redisClient == nil {
 		return nil, 0, goredis.Nil
@@ -239,6 +253,8 @@ func (r *applyRepositoryImpl) rebuildPendingCacheAsync(ctx context.Context, targ
 }
 
 // GetSentList 获取当前用户发出的好友申请列表。
+//
+// 发出列表保持“只查 MySQL”的旧语义，不额外维护缓存，避免写路径继续放大。
 func (r *applyRepositoryImpl) GetSentList(ctx context.Context, applicantUUID string, status, page, pageSize int) ([]*model.ApplyRequest, int64, error) {
 	_, pageSize, offset := normalizePage(page, pageSize)
 
@@ -314,6 +330,10 @@ func (r *applyRepositoryImpl) CleanupAccountApplies(ctx context.Context, userUUI
 	return nil
 }
 
+// invalidateApplyCachesAsync 异步失效待处理申请列表与未读红点缓存。
+//
+// 该方法主要用于账号注销或批量清理场景：统一删除相关 target_uuid 的缓存键，
+// 让后续读取走数据库重建最新事实。
 func (r *applyRepositoryImpl) invalidateApplyCachesAsync(ctx context.Context, targetUUIDs []string) {
 	if r.redisClient == nil || len(targetUUIDs) == 0 {
 		return
