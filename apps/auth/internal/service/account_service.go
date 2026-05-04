@@ -100,7 +100,7 @@ func (s *accountServiceImpl) ChangeEmail(ctx context.Context, req *authpb.Change
 		logger.Warn(ctx, "删除验证码失败", logger.ErrorField("error", err))
 	}
 
-	return &authpb.ChangeEmailResponse{Email: req.NewEmail}, nil
+	return buildChangeEmailResponse(req.NewEmail), nil
 }
 
 // ChangeTelephone 换绑手机号。
@@ -146,8 +146,5 @@ func (s *accountServiceImpl) DeleteAccount(ctx context.Context, req *authpb.Dele
 	}
 
 	recoverDeadline := deleteAt.Add(30 * 24 * time.Hour)
-	return &authpb.DeleteAccountResponse{
-		DeleteAt:        deleteAt.Format(time.RFC3339),
-		RecoverDeadline: recoverDeadline.Format(time.RFC3339),
-	}, nil
+	return buildDeleteAccountResponse(deleteAt, recoverDeadline), nil
 }

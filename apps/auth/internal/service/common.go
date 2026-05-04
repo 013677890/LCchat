@@ -6,7 +6,6 @@ import (
 
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 )
@@ -50,16 +49,4 @@ func getRequiredDeviceID(ctx context.Context) (string, error) {
 		return "", apperr.New(consts.CodeParamError)
 	}
 	return deviceID, nil
-}
-
-// buildLoginUserInfo 将账号模型转换为 auth 登录返回的最小展示信息。
-func buildLoginUserInfo(user *model.UserAccount) *authpb.LoginUserInfo {
-	if user == nil {
-		return nil
-	}
-	return &authpb.LoginUserInfo{
-		Uuid:     user.UserUuid,
-		Nickname: user.LoginNickname,
-		Avatar:   user.LoginAvatar,
-	}
 }

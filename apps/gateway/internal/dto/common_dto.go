@@ -119,19 +119,6 @@ func ConvertSimpleUserItemsFromProto(pbs []*userpb.SimpleUserInfo) []*SimpleUser
 	return result
 }
 
-// ConvertDeviceInfoFromProto 将 Protobuf 设备信息转换为 DTO
-func ConvertDeviceInfoFromProto(pb *userpb.DeviceInfo) *DeviceInfo {
-	if pb == nil {
-		return nil
-	}
-	return &DeviceInfo{
-		DeviceName: pb.DeviceName,
-		Platform:   pb.Platform,
-		OSVersion:  pb.OsVersion,
-		AppVersion: pb.AppVersion,
-	}
-}
-
 // ConvertPaginationInfoFromProto 将 Protobuf 分页信息转换为 DTO
 func ConvertPaginationInfoFromProto(pb *userpb.PaginationInfo) *PaginationInfo {
 	if pb == nil {

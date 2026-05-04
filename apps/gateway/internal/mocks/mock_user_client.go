@@ -5,7 +5,7 @@
 package mocks
 
 import (
-	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	context "context"
 	reflect "reflect"
 
@@ -36,10 +36,10 @@ func (m *MockUserServiceClient) EXPECT() *MockUserServiceClientMockRecorder {
 }
 
 // Login mocks base method.
-func (m *MockUserServiceClient) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
+func (m *MockUserServiceClient) Login(ctx context.Context, req *authpb.LoginRequest) (*authpb.LoginResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Login", ctx, req)
-	ret0, _ := ret[0].(*pb.LoginResponse)
+	ret0, _ := ret[0].(*authpb.LoginResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

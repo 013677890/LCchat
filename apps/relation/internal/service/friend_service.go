@@ -10,7 +10,6 @@ import (
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
-	commonpb "github.com/013677890/LCchat-Backend/pkg/commonpb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
@@ -46,23 +45,6 @@ func NewFriendService(
 		friendRepo:    friendRepo,
 		applyRepo:     applyRepo,
 		blacklistRepo: blacklistRepo,
-	}
-}
-
-// buildPagination 构建跨服务共享的分页结构。
-//
-// relation proto 复用了 proto/common/common.proto 中的 PaginationInfo，因此这里统一返回
-// commonpb.PaginationInfo，避免在多个 RPC 方法中重复拷贝分页计算逻辑。
-func buildPagination(page, pageSize int32, total int64) *commonpb.PaginationInfo {
-	totalPages := int32(0)
-	if pageSize > 0 {
-		totalPages = int32((total + int64(pageSize) - 1) / int64(pageSize))
-	}
-	return &commonpb.PaginationInfo{
-		Page:       page,
-		PageSize:   pageSize,
-		Total:      total,
-		TotalPages: totalPages,
 	}
 }
 
@@ -187,16 +169,9 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 			unreadIDs = append(unreadIDs, apply.Id)
 		}
 
-		items = append(items, &pb.FriendApplyItem{
-			ApplyId:       apply.Id,
-			ApplicantUuid: apply.ApplicantUuid,
-			ApplicantInfo: &pb.SimpleUserInfo{Uuid: apply.ApplicantUuid},
-			Reason:        apply.Reason,
-			Source:        apply.Source,
-			Status:        int32(apply.Status),
-			IsRead:        apply.IsRead,
-			CreatedAt:     apply.CreatedAt.UnixMilli(),
-		})
+		if item := buildFriendApplyItemProto(apply); item != nil {
+			items = append(items, item)
+		}
 	}
 
 	// 列表读取后异步消已读，只做尽力而为，不阻塞主流程。
@@ -252,19 +227,9 @@ func (s *friendServiceImpl) GetSentApplyList(ctx context.Context, req *pb.GetSen
 
 	items := make([]*pb.SentApplyItem, 0, len(applies))
 	for _, apply := range applies {
-		if apply == nil {
-			continue
+		if item := buildSentApplyItemProto(apply); item != nil {
+			items = append(items, item)
 		}
-		items = append(items, &pb.SentApplyItem{
-			ApplyId:    apply.Id,
-			TargetUuid: apply.TargetUuid,
-			TargetInfo: &pb.SimpleUserInfo{Uuid: apply.TargetUuid},
-			Reason:     apply.Reason,
-			Source:     apply.Source,
-			Status:     int32(apply.Status),
-			IsRead:     apply.IsRead,
-			CreatedAt:  apply.CreatedAt.UnixMilli(),
-		})
 	}
 
 	return &pb.GetSentApplyListResponse{
@@ -399,16 +364,9 @@ func (s *friendServiceImpl) GetFriendList(ctx context.Context, req *pb.GetFriend
 
 	items := make([]*pb.FriendItem, 0, len(relations))
 	for _, relation := range relations {
-		if relation == nil {
-			continue
+		if item := buildFriendItemProto(relation); item != nil {
+			items = append(items, item)
 		}
-		items = append(items, &pb.FriendItem{
-			Uuid:      relation.PeerUuid,
-			Remark:    relation.Remark,
-			GroupTag:  relation.GroupTag,
-			Source:    relation.Source,
-			CreatedAt: relation.CreatedAt.UnixMilli(),
-		})
 	}
 
 	return &pb.GetFriendListResponse{
@@ -484,14 +442,9 @@ func (s *friendServiceImpl) SyncFriendList(ctx context.Context, req *pb.SyncFrie
 			changeType = "add"
 		}
 
-		changes = append(changes, &pb.FriendChange{
-			Uuid:       relation.PeerUuid,
-			Remark:     relation.Remark,
-			GroupTag:   relation.GroupTag,
-			Source:     relation.Source,
-			ChangeType: changeType,
-			ChangedAt:  changedAt,
-		})
+		if item := buildFriendChangeProto(relation, changeType, changedAt); item != nil {
+			changes = append(changes, item)
+		}
 		lastChangedAt = changedAt
 	}
 
@@ -615,13 +568,9 @@ func (s *friendServiceImpl) BatchCheckIsFriend(ctx context.Context, req *pb.Batc
 
 	items := make([]*pb.FriendCheckItem, 0, len(req.PeerUuids))
 	for _, peerUUID := range req.PeerUuids {
-		if peerUUID == "" {
-			continue
+		if item := buildFriendCheckItemProto(peerUUID, result[peerUUID]); item != nil {
+			items = append(items, item)
 		}
-		items = append(items, &pb.FriendCheckItem{
-			PeerUuid: peerUUID,
-			IsFriend: result[peerUUID],
-		})
 	}
 
 	return &pb.BatchCheckIsFriendResponse{Items: items}, nil
@@ -644,13 +593,7 @@ func (s *friendServiceImpl) GetRelationStatus(ctx context.Context, req *pb.GetRe
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取关系状态失败")
 	}
 
-	resp := &pb.GetRelationStatusResponse{
-		Relation:    "none",
-		IsFriend:    false,
-		IsBlacklist: false,
-		Remark:      "",
-		GroupTag:    "",
-	}
+	resp := buildRelationStatusResponse("none", false, false, "", "")
 	if relation == nil {
 		return resp, nil
 	}

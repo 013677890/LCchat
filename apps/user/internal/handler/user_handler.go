@@ -11,11 +11,11 @@ import (
 type UserHandler struct {
 	pb.UnimplementedUserServiceServer
 
-	userService service.IUserService
+	userService service.UserService
 }
 
 // NewUserHandler 创建用户信息Handler实例
-func NewUserHandler(userService service.IUserService) *UserHandler {
+func NewUserHandler(userService service.UserService) *UserHandler {
 	return &UserHandler{
 		userService: userService,
 	}

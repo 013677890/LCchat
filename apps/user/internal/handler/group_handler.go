@@ -11,11 +11,11 @@ import (
 type GroupHandler struct {
 	pb.UnimplementedGroupServiceServer
 
-	groupService service.IGroupService
+	groupService service.GroupService
 }
 
 // NewGroupHandler 创建群组 Handler 实例。
-func NewGroupHandler(groupService service.IGroupService) *GroupHandler {
+func NewGroupHandler(groupService service.GroupService) *GroupHandler {
 	return &GroupHandler{groupService: groupService}
 }
 

@@ -129,33 +129,17 @@ func (s *blacklistServiceImpl) GetBlacklistList(ctx context.Context, req *pb.Get
 	}
 
 	if len(relations) == 0 {
-		return &pb.GetBlacklistListResponse{
-			Items:      []*pb.BlacklistItem{},
-			Pagination: buildPagination(page, pageSize, total),
-		}, nil
+		return buildBlacklistListResponse(nil, page, pageSize, total), nil
 	}
 
 	items := make([]*pb.BlacklistItem, 0, len(relations))
 	for _, relation := range relations {
-		if relation == nil {
-			continue
+		if item := buildBlacklistItemProto(relation); item != nil {
+			items = append(items, item)
 		}
-
-		blacklistedAt := relation.UpdatedAt
-		if relation.BlacklistedAt != nil {
-			blacklistedAt = *relation.BlacklistedAt
-		}
-
-		items = append(items, &pb.BlacklistItem{
-			Uuid:          relation.PeerUuid,
-			BlacklistedAt: blacklistedAt.UnixMilli(),
-		})
 	}
 
-	return &pb.GetBlacklistListResponse{
-		Items:      items,
-		Pagination: buildPagination(page, pageSize, total),
-	}, nil
+	return buildBlacklistListResponse(items, page, pageSize, total), nil
 }
 
 // CheckIsBlacklist 判断是否存在拉黑关系。
@@ -172,5 +156,5 @@ func (s *blacklistServiceImpl) CheckIsBlacklist(ctx context.Context, req *pb.Che
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "判断是否拉黑失败")
 	}
 
-	return &pb.CheckIsBlacklistResponse{IsBlacklist: isBlocked}, nil
+	return buildCheckIsBlacklistResponse(isBlocked), nil
 }

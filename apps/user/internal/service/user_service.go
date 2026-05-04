@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/013677890/LCchat-Backend/apps/user/internal/converter"
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
@@ -14,20 +13,9 @@ import (
 	"time"
 )
 
-// userServiceImpl 用户信息服务实现
+// userServiceImpl 资料域服务实现。
 type userServiceImpl struct {
-	userRepo   repository.IUserRepository
-	authRepo   repository.IAuthRepository
-	deviceRepo repository.IDeviceRepository
-}
-
-// NewUserService 创建用户信息服务实例
-func NewUserService(userRepo repository.IUserRepository, authRepo repository.IAuthRepository, deviceRepo repository.IDeviceRepository) UserService {
-	return &userServiceImpl{
-		userRepo:   userRepo,
-		authRepo:   authRepo,
-		deviceRepo: deviceRepo,
-	}
+	userRepo repository.IUserRepository
 }
 
 // NewProfileUserService 创建仅包含资料域职责的用户服务实例。
@@ -63,17 +51,15 @@ func (s *userServiceImpl) GetProfile(ctx context.Context, req *pb.GetProfileRequ
 
 	// 3. 转换为Protobuf格式并返回
 	return &pb.GetProfileResponse{
-		UserInfo: converter.ModelToProtoUserInfo(userInfo),
+		UserInfo: buildUserInfoProto(userInfo),
 	}, nil
 }
 
-// GetOtherProfile 获取他人信息
+// GetOtherProfile 获取他人资料。
 // 业务流程：
-//  1. 从context中获取当前用户UUID
-//  2. 查询目标用户信息
-//  3. 判断是否为好友关系
-//  4. 非好友时脱敏邮箱和手机号
-//  5. 返回用户信息
+//  1. 查询目标用户资料
+//  2. 若不存在则返回用户不存在
+//  3. 返回公开资料视图（隐私字段不在 user_profile 中维护）
 //
 // 错误码映射：
 //   - codes.NotFound: 用户不存在
@@ -91,15 +77,15 @@ func (s *userServiceImpl) GetOtherProfile(ctx context.Context, req *pb.GetOtherP
 
 	// 2. 返回用户信息（脱敏由Gateway层负责）
 	return &pb.GetOtherProfileResponse{
-		UserInfo: converter.ModelToProtoUserInfo(targetUserInfo),
+		UserInfo: buildUserInfoProto(targetUserInfo),
 	}, nil
 }
 
-// SearchUser 搜索用户
+// SearchUser 搜索用户。
 // 业务流程：
-//  1. 从context中获取当前用户UUID（用于鉴权）
-//  2. 调用userRepo搜索用户（按邮箱、昵称、UUID）
-//  3. 组装响应（不返回 email）
+//  1. 从 context 中获取当前用户 UUID 用于鉴权
+//  2. 按昵称前缀或 user_uuid 前缀搜索资料
+//  3. 组装公开搜索结果返回给上游网关
 //
 // 错误码映射：
 //   - codes.InvalidArgument: 关键词太短
@@ -121,39 +107,20 @@ func (s *userServiceImpl) SearchUser(ctx context.Context, req *pb.SearchUserRequ
 		// 没有搜索到结果，返回空列表
 		return &pb.SearchUserResponse{
 			Items: []*pb.SimpleUserItem{},
-			Pagination: &pb.PaginationInfo{
-				Page:       req.Page,
-				PageSize:   req.PageSize,
-				Total:      total,
-				TotalPages: int32((total + int64(req.PageSize) - 1) / int64(req.PageSize)),
-			},
+			Pagination: buildUserPaginationInfoProto(req.Page, req.PageSize, total),
 		}, nil
 	}
 
 	// 3. 构建响应（不返回 email，isFriend 由网关聚合）
 	items := make([]*pb.SimpleUserItem, len(users))
 	for i, user := range users {
-		items[i] = &pb.SimpleUserItem{
-			Uuid:      user.Uuid,
-			Nickname:  user.Nickname,
-			Avatar:    user.Avatar,
-			Signature: user.Signature,
-			IsFriend:  false,
-		}
+		items[i] = buildSearchUserItemProto(user, false)
 	}
-
-	// 4. 计算总页数
-	totalPages := int32((total + int64(req.PageSize) - 1) / int64(req.PageSize))
 
 	// 5. 返回搜索结果
 	return &pb.SearchUserResponse{
 		Items: items,
-		Pagination: &pb.PaginationInfo{
-			Page:       req.Page,
-			PageSize:   req.PageSize,
-			Total:      total,
-			TotalPages: totalPages,
-		},
+		Pagination: buildUserPaginationInfoProto(req.Page, req.PageSize, total),
 	}, nil
 }
 
@@ -214,12 +181,11 @@ func (s *userServiceImpl) UpdateProfile(ctx context.Context, req *pb.UpdateProfi
 
 	// 5. 转换为Protobuf格式并返回
 	return &pb.UpdateProfileResponse{
-		UserInfo: converter.ModelToProtoUserInfo(userInfo),
+		UserInfo: buildUserInfoProto(userInfo),
 	}, nil
 }
 
-// UploadAvatar 上传头像
-// UploadAvatar 上传头像
+// UploadAvatar 上传头像。
 // 业务流程：
 //  1. 从context中获取用户UUID
 //  2. 验证头像URL不为空
@@ -312,8 +278,7 @@ func (s *userServiceImpl) GetQRCode(ctx context.Context, req *pb.GetQRCodeReques
 	}, nil
 }
 
-// BatchGetProfile 批量获取用户信息
-// BatchGetProfile 批量获取用户信息
+// BatchGetProfile 批量获取用户资料。
 // 业务流程：
 //  1. 验证请求参数（UUID列表不为空，最多100个）
 //  2. 批量查询用户信息
@@ -343,13 +308,9 @@ func (s *userServiceImpl) BatchGetProfile(ctx context.Context, req *pb.BatchGetP
 	// 3. 转换为SimpleUserInfo格式
 	simpleUsers := make([]*pb.SimpleUserInfo, 0, len(users))
 	for _, user := range users {
-		simpleUsers = append(simpleUsers, &pb.SimpleUserInfo{
-			Uuid:      user.Uuid,
-			Nickname:  user.Nickname,
-			Avatar:    user.Avatar,
-			Gender:    int32(user.Gender),
-			Signature: user.Signature,
-		})
+		if simpleUser := buildSimpleUserInfoProto(user); simpleUser != nil {
+			simpleUsers = append(simpleUsers, simpleUser)
+		}
 	}
 
 	return &pb.BatchGetProfileResponse{

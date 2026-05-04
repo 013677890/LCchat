@@ -1,0 +1,949 @@
+import json
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+
+import requests
+
+
+ROOT = Path(__file__).resolve().parent.parent
+BASE_URL = "http://localhost:8080"
+REQUEST_TIMEOUT = 10
+
+EXPECTED_ENDPOINTS = {
+    ("GET", "/health"),
+    ("GET", "/metrics"),
+    ("POST", "/api/v1/public/user/login"),
+    ("POST", "/api/v1/public/user/login-by-code"),
+    ("POST", "/api/v1/public/user/register"),
+    ("POST", "/api/v1/public/user/send-verify-code"),
+    ("POST", "/api/v1/public/user/reset-password"),
+    ("POST", "/api/v1/public/user/refresh-token"),
+    ("POST", "/api/v1/public/user/verify-code"),
+    ("POST", "/api/v1/public/user/parse-qrcode"),
+    ("GET", "/api/v1/auth/user/profile"),
+    ("PUT", "/api/v1/auth/user/profile"),
+    ("GET", "/api/v1/auth/user/profile/:userUuid"),
+    ("GET", "/api/v1/auth/user/search"),
+    ("POST", "/api/v1/auth/user/avatar"),
+    ("GET", "/api/v1/auth/user/qrcode"),
+    ("POST", "/api/v1/auth/user/batch-profile"),
+    ("GET", "/api/v1/auth/user/devices"),
+    ("DELETE", "/api/v1/auth/user/devices/:deviceId"),
+    ("GET", "/api/v1/auth/user/online-status/:userUuid"),
+    ("POST", "/api/v1/auth/user/batch-online-status"),
+    ("POST", "/api/v1/auth/user/change-password"),
+    ("POST", "/api/v1/auth/user/change-email"),
+    ("POST", "/api/v1/auth/user/delete-account"),
+    ("POST", "/api/v1/auth/user/logout"),
+    ("POST", "/api/v1/auth/friend/apply"),
+    ("GET", "/api/v1/auth/friend/apply-list"),
+    ("GET", "/api/v1/auth/friend/apply/sent"),
+    ("POST", "/api/v1/auth/friend/apply/handle"),
+    ("GET", "/api/v1/auth/friend/apply/unread"),
+    ("POST", "/api/v1/auth/friend/apply/read"),
+    ("GET", "/api/v1/auth/friend/list"),
+    ("POST", "/api/v1/auth/friend/sync"),
+    ("POST", "/api/v1/auth/friend/delete"),
+    ("POST", "/api/v1/auth/friend/remark"),
+    ("POST", "/api/v1/auth/friend/tag"),
+    ("GET", "/api/v1/auth/friend/tags"),
+    ("POST", "/api/v1/auth/friend/check"),
+    ("POST", "/api/v1/auth/friend/relation"),
+    ("POST", "/api/v1/auth/blacklist"),
+    ("GET", "/api/v1/auth/blacklist"),
+    ("DELETE", "/api/v1/auth/blacklist/:userUuid"),
+    ("POST", "/api/v1/auth/blacklist/check"),
+    ("POST", "/api/v1/auth/messages/send"),
+    ("GET", "/api/v1/auth/messages/pull"),
+    ("POST", "/api/v1/auth/messages/get-by-ids"),
+    ("POST", "/api/v1/auth/messages/recall"),
+    ("GET", "/api/v1/auth/conversations"),
+    ("POST", "/api/v1/auth/conversations/mark-read"),
+    ("DELETE", "/api/v1/auth/conversations/:convId"),
+    ("PATCH", "/api/v1/auth/conversations/settings"),
+}
+
+COVERED_ENDPOINTS: set[tuple[str, str]] = set()
+
+
+class TestFailure(RuntimeError):
+    pass
+
+
+@dataclass
+class ResultItem:
+    name: str
+    status: str
+    detail: str
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.items: list[ResultItem] = []
+
+    def ok(self, name: str, detail: str = "") -> None:
+        self.items.append(ResultItem(name, "PASS", detail))
+        print(f"[PASS] {name}: {detail}")
+
+    def warn(self, name: str, detail: str = "") -> None:
+        self.items.append(ResultItem(name, "WARN", detail))
+        print(f"[WARN] {name}: {detail}")
+
+    def fail(self, name: str, detail: str = "") -> None:
+        self.items.append(ResultItem(name, "FAIL", detail))
+        print(f"[FAIL] {name}: {detail}")
+
+    def summary(self) -> tuple[int, int, int]:
+        passed = sum(1 for item in self.items if item.status == "PASS")
+        warned = sum(1 for item in self.items if item.status == "WARN")
+        failed = sum(1 for item in self.items if item.status == "FAIL")
+        return passed, warned, failed
+
+
+def mark_endpoint(method: str, path: str) -> None:
+    COVERED_ENDPOINTS.add((method.upper(), path))
+
+
+def run_cmd(args: list[str]) -> str:
+    proc = subprocess.run(
+        args,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise TestFailure(
+            f"command failed: {' '.join(args)}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    return proc.stdout.strip()
+
+
+def redis_set(key: str, value: str, expire_seconds: int = 600) -> None:
+    run_cmd(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "redis",
+            "redis-cli",
+            "SET",
+            key,
+            value,
+            "EX",
+            str(expire_seconds),
+        ]
+    )
+
+
+def request_json(
+    method: str,
+    path: str,
+    *,
+    route_path: str | None = None,
+    token: str | None = None,
+    device_id: str | None = None,
+    json_body: dict | None = None,
+    params: dict | None = None,
+    files: dict | None = None,
+) -> tuple[requests.Response, dict]:
+    mark_endpoint(method, route_path or path)
+
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if device_id:
+        headers["X-Device-ID"] = device_id
+
+    response = requests.request(
+        method,
+        f"{BASE_URL}{path}",
+        headers=headers,
+        json=json_body,
+        params=params,
+        files=files,
+        timeout=REQUEST_TIMEOUT,
+    )
+
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise TestFailure(f"{method} {path} returned non-JSON body: {response.text}") from exc
+
+    return response, body
+
+
+def ensure_success(name: str, response: requests.Response, body: dict) -> dict:
+    if response.status_code != 200:
+        raise TestFailure(f"{name} http status={response.status_code}, body={body}")
+    if body.get("code") != 0:
+        raise TestFailure(f"{name} business code={body.get('code')}, body={body}")
+    return body.get("data") or {}
+
+
+def wait_until(name: str, fn, timeout: float = 20.0, interval: float = 1.0):
+    deadline = time.time() + timeout
+    last_error: Exception | None = None
+    while time.time() < deadline:
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            time.sleep(interval)
+    raise TestFailure(f"{name} timeout: {last_error}")
+
+
+def expect_contains(items: list[dict], key: str, value: str, name: str) -> dict:
+    for item in items:
+        if item.get(key) == value:
+            return item
+    raise TestFailure(f"{name} missing item with {key}={value}: {items}")
+
+
+def main() -> int:
+    recorder = Recorder()
+    suffix = uuid.uuid4().hex[:6]
+
+    email_a = f"a{suffix}@example.com"
+    email_b = f"b{suffix}@example.com"
+    new_email_a = f"na{suffix}@example.com"
+    nickname_a = f"A{suffix}"
+    nickname_b = f"B{suffix}"
+    nickname_a2 = f"AU{suffix[:4]}"
+    password_a = "Passw0rd1"
+    password_b = "Passw0rd2"
+    password_a2 = "Passw0rd3"
+    password_b2 = "ResetPwd4"
+
+    device_a1 = f"dev-a1-{suffix}"
+    device_a2 = f"dev-a2-{suffix}"
+    device_a3 = f"dev-a3-{suffix}"
+    device_a4 = f"dev-a4-{suffix}"
+    device_a5 = f"dev-a5-{suffix}"
+    device_b1 = f"dev-b1-{suffix}"
+    device_b2 = f"dev-b2-{suffix}"
+    device_b3 = f"dev-b3-{suffix}"
+    device_code = f"dev-code-{suffix}"
+
+    code_register = "111111"
+    code_login = "222222"
+    code_reset = "333333"
+    code_change_email = "444444"
+
+    try:
+        response, body = request_json("GET", "/health")
+        if response.status_code == 200 and body.get("status") == "ok":
+            recorder.ok("health", "gateway healthy")
+        else:
+            raise TestFailure(f"health body unexpected: {body}")
+
+        mark_endpoint("GET", "/metrics")
+        metrics_response = requests.get(f"{BASE_URL}/metrics", timeout=REQUEST_TIMEOUT)
+        if metrics_response.status_code != 200 or not metrics_response.text.strip():
+            raise TestFailure(
+                f"metrics unexpected: http={metrics_response.status_code}, body={metrics_response.text[:200]}"
+            )
+        recorder.ok("metrics", "metrics reachable")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/send-verify-code",
+            json_body={"email": f"mail{suffix}@example.com", "type": 1},
+        )
+        if response.status_code == 200 and body.get("code") == 0:
+            recorder.ok("send-verify-code", "email sending configured")
+        else:
+            recorder.warn(
+                "send-verify-code",
+                f"blocked by email config or smtp: http={response.status_code}, code={body.get('code')}, message={body.get('message')}",
+            )
+
+        redis_set(f"user:verify_code:{email_a}:1", code_register)
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/verify-code",
+            json_body={"email": email_a, "verifyCode": code_register, "type": 1},
+        )
+        data = ensure_success("verify-code", response, body)
+        if not data.get("valid"):
+            raise TestFailure(f"verify-code returned invalid: {data}")
+        recorder.ok("verify-code", "manual redis seeded code verified")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/register",
+            json_body={
+                "email": email_a,
+                "password": password_a,
+                "verifyCode": code_register,
+                "nickname": nickname_a,
+            },
+        )
+        data = ensure_success("register-a", response, body)
+        user_a = data["userUuid"]
+        recorder.ok("register-a", user_a)
+
+        redis_set(f"user:verify_code:{email_b}:1", code_register)
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/register",
+            json_body={
+                "email": email_b,
+                "password": password_b,
+                "verifyCode": code_register,
+                "nickname": nickname_b,
+            },
+        )
+        data = ensure_success("register-b", response, body)
+        user_b = data["userUuid"]
+        recorder.ok("register-b", user_b)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/login",
+            device_id=device_a1,
+            json_body={
+                "account": email_a,
+                "password": password_a,
+                "deviceInfo": {"deviceName": "A1", "platform": "test", "appVersion": "1.0.0"},
+            },
+        )
+        data = ensure_success("login-a1", response, body)
+        token_a1 = data["accessToken"]
+        refresh_a1 = data["refreshToken"]
+        recorder.ok("login-a1", device_a1)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/login",
+            device_id=device_a2,
+            json_body={
+                "account": email_a,
+                "password": password_a,
+                "deviceInfo": {"deviceName": "A2", "platform": "test", "appVersion": "1.0.0"},
+            },
+        )
+        ensure_success("login-a2", response, body)
+        recorder.ok("login-a2", device_a2)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/login",
+            device_id=device_b1,
+            json_body={
+                "account": email_b,
+                "password": password_b,
+                "deviceInfo": {"deviceName": "B1", "platform": "test", "appVersion": "1.0.0"},
+            },
+        )
+        data = ensure_success("login-b1", response, body)
+        token_b1 = data["accessToken"]
+        recorder.ok("login-b1", device_b1)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/refresh-token",
+            device_id=device_a1,
+            json_body={"uuid": user_a, "device_id": device_a1, "refreshToken": refresh_a1},
+        )
+        data = ensure_success("refresh-token", response, body)
+        token_a1 = data["accessToken"]
+        recorder.ok("refresh-token", "refreshed access token")
+
+        def get_profile_a() -> dict:
+            response, body = request_json("GET", "/api/v1/auth/user/profile", token=token_a1)
+            return ensure_success("get-profile-a", response, body)
+
+        profile_a = wait_until("wait profile a", get_profile_a)
+        if profile_a.get("userInfo", {}).get("uuid") != user_a:
+            raise TestFailure(f"profile a uuid mismatch: {profile_a}")
+        recorder.ok("get-profile-a", user_a)
+
+        def get_profile_b_from_a() -> dict:
+            response, body = request_json(
+                "GET",
+                f"/api/v1/auth/user/profile/{user_b}",
+                route_path="/api/v1/auth/user/profile/:userUuid",
+                token=token_a1,
+            )
+            return ensure_success("get-profile-b", response, body)
+
+        profile_b = wait_until("wait profile b", get_profile_b_from_a)
+        if profile_b.get("userInfo", {}).get("uuid") != user_b:
+            raise TestFailure(f"profile b uuid mismatch: {profile_b}")
+        recorder.ok("get-other-profile", user_b)
+
+        response, body = request_json(
+            "GET",
+            "/api/v1/auth/user/search",
+            token=token_a1,
+            params={"keyword": nickname_b, "page": 1, "pageSize": 20},
+        )
+        data = ensure_success("search-user", response, body)
+        expect_contains(data.get("items", []), "uuid", user_b, "search-user")
+        recorder.ok("search-user", nickname_b)
+
+        response, body = request_json("GET", "/api/v1/auth/user/qrcode", token=token_a1)
+        data = ensure_success("get-qrcode", response, body)
+        qr_token = data["qrCode"]
+        recorder.ok("get-qrcode", qr_token)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/parse-qrcode",
+            json_body={"token": qr_token},
+        )
+        data = ensure_success("parse-qrcode", response, body)
+        if data.get("uuid") != user_a:
+            raise TestFailure(f"parse-qrcode uuid mismatch: {data}")
+        recorder.ok("parse-qrcode", user_a)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/user/batch-profile",
+            token=token_a1,
+            json_body={"userUuids": [user_a, user_b]},
+        )
+        data = ensure_success("batch-profile", response, body)
+        expect_contains(data.get("users", []), "uuid", user_a, "batch-profile")
+        expect_contains(data.get("users", []), "uuid", user_b, "batch-profile")
+        recorder.ok("batch-profile", "returned two users")
+
+        response, body = request_json("GET", "/api/v1/auth/user/devices", token=token_a1)
+        data = ensure_success("device-list", response, body)
+        expect_contains(data.get("devices", []), "deviceId", device_a1, "device-list")
+        expect_contains(data.get("devices", []), "deviceId", device_a2, "device-list")
+        recorder.ok("device-list", "two devices visible")
+
+        response, body = request_json("DELETE", f"/api/v1/auth/user/devices/{device_a2}", token=token_a1)
+        ensure_success("kick-device", response, body)
+        recorder.ok("kick-device", device_a2)
+
+        response, body = request_json("GET", f"/api/v1/auth/user/online-status/{user_b}", token=token_a1)
+        ensure_success("online-status", response, body)
+        recorder.ok("online-status", user_b)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/user/batch-online-status",
+            token=token_a1,
+            json_body={"userUuids": [user_a, user_b]},
+        )
+        data = ensure_success("batch-online-status", response, body)
+        expect_contains(data.get("users", []), "userUuid", user_a, "batch-online-status")
+        expect_contains(data.get("users", []), "userUuid", user_b, "batch-online-status")
+        recorder.ok("batch-online-status", "returned two users")
+
+        response, body = request_json(
+            "PUT",
+            "/api/v1/auth/user/profile",
+            token=token_a1,
+            json_body={"nickname": nickname_a2, "signature": "blackbox-profile"},
+        )
+        ensure_success("update-profile", response, body)
+        recorder.ok("update-profile", nickname_a2)
+
+        redis_set(f"user:verify_code:{email_a}:2", code_login)
+
+        def login_by_code_after_profile_change() -> dict:
+            response, body = request_json(
+                "POST",
+                "/api/v1/public/user/login-by-code",
+                device_id=device_code,
+                json_body={
+                    "email": email_a,
+                    "verifyCode": code_login,
+                    "deviceInfo": {"deviceName": "ACode", "platform": "test", "appVersion": "1.0.0"},
+                },
+            )
+            data = ensure_success("login-by-code", response, body)
+            if data.get("userInfo", {}).get("nickname") != nickname_a2:
+                raise TestFailure(f"nickname not propagated yet: {data}")
+            return data
+
+        login_code_data = wait_until("wait profile_display_changed nickname", login_by_code_after_profile_change)
+        recorder.ok("login-by-code", login_code_data.get("userInfo", {}).get("nickname", ""))
+
+        with tempfile.NamedTemporaryFile("wb", suffix=".png", delete=False) as temp_file:
+            temp_file.write(b"fake-png-content")
+            avatar_path = temp_file.name
+
+        mark_endpoint("POST", "/api/v1/auth/user/avatar")
+        with open(avatar_path, "rb") as avatar_file:
+            response = requests.post(
+                f"{BASE_URL}/api/v1/auth/user/avatar",
+                headers={"Authorization": f"Bearer {token_a1}"},
+                files={"avatar": ("avatar.png", avatar_file, "image/png")},
+                timeout=REQUEST_TIMEOUT,
+            )
+        body = response.json()
+        data = ensure_success("upload-avatar", response, body)
+        avatar_url = data["avatarUrl"]
+        recorder.ok("upload-avatar", avatar_url)
+
+        def login_after_avatar_change() -> dict:
+            response, body = request_json(
+                "POST",
+                "/api/v1/public/user/login",
+                device_id=device_a3,
+                json_body={
+                    "account": email_a,
+                    "password": password_a,
+                    "deviceInfo": {"deviceName": "A3", "platform": "test", "appVersion": "1.0.0"},
+                },
+            )
+            data = ensure_success("login-after-avatar", response, body)
+            if data.get("userInfo", {}).get("avatar") != avatar_url:
+                raise TestFailure(f"avatar not propagated yet: {data}")
+            return data
+
+        login_avatar_data = wait_until("wait profile_display_changed avatar", login_after_avatar_change)
+        token_a3 = login_avatar_data["accessToken"]
+        recorder.ok("login-after-avatar", avatar_url)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/apply",
+            token=token_a1,
+            json_body={"targetUuid": user_b, "reason": "hello", "source": "blackbox"},
+        )
+        data = ensure_success("friend-apply", response, body)
+        apply_id = data["applyId"]
+        recorder.ok("friend-apply", str(apply_id))
+
+        def unread_apply() -> dict:
+            response, body = request_json("GET", "/api/v1/auth/friend/apply/unread", token=token_b1)
+            data = ensure_success("friend-apply-unread", response, body)
+            if data.get("unreadCount", 0) < 1:
+                raise TestFailure(f"unread count not ready: {data}")
+            return data
+
+        unread_data = wait_until("wait unread apply", unread_apply)
+        recorder.ok("friend-apply-unread", str(unread_data.get("unreadCount")))
+
+        response, body = request_json(
+            "GET",
+            "/api/v1/auth/friend/apply-list",
+            token=token_b1,
+            params={"page": 1, "pageSize": 20, "status": 0},
+        )
+        data = ensure_success("friend-apply-list", response, body)
+        expect_contains(data.get("items", []), "applyId", apply_id, "friend-apply-list")
+        recorder.ok("friend-apply-list", str(apply_id))
+
+        response, body = request_json(
+            "GET",
+            "/api/v1/auth/friend/apply/sent",
+            token=token_a1,
+            params={"page": 1, "pageSize": 20, "status": 0},
+        )
+        data = ensure_success("friend-apply-sent", response, body)
+        expect_contains(data.get("items", []), "applyId", apply_id, "friend-apply-sent")
+        recorder.ok("friend-apply-sent", str(apply_id))
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/apply/read",
+            token=token_b1,
+            json_body={"applyIds": [apply_id]},
+        )
+        ensure_success("friend-apply-read", response, body)
+        recorder.ok("friend-apply-read", str(apply_id))
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/apply/handle",
+            token=token_b1,
+            json_body={"applyId": apply_id, "action": 1, "remark": "ok"},
+        )
+        ensure_success("friend-apply-handle", response, body)
+        recorder.ok("friend-apply-handle", "accepted")
+
+        response, body = request_json(
+            "GET",
+            "/api/v1/auth/friend/list",
+            token=token_a1,
+            params={"page": 1, "pageSize": 20},
+        )
+        data = ensure_success("friend-list", response, body)
+        friend_item = expect_contains(data.get("items", []), "uuid", user_b, "friend-list")
+        friend_version = data.get("version", 0)
+        recorder.ok("friend-list", friend_item.get("uuid", ""))
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/check",
+            token=token_a1,
+            json_body={"userUuid": user_a, "peerUuid": user_b},
+        )
+        data = ensure_success("friend-check", response, body)
+        if not data.get("isFriend"):
+            raise TestFailure(f"friend-check false: {data}")
+        recorder.ok("friend-check", "true")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/relation",
+            token=token_a1,
+            json_body={"userUuid": user_a, "peerUuid": user_b},
+        )
+        data = ensure_success("friend-relation", response, body)
+        if not data.get("isFriend"):
+            raise TestFailure(f"friend-relation false: {data}")
+        recorder.ok("friend-relation", data.get("relation", ""))
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/remark",
+            token=token_a1,
+            json_body={"userUuid": user_b, "remark": "bb-remark"},
+        )
+        ensure_success("friend-remark", response, body)
+        recorder.ok("friend-remark", "bb-remark")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/tag",
+            token=token_a1,
+            json_body={"userUuid": user_b, "groupTag": "bb-tag"},
+        )
+        ensure_success("friend-tag", response, body)
+        recorder.ok("friend-tag", "bb-tag")
+
+        response, body = request_json("GET", "/api/v1/auth/friend/tags", token=token_a1)
+        data = ensure_success("friend-tags", response, body)
+        expect_contains(data.get("tags", []), "tagName", "bb-tag", "friend-tags")
+        recorder.ok("friend-tags", "bb-tag")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/sync",
+            token=token_a1,
+            json_body={"version": 0, "limit": 100},
+        )
+        data = ensure_success("friend-sync", response, body)
+        if not data.get("changes"):
+            raise TestFailure(f"friend-sync empty: {data}")
+        recorder.ok("friend-sync", str(data.get("latestVersion")))
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/messages/send",
+            token=token_a1,
+            json_body={
+                "clientMsgId": f"msg-{suffix}",
+                "convType": 1,
+                "targetUuid": user_b,
+                "msgType": 1,
+                "content": json.dumps({"text": "hello blackbox"}),
+            },
+        )
+        data = ensure_success("message-send", response, body)
+        conv_id = data["convId"]
+        msg_id = data["msgId"]
+        msg_seq = data["seq"]
+        recorder.ok("message-send", msg_id)
+
+        def get_conversations_b() -> dict:
+            response, body = request_json(
+                "GET",
+                "/api/v1/auth/conversations",
+                token=token_b1,
+                params={"pageSize": 50},
+            )
+            data = ensure_success("conversations-list", response, body)
+            expect_contains(data.get("conversations", []), "convId", conv_id, "conversations-list")
+            return data
+
+        data = wait_until("wait conversation b", get_conversations_b)
+        recorder.ok("conversations-list", conv_id)
+
+        response, body = request_json(
+            "GET",
+            "/api/v1/auth/messages/pull",
+            token=token_b1,
+            params={"convId": conv_id, "limit": 20, "direction": 1},
+        )
+        data = ensure_success("message-pull", response, body)
+        expect_contains(data.get("messages", []), "msgId", msg_id, "message-pull")
+        recorder.ok("message-pull", msg_id)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/messages/get-by-ids",
+            token=token_a1,
+            json_body={"convId": conv_id, "msgIds": [msg_id]},
+        )
+        data = ensure_success("message-get-by-ids", response, body)
+        expect_contains(data.get("messages", []), "msgId", msg_id, "message-get-by-ids")
+        recorder.ok("message-get-by-ids", msg_id)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/conversations/mark-read",
+            token=token_b1,
+            json_body={"convId": conv_id, "readSeq": msg_seq},
+        )
+        ensure_success("conversation-mark-read", response, body)
+        recorder.ok("conversation-mark-read", str(msg_seq))
+
+        response, body = request_json(
+            "PATCH",
+            "/api/v1/auth/conversations/settings",
+            token=token_b1,
+            json_body={"convId": conv_id, "mute": True, "pin": True},
+        )
+        ensure_success("conversation-settings", response, body)
+        recorder.ok("conversation-settings", "mute+pin")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/messages/recall",
+            token=token_a1,
+            json_body={"convId": conv_id, "msgId": msg_id},
+        )
+        ensure_success("message-recall", response, body)
+        recorder.ok("message-recall", msg_id)
+
+        def pull_recalled_message() -> dict:
+            response, body = request_json(
+                "GET",
+                "/api/v1/auth/messages/pull",
+                token=token_b1,
+                params={"convId": conv_id, "limit": 20, "direction": 1},
+            )
+            data = ensure_success("message-pull-after-recall", response, body)
+            item = expect_contains(data.get("messages", []), "msgId", msg_id, "message-pull-after-recall")
+            if item.get("status") != 1:
+                raise TestFailure(f"message not recalled yet: {item}")
+            return data
+
+        wait_until("wait message recall visible", pull_recalled_message)
+        recorder.ok("message-pull-after-recall", "status=1")
+
+        response, body = request_json(
+            "DELETE",
+            f"/api/v1/auth/conversations/{conv_id}",
+            route_path="/api/v1/auth/conversations/:convId",
+            token=token_b1,
+        )
+        ensure_success("conversation-delete", response, body)
+        recorder.ok("conversation-delete", conv_id)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/delete",
+            token=token_a1,
+            json_body={"userUuid": user_b},
+        )
+        ensure_success("friend-delete", response, body)
+        recorder.ok("friend-delete", user_b)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/check",
+            token=token_a1,
+            json_body={"userUuid": user_a, "peerUuid": user_b},
+        )
+        data = ensure_success("friend-check-after-delete", response, body)
+        if data.get("isFriend"):
+            raise TestFailure(f"friend-check-after-delete true: {data}")
+        recorder.ok("friend-check-after-delete", "false")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/friend/sync",
+            token=token_a1,
+            json_body={"version": friend_version, "limit": 100},
+        )
+        data = ensure_success("friend-sync-after-delete", response, body)
+        recorder.ok("friend-sync-after-delete", str(data.get("latestVersion")))
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/blacklist",
+            token=token_a1,
+            json_body={"targetUuid": user_b},
+        )
+        ensure_success("blacklist-add", response, body)
+        recorder.ok("blacklist-add", user_b)
+
+        response, body = request_json("GET", "/api/v1/auth/blacklist", token=token_a1, params={"page": 1, "pageSize": 20})
+        data = ensure_success("blacklist-list", response, body)
+        expect_contains(data.get("items", []), "uuid", user_b, "blacklist-list")
+        recorder.ok("blacklist-list", user_b)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/blacklist/check",
+            token=token_a1,
+            json_body={"userUuid": user_a, "targetUuid": user_b},
+        )
+        data = ensure_success("blacklist-check", response, body)
+        if not data.get("isBlacklist"):
+            raise TestFailure(f"blacklist-check false: {data}")
+        recorder.ok("blacklist-check", "true")
+
+        response, body = request_json(
+            "DELETE",
+            f"/api/v1/auth/blacklist/{user_b}",
+            route_path="/api/v1/auth/blacklist/:userUuid",
+            token=token_a1,
+        )
+        ensure_success("blacklist-remove", response, body)
+        recorder.ok("blacklist-remove", user_b)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/blacklist/check",
+            token=token_a1,
+            json_body={"userUuid": user_a, "targetUuid": user_b},
+        )
+        data = ensure_success("blacklist-check-after-remove", response, body)
+        if data.get("isBlacklist"):
+            raise TestFailure(f"blacklist-check-after-remove true: {data}")
+        recorder.ok("blacklist-check-after-remove", "false")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/user/change-password",
+            token=token_a3,
+            json_body={"oldPassword": password_a, "newPassword": password_a2},
+        )
+        ensure_success("change-password", response, body)
+        recorder.ok("change-password", "updated")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/login",
+            device_id=device_a4,
+            json_body={
+                "account": email_a,
+                "password": password_a2,
+                "deviceInfo": {"deviceName": "A4", "platform": "test", "appVersion": "1.0.0"},
+            },
+        )
+        data = ensure_success("login-after-change-password", response, body)
+        token_a4 = data["accessToken"]
+        recorder.ok("login-after-change-password", device_a4)
+
+        redis_set(f"user:verify_code:{new_email_a}:4", code_change_email)
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/user/change-email",
+            token=token_a4,
+            json_body={"newEmail": new_email_a, "verifyCode": code_change_email},
+        )
+        data = ensure_success("change-email", response, body)
+        if data.get("email") != new_email_a:
+            raise TestFailure(f"change-email mismatch: {data}")
+        recorder.ok("change-email", new_email_a)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/login",
+            device_id=device_a5,
+            json_body={
+                "account": new_email_a,
+                "password": password_a2,
+                "deviceInfo": {"deviceName": "A5", "platform": "test", "appVersion": "1.0.0"},
+            },
+        )
+        data = ensure_success("login-after-change-email", response, body)
+        token_a5 = data["accessToken"]
+        recorder.ok("login-after-change-email", new_email_a)
+
+        redis_set(f"user:verify_code:{email_b}:3", code_reset)
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/reset-password",
+            json_body={"email": email_b, "verifyCode": code_reset, "newPassword": password_b2},
+        )
+        ensure_success("reset-password", response, body)
+        recorder.ok("reset-password", email_b)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/login",
+            device_id=device_b2,
+            json_body={
+                "account": email_b,
+                "password": password_b2,
+                "deviceInfo": {"deviceName": "B2", "platform": "test", "appVersion": "1.0.0"},
+            },
+        )
+        data = ensure_success("login-after-reset-password", response, body)
+        token_b2 = data["accessToken"]
+        recorder.ok("login-after-reset-password", device_b2)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/user/delete-account",
+            token=token_b2,
+            json_body={"password": password_b2, "reason": "blackbox cleanup"},
+        )
+        ensure_success("delete-account", response, body)
+        recorder.ok("delete-account", user_b)
+
+        def wait_profile_deleted() -> dict:
+            response, body = request_json(
+                "GET",
+                f"/api/v1/auth/user/profile/{user_b}",
+                route_path="/api/v1/auth/user/profile/:userUuid",
+                token=token_a5,
+            )
+            if response.status_code != 200:
+                raise TestFailure(f"profile delete http mismatch: {response.status_code}, {body}")
+            if body.get("code") == 0:
+                raise TestFailure(f"profile still exists: {body}")
+            return body
+
+        wait_until("wait account.deleted profile cleanup", wait_profile_deleted)
+        recorder.ok("account-deleted-profile-cleanup", user_b)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/public/user/login",
+            device_id=device_b3,
+            json_body={
+                "account": email_b,
+                "password": password_b2,
+                "deviceInfo": {"deviceName": "B3", "platform": "test", "appVersion": "1.0.0"},
+            },
+        )
+        if response.status_code == 200 and body.get("code") != 0:
+            recorder.ok("login-after-delete-account", f"blocked with code={body.get('code')}")
+        else:
+            raise TestFailure(f"login-after-delete-account unexpected: http={response.status_code}, body={body}")
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/user/logout",
+            token=token_a5,
+            json_body={"deviceId": device_a5},
+        )
+        ensure_success("logout", response, body)
+        recorder.ok("logout", device_a5)
+
+        missing = sorted(EXPECTED_ENDPOINTS - COVERED_ENDPOINTS)
+        extra = sorted(COVERED_ENDPOINTS - EXPECTED_ENDPOINTS)
+        if missing or extra:
+            raise TestFailure(f"endpoint coverage mismatch: missing={missing}, extra={extra}")
+        recorder.ok("endpoint-coverage", f"covered={len(COVERED_ENDPOINTS)}")
+
+    except Exception as exc:  # noqa: BLE001
+        recorder.fail("scenario", str(exc))
+
+    passed, warned, failed = recorder.summary()
+    print(f"\nSummary: pass={passed}, warn={warned}, fail={failed}")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

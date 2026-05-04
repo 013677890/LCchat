@@ -46,14 +46,9 @@ func (s *internalProfileServiceImpl) BatchGetUserCard(ctx context.Context, req *
 
 	cards := make([]*pb.UserCard, 0, len(users))
 	for _, user := range users {
-		if user == nil {
-			continue
+		if card := buildUserCardProto(user); card != nil {
+			cards = append(cards, card)
 		}
-		cards = append(cards, &pb.UserCard{
-			Uuid:     user.Uuid,
-			Nickname: user.Nickname,
-			Avatar:   user.Avatar,
-		})
 	}
 
 	return &pb.BatchGetUserCardResponse{Cards: cards}, nil
@@ -72,16 +67,9 @@ func (s *internalProfileServiceImpl) BatchGetPublicProfile(ctx context.Context, 
 
 	profiles := make([]*pb.PublicProfile, 0, len(users))
 	for _, user := range users {
-		if user == nil {
-			continue
+		if profile := buildPublicProfileProto(user); profile != nil {
+			profiles = append(profiles, profile)
 		}
-		profiles = append(profiles, &pb.PublicProfile{
-			Uuid:      user.Uuid,
-			Nickname:  user.Nickname,
-			Avatar:    user.Avatar,
-			Gender:    int32(user.Gender),
-			Signature: user.Signature,
-		})
 	}
 
 	return &pb.BatchGetPublicProfileResponse{Profiles: profiles}, nil

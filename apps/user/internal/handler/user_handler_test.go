@@ -13,7 +13,7 @@ import (
 )
 
 type fakeUserHandlerService struct {
-	service.IUserService
+	service.UserService
 
 	getProfileFn      func(context.Context, *pb.GetProfileRequest) (*pb.GetProfileResponse, error)
 	getOtherProfileFn func(context.Context, *pb.GetOtherProfileRequest) (*pb.GetOtherProfileResponse, error)
@@ -25,7 +25,7 @@ type fakeUserHandlerService struct {
 	batchGetProfileFn func(context.Context, *pb.BatchGetProfileRequest) (*pb.BatchGetProfileResponse, error)
 }
 
-var _ service.IUserService = (*fakeUserHandlerService)(nil)
+var _ service.UserService = (*fakeUserHandlerService)(nil)
 
 func (f *fakeUserHandlerService) GetProfile(ctx context.Context, req *pb.GetProfileRequest) (*pb.GetProfileResponse, error) {
 	if f.getProfileFn == nil {

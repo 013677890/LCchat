@@ -30,11 +30,7 @@ func (s *internalAuthServiceImpl) FindAccountByEmail(ctx context.Context, req *a
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "按邮箱查询账号失败")
 	}
 
-	return &authpb.FindAccountByEmailResponse{
-		UserUuid: user.UserUuid,
-		Status:   int32(user.Status),
-		Found:    true,
-	}, nil
+	return buildFindAccountByEmailResponse(user), nil
 }
 
 // FindAccountByTelephone 按手机号查询账号。
@@ -66,14 +62,9 @@ func (s *internalAuthServiceImpl) BatchCheckAccountStatus(ctx context.Context, r
 
 	respItems := make([]*authpb.AccountStatusItem, 0, len(items))
 	for _, item := range items {
-		if item == nil {
-			continue
+		if protoItem := buildAccountStatusItemProto(item); protoItem != nil {
+			respItems = append(respItems, protoItem)
 		}
-		respItems = append(respItems, &authpb.AccountStatusItem{
-			UserUuid: item.UserUUID,
-			Status:   item.Status,
-			Exists:   item.Exists,
-		})
 	}
 	return &authpb.BatchCheckAccountStatusResponse{Items: respItems}, nil
 }

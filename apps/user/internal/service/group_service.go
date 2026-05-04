@@ -36,13 +36,9 @@ func (s *groupServiceImpl) GetGroupMembers(ctx context.Context, req *pb.GetGroup
 
 	items := make([]*pb.GroupMemberItem, 0, len(members))
 	for _, member := range members {
-		if member == nil || member.UserUuid == "" {
-			continue
+		if item := buildGroupMemberItemProto(member); item != nil {
+			items = append(items, item)
 		}
-		items = append(items, &pb.GroupMemberItem{
-			UserUuid: member.UserUuid,
-			Role:     int32(member.Role),
-		})
 	}
 
 	return &pb.GetGroupMembersResponse{Members: items}, nil

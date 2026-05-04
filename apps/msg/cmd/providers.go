@@ -35,6 +35,9 @@ import (
 type grpcAddress string
 type metricsAddress string
 type msgUserGRPCAddress string
+type msgRelationGRPCAddress string
+type msgUserGRPCConn struct{ *grpc.ClientConn }
+type msgRelationGRPCConn struct{ *grpc.ClientConn }
 type msgAsyncReleaseTimeout time.Duration
 type msgGRPCShutdownTimeout time.Duration
 
@@ -74,12 +77,20 @@ func provideMsgConfig() message.Config { return message.DefaultConfig() }
 func provideMsgUserGRPCAddress() msgUserGRPCAddress {
 	addr := os.Getenv("USER_GRPC_ADDR")
 	if addr == "" {
-		addr = ":9090"
+		addr = ":9094"
 	}
 	return msgUserGRPCAddress(addr)
 }
 
-func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (*grpc.ClientConn, error) {
+func provideMsgRelationGRPCAddress() msgRelationGRPCAddress {
+	addr := os.Getenv("RELATION_GRPC_ADDR")
+	if addr == "" {
+		addr = ":9093"
+	}
+	return msgRelationGRPCAddress(addr)
+}
+
+func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (msgUserGRPCConn, error) {
 	conn, err := grpc.NewClient(
 		string(addr),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -88,14 +99,28 @@ func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (*grpc.Clien
 		),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("msg 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
+		return msgUserGRPCConn{}, fmt.Errorf("msg 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
 	}
-	return conn, nil
+	return msgUserGRPCConn{ClientConn: conn}, nil
 }
 
-func provideMsgGroupClient(conn *grpc.ClientConn) *groupcli.Client { return groupcli.NewClient(conn) }
-func provideMsgPermissionChecker(conn *grpc.ClientConn) *usercli.PermissionChecker {
-	return usercli.NewPermissionChecker(conn)
+func provideMsgRelationGRPCConn(_ *zap.Logger, addr msgRelationGRPCAddress) (msgRelationGRPCConn, error) {
+	conn, err := grpc.NewClient(
+		string(addr),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
+		),
+	)
+	if err != nil {
+		return msgRelationGRPCConn{}, fmt.Errorf("msg 创建 relation-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
+	}
+	return msgRelationGRPCConn{ClientConn: conn}, nil
+}
+
+func provideMsgGroupClient(conn msgUserGRPCConn) *groupcli.Client { return groupcli.NewClient(conn.ClientConn) }
+func provideMsgPermissionChecker(relationConn msgRelationGRPCConn, userConn msgUserGRPCConn) *usercli.PermissionChecker {
+	return usercli.NewPermissionChecker(relationConn.ClientConn, userConn.ClientConn)
 }
 
 func provideMsgService(repo message.Repository, cfg message.Config, gc *groupcli.Client) *message.Service {
@@ -178,7 +203,9 @@ var msgInfraProviderSet = wire.NewSet(
 	provideMsgProducer,
 	provideMsgConfig,
 	provideMsgUserGRPCAddress,
+	provideMsgRelationGRPCAddress,
 	provideMsgUserGRPCConn,
+	provideMsgRelationGRPCConn,
 	provideMsgGroupClient,
 	provideMsgPermissionChecker,
 	provideMsgService,

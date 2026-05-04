@@ -11,11 +11,11 @@ import (
 type InternalProfileHandler struct {
 	pb.UnimplementedInternalProfileServiceServer
 
-	internalProfileService service.IInternalProfileService
+	internalProfileService service.InternalProfileService
 }
 
 // NewInternalProfileHandler 创建内部资料 Handler 实例。
-func NewInternalProfileHandler(internalProfileService service.IInternalProfileService) *InternalProfileHandler {
+func NewInternalProfileHandler(internalProfileService service.InternalProfileService) *InternalProfileHandler {
 	return &InternalProfileHandler{internalProfileService: internalProfileService}
 }
 

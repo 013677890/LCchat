@@ -59,19 +59,9 @@ func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *authpb.GetDe
 
 	devices := make([]*authpb.DeviceItem, 0, len(sessions))
 	for _, session := range sessions {
-		if session == nil {
-			continue
+		if device := buildDeviceItemProto(session, deviceID, activeTimes[session.DeviceId]); device != nil {
+			devices = append(devices, device)
 		}
-		sec := activeTimes[session.DeviceId]
-		devices = append(devices, &authpb.DeviceItem{
-			DeviceId:        session.DeviceId,
-			DeviceName:      session.DeviceName,
-			Platform:        session.Platform,
-			AppVersion:      session.AppVersion,
-			IsCurrentDevice: deviceID != "" && session.DeviceId == deviceID,
-			Status:          int32(session.Status),
-			LastSeenAt:      sec * 1000,
-		})
 	}
 
 	sort.Slice(devices, func(i, j int) bool {
@@ -146,12 +136,7 @@ func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *authpb.Get
 	}
 	lastSeenSec := lastSeenMap[req.UserUuid]
 	if len(sessions) == 0 {
-		return &authpb.GetOnlineStatusResponse{Status: &authpb.OnlineStatus{
-			UserUuid:        req.UserUuid,
-			IsOnline:        false,
-			LastSeenAt:      lastSeenSec * 1000,
-			OnlinePlatforms: []string{},
-		}}, nil
+		return &authpb.GetOnlineStatusResponse{Status: buildOnlineStatusProto(req.UserUuid, false, lastSeenSec, []string{})}, nil
 	}
 
 	deviceIDs := make([]string, 0, len(sessions))
@@ -197,12 +182,7 @@ func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *authpb.Get
 	}
 	sort.Strings(platforms)
 
-	return &authpb.GetOnlineStatusResponse{Status: &authpb.OnlineStatus{
-		UserUuid:        req.UserUuid,
-		IsOnline:        isOnline,
-		LastSeenAt:      lastSeenSec * 1000,
-		OnlinePlatforms: platforms,
-	}}, nil
+	return &authpb.GetOnlineStatusResponse{Status: buildOnlineStatusProto(req.UserUuid, isOnline, lastSeenSec, platforms)}, nil
 }
 
 // BatchGetOnlineStatus 批量获取在线状态。
@@ -271,7 +251,7 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *authp
 		sessions := sessionsByUser[userUUID]
 		lastSeenSec := lastSeenByUser[userUUID]
 		if len(sessions) == 0 {
-			users = append(users, &authpb.OnlineStatusItem{UserUuid: userUUID, IsOnline: false, LastSeenAt: lastSeenSec * 1000})
+			users = append(users, buildOnlineStatusItemProto(userUUID, false, lastSeenSec))
 			continue
 		}
 
@@ -292,7 +272,7 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *authp
 				isOnline = true
 			}
 		}
-		users = append(users, &authpb.OnlineStatusItem{UserUuid: userUUID, IsOnline: isOnline, LastSeenAt: lastSeenSec * 1000})
+		users = append(users, buildOnlineStatusItemProto(userUUID, isOnline, lastSeenSec))
 	}
 
 	return &authpb.BatchGetOnlineStatusResponse{Users: users}, nil

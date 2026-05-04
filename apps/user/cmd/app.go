@@ -12,10 +12,8 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/user/mq"
-	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
@@ -227,8 +225,6 @@ func (a *UserApp) installProcessGlobals(ctx context.Context) {
 		SenderName:   userGetEnv("EMAIL_SENDER_NAME", "LCChat"),
 		AuthPassword: os.Getenv("EMAIL_AUTH_CODE"),
 	})
-	daCfg := config.DefaultDeviceActiveConfig()
-	pkgdeviceactive.SetOnlineWindow(daCfg.OnlineWindow)
 	if a.kafkaProducer != nil {
 		mq.SetGlobalProducer(a.kafkaProducer)
 	}

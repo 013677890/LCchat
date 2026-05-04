@@ -139,11 +139,6 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 	return profileToUserInfo(&profile), nil
 }
 
-// GetByPhone 根据手机号查询用户信息
-func (r *userRepositoryImpl) GetByPhone(ctx context.Context, telephone string) (*model.UserInfo, error) {
-	return nil, nil // TODO: 实现查询用户信息
-}
-
 // BatchGetByUUIDs 批量查询用户信息
 // 返回结果按传入的 uuids 顺序排列，不存在的用户不包含在结果中
 func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string) ([]*model.UserInfo, error) {
@@ -280,29 +275,6 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 	return result, nil
 }
 
-// Update 更新用户信息
-func (r *userRepositoryImpl) Update(ctx context.Context, user *model.UserInfo) (*model.UserInfo, error) {
-	return nil, nil // TODO: 实现更新用户信息
-}
-
-// UpdateAvatar 更新用户头像
-func (r *userRepositoryImpl) UpdateAvatar(ctx context.Context, userUUID, avatar string) error {
-	// 更新头像到数据库
-	err := r.db.WithContext(ctx).
-		Model(&model.UserProfile{}).
-		Where("user_uuid = ?", userUUID).
-		Update("avatar", avatar).
-		Error
-	if err != nil {
-		return WrapDBError(err)
-	}
-
-	// 更新成功后，删除 Redis 缓存。
-	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateAvatar")
-
-	return nil
-}
-
 // UpdateAvatarWithDisplayEvent 更新头像并写入展示字段变更事件。
 func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserInfo, error) {
 	var profile model.UserProfile
@@ -341,17 +313,6 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 	return profileToUserInfo(&profile), nil
 }
 
-// UpdateBasicInfo 更新基本信息
-func (r *userRepositoryImpl) UpdateBasicInfo(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) error {
-	err := r.applyBasicInfoUpdate(r.db.WithContext(ctx), userUUID, nickname, signature, birthday, gender)
-	if err != nil {
-		return err
-	}
-
-	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateBasicInfo")
-	return nil
-}
-
 // UpdateBasicInfoWithDisplayEvent 更新基本信息并写入展示字段变更事件。
 func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) (*model.UserInfo, error) {
 	var profile model.UserProfile
@@ -388,28 +349,6 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 	return profileToUserInfo(&profile), nil
 }
 
-// UpdateEmail 更新邮箱
-func (r *userRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email string) error {
-	// 更新邮箱到数据库
-	err := r.db.WithContext(ctx).
-		Model(&model.UserInfo{}).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
-		Update("email", email).
-		Error
-	if err != nil {
-		return WrapDBError(err)
-	}
-
-	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateEmail")
-
-	return nil
-}
-
-// UpdateTelephone 更新手机号
-func (r *userRepositoryImpl) UpdateTelephone(ctx context.Context, userUUID, telephone string) error {
-	return nil // TODO: 实现更新手机号
-}
-
 // Delete 软删除用户（注销账号）
 // 设置 deleted_at 字段，删除 Redis 缓存
 func (r *userRepositoryImpl) Delete(ctx context.Context, userUUID string) error {
@@ -423,42 +362,6 @@ func (r *userRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 	}
 
 	r.invalidateUserCache(ctx, userUUID, "UserRepository.Delete")
-
-	return nil
-}
-
-// ExistsByPhone 检查手机号是否已存在
-func (r *userRepositoryImpl) ExistsByPhone(ctx context.Context, telephone string) (bool, error) {
-	return false, nil // TODO: 实现检查手机号是否已存在
-}
-
-// ExistsByEmail 检查邮箱是否已存在
-func (r *userRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	var count int64
-	err := r.db.WithContext(ctx).
-		Model(&model.UserInfo{}).
-		Where("email = ? AND deleted_at IS NULL", email).
-		Count(&count).
-		Error
-	if err != nil {
-		return false, WrapDBError(err)
-	}
-	return count > 0, nil
-}
-
-// UpdatePassword 更新密码
-func (r *userRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, password string) error {
-	// 更新密码到数据库
-	err := r.db.WithContext(ctx).
-		Model(&model.UserInfo{}).
-		Where("uuid = ? AND deleted_at IS NULL", userUUID).
-		Update("password", password).
-		Error
-	if err != nil {
-		return WrapDBError(err)
-	}
-
-	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdatePassword")
 
 	return nil
 }

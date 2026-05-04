@@ -4,8 +4,6 @@ package user;
 
 option go_package = "github.com/013677890/LCchat-Backend/apps/user/pb";
 
-import "proto/user/common.proto";
-
 import "validate/validate.proto";
 
 // ==================== 用户资料服务接口 ====================
@@ -78,6 +76,14 @@ message SimpleUserItem {
 	string avatar = 4;
 	string signature = 5;
 	bool is_friend = 6;
+}
+
+// PaginationInfo 分页信息。
+message PaginationInfo {
+	int32 page = 1;
+	int32 page_size = 2;
+	int64 total = 3;
+	int32 total_pages = 4;
 }
 
 // ==================== 获取个人信息 ====================

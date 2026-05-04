@@ -29,7 +29,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   redis:
     image: ${REDIS_IMAGE:-redis:7.2}
     restart: unless-stopped
@@ -45,7 +44,6 @@ services:
       retries: 20
     networks:
       - chat-network
-
   kafka:
     image: ${KAFKA_IMAGE:-apache/kafka:3.9.2}
     restart: unless-stopped
@@ -72,9 +70,8 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   kafka-connect:
-    image: ${KAFKA_CONNECT_IMAGE:-debezium/connect:3.0}
+    image: ${KAFKA_CONNECT_IMAGE:-quay.io/debezium/connect:3.0.8.Final}
     restart: unless-stopped
     environment:
       BOOTSTRAP_SERVERS: "kafka:9092"
@@ -103,7 +100,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   cdc-init:
     image: curlimages/curl:8.13.0
     restart: "no"
@@ -121,7 +117,6 @@ services:
         condition: service_healthy
     networks:
       - chat-network
-
   minio:
     image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-01-20T14-49-07Z}
     restart: unless-stopped
@@ -141,7 +136,6 @@ services:
       retries: 20
     networks:
       - chat-network
-
   auth:
     build:
       context: .
@@ -186,7 +180,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   user:
     build:
       context: .
@@ -231,7 +224,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   relation:
     build:
       context: .
@@ -259,8 +251,8 @@ services:
       cdc-init:
         condition: service_completed_successfully
     ports:
-      - "${RELATION_GRPC_PORT:-19093}:9093"
-      - "${RELATION_METRICS_PORT:-19193}:9193"
+      - "${RELATION_GRPC_PORT:-19094}:9093"
+      - "${RELATION_METRICS_PORT:-19194}:9193"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9193/metrics >/dev/null || exit 1"]
       interval: 5s
@@ -269,7 +261,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   msg:
     build:
       context: .
@@ -305,7 +296,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   gateway:
     build:
       context: .
@@ -346,7 +336,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   connect:
     build:
       context: .
@@ -380,7 +369,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   message-push:
     build:
       context: .
@@ -418,7 +406,6 @@ services:
       start_period: 20s
     networks:
       - chat-network
-
   blackbox:
     image: curlimages/curl:8.13.0
     profiles: ["blackbox"]
@@ -436,11 +423,9 @@ services:
         code=$$(curl -s -o /dev/null -w "%{http_code}" http://gateway:8080/api/v1/auth/blacklist)
         test "$$code" = "401"
         echo "[blackbox] auth middleware smoke check passed"
-
 networks:
   chat-network:
     driver: bridge
-
 volumes:
   mysql-data:
   redis-data:

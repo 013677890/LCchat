@@ -83,12 +83,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建用户失败")
 	}
 
-	return &authpb.RegisterResponse{
-		UserUuid:  createdUser.UserUuid,
-		Nickname:  createdUser.LoginNickname,
-		Email:     createdUser.Email,
-		Telephone: createdUser.Telephone,
-	}, nil
+	return buildRegisterResponse(createdUser), nil
 }
 
 // Login 用户密码登录。
@@ -154,13 +149,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		)
 	}
 
-	return &authpb.LoginResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    int64(util.AccessExpire.Seconds()),
-		UserInfo:     buildLoginUserInfo(user),
-	}, nil
+	return buildLoginResponse(accessToken, refreshToken, int64(util.AccessExpire.Seconds()), user), nil
 }
 
 // LoginByCode 用户验证码登录。
@@ -235,13 +224,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 		)
 	}
 
-	return &authpb.LoginByCodeResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    int64(util.AccessExpire.Seconds()),
-		UserInfo:     buildLoginUserInfo(user),
-	}, nil
+	return buildLoginByCodeResponse(accessToken, refreshToken, int64(util.AccessExpire.Seconds()), user), nil
 }
 
 // SendVerifyCode 发送验证码。

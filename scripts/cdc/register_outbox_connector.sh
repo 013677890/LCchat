@@ -66,5 +66,17 @@ curl -fsS -X PUT \
 
 echo
 echo "[cdc-init] connector registered successfully"
-curl -fsS "${CONNECT_URL}/connectors/${CONNECTOR_NAME}/status"
-echo
+status_url="${CONNECT_URL}/connectors/${CONNECTOR_NAME}/status"
+deadline=$(( $(date +%s) + READY_TIMEOUT_SECONDS ))
+while true; do
+    if curl -fsS "${status_url}"; then
+        echo
+        break
+    fi
+
+    if [ "$(date +%s)" -ge "${deadline}" ]; then
+        echo "[cdc-init] connector status not ready before timeout" >&2
+        exit 1
+    fi
+    sleep 2
+done
