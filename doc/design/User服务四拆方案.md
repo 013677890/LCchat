@@ -997,5 +997,68 @@ ENABLE_SERVICES=auth                       # 只起 auth-service
 
 ---
 
-*文档更新时间：2026-04-17*
-*评审版本：v2（基于 2026-04-14 初稿，按评审决策整合 Outbox / Kafka / 冗余字段 / 权限矩阵等）*
+## 十七、当前落地差异与未完成项（2026-05-05 补充）
+
+> 本章节不改变前文目标设计，只记录当前仓库与目标状态之间的差异，供后续阶段验收与收口使用。
+>
+> 当前总体判断：`auth-service`、`relation-service`、`user-service`（profile）主体已基本拆出，但四拆尚未结束；当前仍处于“非 group 主体已拆、group 后置、旧表/旧配置/旧调用路径待清理”的中间态。
+
+### 17.1 非 Group 范围内，当前仍需收口的事项
+
+#### 17.1.1 旧兼容表与旧模型尚未清理
+- `user_info` 仍存在于默认 schema / model 中（如 `config/mysql/001_schema.sql`、`model/UserInfo.go`），尚不能视为“旧表已完全停写、可删表”的状态；
+- 虽然代码中已经引入 `user_account` / `user_profile`，但仓库内仍保留迁移阶段兼容痕迹；
+- `apps/user/internal/consumer/account_deleted_consumer.go` 仍包含针对 `user_info` 的迁移期兼容处理说明。
+
+#### 17.1.2 复数表名统一未完成
+- 当前仍在使用旧单数表名：`device_session`、`user_relation`、`apply_request`、`group_info`、`group_member`；
+- 目标表名 `device_sessions`、`user_relations`、`apply_requests`、`groups`、`group_members` 尚未全量切换；
+- `scripts/migration/001_phase1_outbox_and_split.sql` 中部分 rename 仍处于注释状态，说明表名统一尚未收口。
+
+#### 17.1.3 Proto / 事件命名仍有遗留
+- `proto/user/group_service.proto` 仍保留，说明 proto 层的最终收口尚未完成；
+- 设计文档中的 `user.created` 与当前代码/配置里使用的 `user_created` 存在命名不一致，后续需要统一 event type 与 Kafka topic 口径。
+
+#### 17.1.4 部署与配置未完全对齐
+- `docker-compose.yml`、`README.md`、`deploy/env/chatserver.env.example` 等仍存在旧端口或旧服务地址痕迹；
+- user-service 在部分部署配置里仍沿用旧 `:9090` 语义，尚未与本文档中的 `:9094` / `:9194` 完全一致；
+- `apps/message-push/cmd/providers.go` 中 `USER_GRPC_ADDR` 默认值仍保留旧端口认知；
+- `apps/msg/cmd/providers.go` 中 msg metrics 默认 `:9093`，与 relation-service gRPC 默认 `:9093` 存在冲突风险。
+
+#### 17.1.5 阶段验收配套物未完全落地
+- 本文提到的 `docker-compose.dev.yml`、`doc/runbook/`、完整回滚 runbook / 阶段验收材料尚未在仓库中完全对齐；
+- 后续阶段需补齐“可一键拉起”“可演练回滚”“可对账”的配套资产，避免只完成代码拆分而缺少发布保障。
+
+### 17.2 Group 相关待办（单独后置，非本次任务）
+
+> group-service 独立落地不纳入本次收口任务；本节仅记录当前差异，避免后续误判为“四拆已完成”。
+
+#### 17.2.1 当前现状
+- `proto/group/group_service.proto` 已存在，但未看到独立 `apps/group`（或 `apps/group-service`）服务目录、独立 main/provider/wire、独立 metrics/compose 配置；
+- `apps/user` 仍在注册并承载 `GroupService`，相关实现仍位于 `apps/user/internal/handler/group_handler.go`、`apps/user/internal/service/group_service.go`、`apps/user/internal/repository/group_repository.go`；
+- 群相关数据表仍为 `group_info` / `group_member`，尚未迁移为 `groups` / `group_members`；
+- gateway 尚未补齐 `GROUP_SERVICE_ADDR` 与独立 group client；
+- `apps/msg` / `apps/message-push` 仍通过 `apps/user/pb` 或 user 侧连接获取群成员、群权限等信息，尚未切换到独立 `apps/group/pb.GroupService`；
+- `account.deleted` 的 group 侧异步消费链路也尚未随独立 group-service 一并落地。
+
+#### 17.2.2 后续完成 Group 时的最低收口要求
+- 新建独立 `apps/group`（或 `apps/group-service`）进程，落地 `:9095` / `:9195`；
+- 将 user-service 内现有 group handler/service/repository 迁移出去；
+- Gateway / Msg / Push-Job 全量切到 `proto/group/group_service.proto` 生成的 client；
+- 完成 `group_info` → `groups`、`group_member` → `group_members` 的表名统一；
+- 清理 `proto/user/group_service.proto` 及所有通过 `apps/user/pb.GroupService` 的旧调用路径；
+- 补齐 group 侧 `account.deleted` 消费、内部最小视图接口与缓存 ownership。
+
+### 17.3 当前阶段性结论
+- 当前可以认定：
+  - `auth-service`：主体已拆出，但仍有表名/配置收口项；
+  - `relation-service`：主体已拆出，但仍有表名统一与部署收口项；
+  - `user-service`（profile）：主体已拆出，但仍残留迁移期兼容与非最终配置；
+  - `group-service`：明确未完成，且后置处理。
+- 因此当前状态应统一表述为：
+  - **“四拆方向正确，但尚未完成最终验收；当前处于非 group 主体已拆、group 后置、旧表/旧配置/旧调用路径待清理的中间态。”**
+
+---
+
+*文档更新时间：2026-05-05*
+*评审版本：v2.1（基于 2026-04-14 初稿与 v2 评审稿，补充当前落地差异与未完成项）*
