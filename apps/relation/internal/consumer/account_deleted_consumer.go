@@ -2,7 +2,6 @@ package consumer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -60,13 +59,9 @@ func (c *AccountDeletedConsumer) Close() error {
 }
 
 func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) error {
-	var payload accountevent.AccountDeletedPayload
-	if err := json.Unmarshal(message, &payload); err != nil {
+	payload, err := accountevent.DecodeAccountDeleted(message)
+	if err != nil {
 		logger.Warn(ctx, "解析 relation account.deleted 事件失败，按不可重试消息跳过", logger.ErrorField("error", err))
-		return nil
-	}
-	if payload.EventID == "" || payload.UserUUID == "" {
-		logger.Warn(ctx, "relation account.deleted 事件缺少 event_id 或 user_uuid，按不可重试消息跳过")
 		return nil
 	}
 

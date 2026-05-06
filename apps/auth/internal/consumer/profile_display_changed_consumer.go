@@ -2,7 +2,6 @@ package consumer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -58,13 +57,9 @@ func (c *ProfileDisplayChangedConsumer) Close() error {
 }
 
 func (c *ProfileDisplayChangedConsumer) handle(ctx context.Context, message []byte) error {
-	var payload accountevent.ProfileDisplayChangedPayload
-	if err := json.Unmarshal(message, &payload); err != nil {
+	payload, err := accountevent.DecodeProfileDisplayChanged(message)
+	if err != nil {
 		logger.Warn(ctx, "解析 profile_display_changed 事件失败，按不可重试消息跳过", logger.ErrorField("error", err))
-		return nil
-	}
-	if payload.EventID == "" || payload.UserUUID == "" {
-		logger.Warn(ctx, "profile_display_changed 事件缺少 event_id 或 user_uuid，按不可重试消息跳过")
 		return nil
 	}
 

@@ -2,7 +2,6 @@ package consumer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -58,13 +57,9 @@ func (c *UserCreatedConsumer) Close() error {
 }
 
 func (c *UserCreatedConsumer) handle(ctx context.Context, message []byte) error {
-	var payload accountevent.UserCreatedPayload
-	if err := json.Unmarshal(message, &payload); err != nil {
+	payload, err := accountevent.DecodeUserCreated(message)
+	if err != nil {
 		logger.Warn(ctx, "解析 user_created 事件失败，按不可重试消息跳过", logger.ErrorField("error", err))
-		return nil
-	}
-	if payload.EventID == "" || payload.UserUUID == "" {
-		logger.Warn(ctx, "user_created 事件缺少 event_id 或 user_uuid，按不可重试消息跳过")
 		return nil
 	}
 

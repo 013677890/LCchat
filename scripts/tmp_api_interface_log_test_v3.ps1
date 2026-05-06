@@ -4,6 +4,23 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $env:EMAIL_AUTH_CODE = 'dummy'
 
+$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+try {
+	[Console]::InputEncoding = $Utf8NoBom
+} catch {
+}
+try {
+	[Console]::OutputEncoding = $Utf8NoBom
+} catch {
+}
+$OutputEncoding = $Utf8NoBom
+$PSDefaultParameterValues['Set-Content:Encoding'] = 'utf8'
+$PSDefaultParameterValues['Add-Content:Encoding'] = 'utf8'
+$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+if ($IsWindows) {
+	chcp.com 65001 | Out-Null
+}
+
 $BaseUrl = 'http://127.0.0.1:8080'
 $CoreServices = @('gateway', 'auth', 'user', 'relation', 'msg')
 $GatewayOnly = @('gateway')
@@ -258,6 +275,88 @@ CREATE TABLE IF NOT EXISTS `idempotent_events` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_type_event` (`event_type`, `event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='idempotent events';
+
+CREATE TABLE IF NOT EXISTS `user_profile` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'auto id',
+  `user_uuid` CHAR(20) NOT NULL COMMENT 'user uuid',
+  `nickname` VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'nickname',
+  `avatar` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'avatar',
+  `gender` TINYINT NOT NULL DEFAULT 3 COMMENT 'gender',
+  `signature` VARCHAR(100) NOT NULL DEFAULT '' COMMENT 'signature',
+  `birthday` DATE DEFAULT NULL COMMENT 'birthday',
+  `qrcode_token` VARCHAR(64) DEFAULT NULL COMMENT 'qrcode token',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'created at',
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'updated at',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_profile_user_uuid` (`user_uuid`),
+  KEY `idx_user_profile_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='user profile';
+
+CREATE TABLE IF NOT EXISTS `user_relations` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'auto id',
+  `user_uuid` CHAR(20) NOT NULL COMMENT 'user uuid',
+  `peer_uuid` CHAR(20) NOT NULL COMMENT 'peer uuid',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT 'relation status',
+  `remark` VARCHAR(64) DEFAULT NULL COMMENT 'remark',
+  `source` VARCHAR(64) DEFAULT NULL COMMENT 'source',
+  `group_tag` VARCHAR(32) DEFAULT NULL COMMENT 'group tag',
+  `blacklisted_at` DATETIME(3) DEFAULT NULL COMMENT 'blacklisted at',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'created at',
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'updated at',
+  `deleted_at` DATETIME(3) DEFAULT NULL COMMENT 'deleted at',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uidx_user_peer` (`user_uuid`, `peer_uuid`),
+  KEY `idx_user_updated_at` (`user_uuid`, `updated_at`),
+  KEY `idx_peer_uuid` (`peer_uuid`),
+  KEY `idx_user_status_deleted_created` (`user_uuid`, `status`, `deleted_at`, `created_at`, `id`),
+  KEY `idx_user_blacklist_deleted_time` (`user_uuid`, `status`, `deleted_at`, `blacklisted_at`, `id`),
+  KEY `idx_user_relations_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='user relations';
+
+CREATE TABLE IF NOT EXISTS `apply_requests` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'auto id',
+  `apply_type` TINYINT NOT NULL COMMENT 'apply type',
+  `applicant_uuid` CHAR(20) NOT NULL COMMENT 'applicant uuid',
+  `target_uuid` CHAR(20) NOT NULL COMMENT 'target uuid',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT 'status',
+  `is_read` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'is read',
+  `reason` VARCHAR(255) DEFAULT NULL COMMENT 'reason',
+  `source` VARCHAR(32) DEFAULT NULL COMMENT 'source',
+  `handle_user_uuid` CHAR(20) DEFAULT NULL COMMENT 'handle user uuid',
+  `handle_remark` VARCHAR(255) DEFAULT NULL COMMENT 'handle remark',
+  `expired_at` DATETIME(3) DEFAULT NULL COMMENT 'expired at',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'created at',
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'updated at',
+  `deleted_at` DATETIME(3) DEFAULT NULL COMMENT 'deleted at',
+  PRIMARY KEY (`id`),
+  KEY `idx_applicant_target` (`applicant_uuid`, `target_uuid`),
+  KEY `idx_apply_pending_list` (`apply_type`, `target_uuid`, `status`, `deleted_at`, `created_at`, `id`),
+  KEY `idx_apply_sent_list` (`apply_type`, `applicant_uuid`, `status`, `deleted_at`, `created_at`, `id`),
+  KEY `idx_apply_target_read` (`target_uuid`, `apply_type`, `is_read`, `deleted_at`),
+  KEY `idx_apply_requests_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='apply requests';
+
+CREATE TABLE IF NOT EXISTS `device_sessions` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'auto id',
+  `user_uuid` CHAR(20) NOT NULL COMMENT 'user uuid',
+  `device_id` VARCHAR(64) NOT NULL COMMENT 'device id',
+  `device_name` VARCHAR(64) NOT NULL DEFAULT 'Unknown Device' COMMENT 'device name',
+  `platform` VARCHAR(32) NOT NULL COMMENT 'platform',
+  `app_version` VARCHAR(32) DEFAULT NULL COMMENT 'app version',
+  `ip` VARCHAR(64) DEFAULT NULL COMMENT 'login ip',
+  `user_agent` VARCHAR(512) DEFAULT NULL COMMENT 'user agent',
+  `expire_at` DATETIME(3) DEFAULT NULL COMMENT 'expire at',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT 'status',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'created at',
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'updated at',
+  `deleted_at` DATETIME(3) DEFAULT NULL COMMENT 'deleted at',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uidx_user_device` (`user_uuid`, `device_id`),
+  KEY `idx_device_expire_at` (`expire_at`),
+  KEY `idx_device_deleted_at` (`deleted_at`),
+  KEY `idx_device_user_updated` (`user_uuid`, `updated_at`, `id`),
+  KEY `idx_device_user_status_deleted` (`user_uuid`, `status`, `deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='device sessions';
 '@
 	docker exec lcchat-mysql-1 mysql -uroot -proot -D chat_server -e $sql | Out-Null
 }
@@ -601,7 +700,8 @@ try {
 	Assert-Pass (Invoke-Endpoint -Name 'auth.user.search' -Method 'GET' -Path '/api/v1/auth/user/search?keyword=TestB&page=1&pageSize=20' -Headers @{ Authorization = "Bearer $($A.Access)" } -Services @('gateway', 'user', 'relation'))
 
 	$avatarPath = Join-Path $env:TEMP ("lcchat-avatar-" + [guid]::NewGuid().ToString() + '.png')
-	[System.IO.File]::WriteAllText($avatarPath, 'fakepng')
+	$avatarPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6pM6kAAAAASUVORK5CYII='
+	[System.IO.File]::WriteAllBytes($avatarPath, [Convert]::FromBase64String($avatarPngBase64))
 	Assert-Pass (Invoke-Endpoint -Name 'auth.user.avatar' -Method 'POST' -Path '/api/v1/auth/user/avatar' -Headers @{ Authorization = "Bearer $($A.Access)" } -FormParts @("avatar=@$avatarPath;type=image/png;filename=test.png") -Services @('gateway', 'user'))
 
 	Assert-Pass (Invoke-Endpoint -Name 'auth.user.devices.list.before-kick' -Method 'GET' -Path '/api/v1/auth/user/devices' -Headers @{ Authorization = "Bearer $($A.Access)" } -Services @('gateway', 'auth'))
