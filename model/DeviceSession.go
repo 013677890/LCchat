@@ -36,7 +36,7 @@ type DeviceSession struct {
 }
 
 func (DeviceSession) TableName() string {
-	return "device_session"
+	return "device_sessions"
 }
 
 const (

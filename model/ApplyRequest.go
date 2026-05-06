@@ -26,9 +26,8 @@ type ApplyRequest struct {
 	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
 
-func (ApplyRequest) TableName() string { return "apply_request" }
+func (ApplyRequest) TableName() string { return "apply_requests" }
 
-
-//如果一个人多次申请
-//应该 找到之前那条 Status=0 的旧记录，更新它的 UpdatedAt 时间，并把 IsRead 重置为 0。
-//原因： 防止 B 的列表里出现 10 条全是 A 发来的申请，体验很差。
+// 如果一个人多次申请，应该找到之前那条 Status=0 的旧记录，
+// 更新它的 UpdatedAt 时间，并把 IsRead 重置为 0。
+// 原因：防止 B 的列表里出现 10 条全是 A 发来的申请，体验很差。

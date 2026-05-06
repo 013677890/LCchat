@@ -1003,27 +1003,26 @@ ENABLE_SERVICES=auth                       # 只起 auth-service
 >
 > 当前总体判断：`auth-service`、`relation-service`、`user-service`（profile）主体已基本拆出，但四拆尚未结束；当前仍处于“非 group 主体已拆、group 后置、旧表/旧配置/旧调用路径待清理”的中间态。
 
-### 17.1 非 Group 范围内，当前仍需收口的事项
+### 17.1 非 Group 范围内，本轮收口结果与剩余事项
 
-#### 17.1.1 旧兼容表与旧模型尚未清理
-- `user_info` 仍存在于默认 schema / model 中（如 `config/mysql/001_schema.sql`、`model/UserInfo.go`），尚不能视为“旧表已完全停写、可删表”的状态；
-- 虽然代码中已经引入 `user_account` / `user_profile`，但仓库内仍保留迁移阶段兼容痕迹；
-- `apps/user/internal/consumer/account_deleted_consumer.go` 仍包含针对 `user_info` 的迁移期兼容处理说明。
+#### 17.1.1 已完成：旧兼容表与旧模型清理
+- `user_info` 已从默认 schema / model 清理，`user_account` / `user_profile` 成为非 Group 范围内的唯一口径；
+- `apps/user/internal/consumer/account_deleted_consumer.go` 已切换到 `user_profile` 清理语义，不再保留迁移期兼容说明；
+- gateway 侧 `UserInfo` 兼容 DTO 已移除，登录态与资料态分别收敛为 `LoginProfile` / `UserProfile`。
 
-#### 17.1.2 复数表名统一未完成
-- 当前仍在使用旧单数表名：`device_session`、`user_relation`、`apply_request`、`group_info`、`group_member`；
-- 目标表名 `device_sessions`、`user_relations`、`apply_requests`、`groups`、`group_members` 尚未全量切换；
-- `scripts/migration/001_phase1_outbox_and_split.sql` 中部分 rename 仍处于注释状态，说明表名统一尚未收口。
+#### 17.1.2 已完成：复数表名统一
+- 非 Group 范围内的 `device_sessions`、`user_relations`、`apply_requests` 已完成代码与默认 schema 对齐；
+- `scripts/migration/001_phase1_outbox_and_split.sql` 中复数表名 rename 已显式落地，不再保留“部分 rename 仍处于注释状态”的中间态描述；
+- Group 相关的 `groups` / `group_members` 仅保留为后置任务的记录项，不再影响本轮非 Group 收口结论。
 
 #### 17.1.3 Proto / 事件命名仍有遗留
 - `proto/user/group_service.proto` 仍保留，说明 proto 层的最终收口尚未完成；
 - 设计文档中的 `user.created` 与当前代码/配置里使用的 `user_created` 存在命名不一致，后续需要统一 event type 与 Kafka topic 口径。
 
-#### 17.1.4 部署与配置未完全对齐
-- `docker-compose.yml`、`README.md`、`deploy/env/chatserver.env.example` 等仍存在旧端口或旧服务地址痕迹；
-- user-service 在部分部署配置里仍沿用旧 `:9090` 语义，尚未与本文档中的 `:9094` / `:9194` 完全一致；
-- `apps/message-push/cmd/providers.go` 中 `USER_GRPC_ADDR` 默认值仍保留旧端口认知；
-- `apps/msg/cmd/providers.go` 中 msg metrics 默认 `:9093`，与 relation-service gRPC 默认 `:9093` 存在冲突风险。
+#### 17.1.4 已完成：部署与配置主路径对齐
+- `docker-compose.yml`、`README.md`、`deploy/env/chatserver.env.example` 与 `doc/guides/实际测试指南.md` 已对齐 user-service `:9094` / `:9194` 语义；
+- `apps/message-push/cmd/providers.go` 与 `apps/msg/cmd/providers.go` 的默认端口认知已按当前拆分结果修正；
+- 当前非 Group 范围内残留问题已不再集中于旧端口或旧服务地址。
 
 #### 17.1.5 阶段验收配套物未完全落地
 - 本文提到的 `docker-compose.dev.yml`、`doc/runbook/`、完整回滚 runbook / 阶段验收材料尚未在仓库中完全对齐；
@@ -1051,12 +1050,12 @@ ENABLE_SERVICES=auth                       # 只起 auth-service
 
 ### 17.3 当前阶段性结论
 - 当前可以认定：
-  - `auth-service`：主体已拆出，但仍有表名/配置收口项；
-  - `relation-service`：主体已拆出，但仍有表名统一与部署收口项；
-  - `user-service`（profile）：主体已拆出，但仍残留迁移期兼容与非最终配置；
+  - `auth-service`：非 Group 主路径已完成主体拆分与主配置收口；
+  - `relation-service`：非 Group 主路径已完成主体拆分与表名统一；
+  - `user-service`（profile）：非 Group 主路径已完成兼容层清理与配置对齐；
   - `group-service`：明确未完成，且后置处理。
 - 因此当前状态应统一表述为：
-  - **“四拆方向正确，但尚未完成最终验收；当前处于非 group 主体已拆、group 后置、旧表/旧配置/旧调用路径待清理的中间态。”**
+  - **“四拆方向正确，非 group 主路径已基本收口；当前剩余工作主要集中在 group 后置拆分、proto/event 命名统一与阶段验收配套资产补齐。”**
 
 ---
 

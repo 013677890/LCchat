@@ -114,9 +114,7 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 	} else if friendResp != nil {
 		isFriend = friendResp.IsFriend
 	}
-	// 6. 非好友时脱敏
-	// NOTE: Email/Telephone 已从 UserInfo 移除（属于 user_account），
-	// 脱敏逻辑待 gateway 迁移到 auth.AccountService 后重新实现。
+	// 6. 资料域当前只返回公开资料字段，非好友场景无需再裁剪账号域信息。
 
 	// 7. 返回响应
 	return dto.ConvertGetOtherProfileResponseFromProto(userResp, isFriend), nil

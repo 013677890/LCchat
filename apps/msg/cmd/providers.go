@@ -118,7 +118,9 @@ func provideMsgRelationGRPCConn(_ *zap.Logger, addr msgRelationGRPCAddress) (msg
 	return msgRelationGRPCConn{ClientConn: conn}, nil
 }
 
-func provideMsgGroupClient(conn msgUserGRPCConn) *groupcli.Client { return groupcli.NewClient(conn.ClientConn) }
+func provideMsgGroupClient(conn msgUserGRPCConn) *groupcli.Client {
+	return groupcli.NewClient(conn.ClientConn)
+}
 func provideMsgPermissionChecker(relationConn msgRelationGRPCConn, userConn msgUserGRPCConn) *usercli.PermissionChecker {
 	return usercli.NewPermissionChecker(relationConn.ClientConn, userConn.ClientConn)
 }
@@ -142,7 +144,7 @@ func provideGRPCAddress() grpcAddress {
 func provideMetricsAddress() metricsAddress {
 	addr := os.Getenv("MSG_METRICS_ADDR")
 	if addr == "" {
-		addr = ":9093"
+		addr = ":9192"
 	}
 	return metricsAddress(addr)
 }

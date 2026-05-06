@@ -197,8 +197,8 @@ services:
       KAFKA_USER_CREATED_TOPIC: user_created
       KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC: profile_display_changed
       KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
-      USER_GRPC_ADDR: ":9090"
-      USER_METRICS_ADDR: ":9091"
+      USER_GRPC_ADDR: ":9094"
+      USER_METRICS_ADDR: ":9194"
       EMAIL_SENDER: ${EMAIL_SENDER:-2315635418@qq.com}
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-LCChat}
       EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-smtp.qq.com}
@@ -214,10 +214,10 @@ services:
       cdc-init:
         condition: service_completed_successfully
     ports:
-      - "${USER_GRPC_PORT:-9090}:9090"
-      - "${USER_METRICS_PORT:-9091}:9091"
+      - "${USER_GRPC_PORT:-19094}:9094"
+      - "${USER_METRICS_PORT:-19194}:9194"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9091/metrics >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9194/metrics >/dev/null || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -251,8 +251,8 @@ services:
       cdc-init:
         condition: service_completed_successfully
     ports:
-      - "${RELATION_GRPC_PORT:-19094}:9093"
-      - "${RELATION_METRICS_PORT:-19194}:9193"
+      - "${RELATION_GRPC_PORT:-19093}:9093"
+      - "${RELATION_METRICS_PORT:-19193}:9193"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9193/metrics >/dev/null || exit 1"]
       interval: 5s
@@ -277,7 +277,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_MSG_PUSH_TOPIC: msg.push
       MSG_GRPC_ADDR: ":9092"
-      MSG_METRICS_ADDR: ":9093"
+      MSG_METRICS_ADDR: ":9192"
     depends_on:
       mysql:
         condition: service_healthy
@@ -287,9 +287,9 @@ services:
         condition: service_healthy
     ports:
       - "${MSG_GRPC_PORT:-19092}:9092"
-      - "${MSG_METRICS_PORT:-19093}:9093"
+      - "${MSG_METRICS_PORT:-19192}:9192"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9093/metrics >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9192/metrics >/dev/null || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -309,7 +309,7 @@ services:
       TZ: ${TZ:-UTC}
       GIN_MODE: ${GIN_MODE:-release}
       AUTH_SERVICE_ADDR: "auth:9090"
-      USER_SERVICE_ADDR: "user:9090"
+      USER_SERVICE_ADDR: "user:9094"
       RELATION_SERVICE_ADDR: "relation:9093"
       MSG_SERVICE_ADDR: "msg:9092"
       GATEWAY_ADDR: ":8080"
@@ -349,12 +349,12 @@ services:
       TZ: ${TZ:-UTC}
       GIN_MODE: ${GIN_MODE:-release}
       REDIS_ADDR: redis:6379
-      USER_GRPC_ADDR: user:9090
+      AUTH_GRPC_ADDR: auth:9090
       CONNECT_ADDR: ":8081"
       CONNECT_GRPC_ADDR: ":9091"
       CONNECT_SELF_GRPC_ADDR: connect:9091
     depends_on:
-      user:
+      auth:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -385,7 +385,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_MSG_PUSH_TOPIC: msg.push
       KAFKA_MSG_PUSH_GROUP_ID: message-push-consumer-group
-      USER_GRPC_ADDR: user:9090
+      USER_GRPC_ADDR: user:9094
       MESSAGE_PUSH_HTTP_ADDR: ":8084"
     depends_on:
       user:

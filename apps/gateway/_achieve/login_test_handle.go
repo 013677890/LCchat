@@ -1,4 +1,5 @@
 package _achieve
+
 import (
 	"bytes"
 	"context"
@@ -72,11 +73,9 @@ func TestLoginHandler_Login(t *testing.T) {
 					RefreshToken: "test-refresh-token",
 					TokenType:    "Bearer",
 					ExpiresIn:    7200,
-					UserInfo: dto.UserInfo{
-						UUID:      "550e8400-e29b-41d4-a716-446655440000", // 标准 UUID 格式
-						Nickname:  "测试用户",
-						Telephone: "13800138000",
-						Email:     "test@example.com",
+					UserInfo: &dto.LoginProfile{
+						UUID:     "550e8400-e29b-41d4-a716-446655440000", // 标准 UUID 格式
+						Nickname: "测试用户",
 					},
 				}, nil
 			},
@@ -101,10 +100,9 @@ func TestLoginHandler_Login(t *testing.T) {
 					RefreshToken: "test-refresh-token",
 					TokenType:    "Bearer",
 					ExpiresIn:    7200,
-					UserInfo: dto.UserInfo{
-						UUID:      "550e8400-e29b-41d4-a716-446655440000", // 标准 UUID 格式
-						Nickname:  "测试用户",
-						Telephone: "13800138000",
+					UserInfo: &dto.LoginProfile{
+						UUID:     "550e8400-e29b-41d4-a716-446655440000", // 标准 UUID 格式
+						Nickname: "测试用户",
 					},
 				}, nil
 			},
@@ -284,10 +282,9 @@ func BenchmarkLoginHandler_Login(b *testing.B) {
 				RefreshToken: "test-refresh-token",
 				TokenType:    "Bearer",
 				ExpiresIn:    7200,
-				UserInfo: dto.UserInfo{
-					UUID:      "550e8400-e29b-41d4-a716-446655440000", // 标准 UUID 格式
-					Nickname:  "测试用户",
-					Telephone: "13800138000",
+				UserInfo: &dto.LoginProfile{
+					UUID:     "550e8400-e29b-41d4-a716-446655440000", // 标准 UUID 格式
+					Nickname: "测试用户",
 				},
 			}, nil
 		},

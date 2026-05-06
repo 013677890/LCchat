@@ -12,7 +12,7 @@ type GetProfileRequest struct{}
 
 // GetProfileResponse 获取个人信息响应 DTO
 type GetProfileResponse struct {
-	UserInfo *UserInfo `json:"userInfo"` // 用户信息
+	UserInfo *UserProfile `json:"userInfo"` // 用户资料
 }
 
 // GetOtherProfileRequest 获取他人信息请求 DTO
@@ -22,8 +22,8 @@ type GetOtherProfileRequest struct {
 
 // GetOtherProfileResponse 获取他人信息响应 DTO
 type GetOtherProfileResponse struct {
-	UserInfo *UserInfo `json:"userInfo"` // 用户信息
-	IsFriend bool      `json:"isFriend"` // 是否好友
+	UserInfo *UserProfile `json:"userInfo"` // 用户资料
+	IsFriend bool         `json:"isFriend"` // 是否好友
 }
 
 // UpdateProfileRequest 更新基本信息请求 DTO
@@ -36,7 +36,7 @@ type UpdateProfileRequest struct {
 
 // UpdateProfileResponse 更新基本信息响应 DTO
 type UpdateProfileResponse struct {
-	UserInfo *UserInfo `json:"userInfo"` // 更新后的用户信息
+	UserInfo *UserProfile `json:"userInfo"` // 更新后的用户资料
 }
 
 // UploadAvatarRequest 上传头像请求 DTO
@@ -218,7 +218,7 @@ func ConvertGetProfileResponseFromProto(pb *userpb.GetProfileResponse) *GetProfi
 		return nil
 	}
 	return &GetProfileResponse{
-		UserInfo: ConvertUserInfoFromProto(pb.UserInfo),
+		UserInfo: ConvertUserProfileFromProto(pb.UserInfo),
 	}
 }
 
@@ -228,7 +228,7 @@ func ConvertGetOtherProfileResponseFromProto(pb *userpb.GetOtherProfileResponse,
 		return nil
 	}
 	return &GetOtherProfileResponse{
-		UserInfo: ConvertUserInfoFromProto(pb.UserInfo),
+		UserInfo: ConvertUserProfileFromProto(pb.UserInfo),
 		IsFriend: isFriend,
 	}
 }
@@ -239,7 +239,7 @@ func ConvertUpdateProfileResponseFromProto(pb *userpb.UpdateProfileResponse) *Up
 		return nil
 	}
 	return &UpdateProfileResponse{
-		UserInfo: ConvertUserInfoFromProto(pb.UserInfo),
+		UserInfo: ConvertUserProfileFromProto(pb.UserInfo),
 	}
 }
 

@@ -22,5 +22,5 @@ type GroupInfo struct {
 }
 
 func (GroupInfo) TableName() string {
-	return "group_info"
+	return "groups"
 }

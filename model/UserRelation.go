@@ -7,7 +7,7 @@ import (
 )
 
 // UserRelation 维护用户之间的单向关系（好友/拉黑/待确认）。
-// 约束：uniqueIndex:uidx_user_peer 确保同一对用户不重复；长度与 user_info.uuid 保持一致（char(20)）。
+// 约束：uniqueIndex:uidx_user_peer 确保同一对用户不重复；user_uuid / peer_uuid 统一使用 char(20)。
 type UserRelation struct {
 	Id       int64  `gorm:"column:id;primaryKey;autoIncrement;comment:自增id"`
 	UserUuid string `gorm:"column:user_uuid;type:char(20);not null;uniqueIndex:uidx_user_peer;index:idx_user_updated_at;comment:用户uuid"`
@@ -16,12 +16,12 @@ type UserRelation struct {
 	Remark   string `gorm:"column:remark;type:varchar(64);comment:好友备注"`
 	Source   string `gorm:"column:source;type:varchar(64);comment:添加来源，如手机号/群/二维码"`
 	//LastContactAt *time.Time     `gorm:"column:last_contact_at;comment:最近联系时间"`  性能问题，不存储最近联系时间
-	GroupTag  string         `gorm:"column:group_tag;type:varchar(32);comment:标签"`
+	GroupTag string `gorm:"column:group_tag;type:varchar(32);comment:标签"`
 	// BlacklistedAt 拉黑时间（仅 status=1/3 有效）
-	BlacklistedAt *time.Time `gorm:"column:blacklisted_at;comment:拉黑时间"`
-	CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt time.Time      `gorm:"column:updated_at;index:idx_user_updated_at;autoUpdateTime"`
-	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index"`
+	BlacklistedAt *time.Time     `gorm:"column:blacklisted_at;comment:拉黑时间"`
+	CreatedAt     time.Time      `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt     time.Time      `gorm:"column:updated_at;index:idx_user_updated_at;autoUpdateTime"`
+	DeletedAt     gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
 
-func (UserRelation) TableName() string { return "user_relation" }
+func (UserRelation) TableName() string { return "user_relations" }

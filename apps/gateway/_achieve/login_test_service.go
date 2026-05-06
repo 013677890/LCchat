@@ -79,15 +79,10 @@ func TestLoginService_Login(t *testing.T) {
 			},
 			wantResp: &dto.LoginResponse{
 				TokenType: "Bearer",
-				UserInfo: dto.UserInfo{
-					UUID:      "user-uuid-001",
-					Nickname:  "测试用户",
-					Telephone: "13800138000",
-					Email:     "test@example.com",
-					Avatar:    "http://avatar.example.com",
-					Gender:    1,
-					Signature: "这是签名",
-					Birthday:  "1990-01-01",
+				UserInfo: &dto.LoginProfile{
+					UUID:     "user-uuid-001",
+					Nickname: "测试用户",
+					Avatar:   "http://avatar.example.com",
 				},
 			},
 			wantErr: false,
@@ -199,7 +194,7 @@ func TestLoginService_Login(t *testing.T) {
 				// 验证用户信息
 				assert.Equal(t, tt.wantResp.UserInfo.UUID, resp.UserInfo.UUID, "UUID 不匹配")
 				assert.Equal(t, tt.wantResp.UserInfo.Nickname, resp.UserInfo.Nickname, "Nickname 不匹配")
-				assert.Equal(t, tt.wantResp.UserInfo.Telephone, resp.UserInfo.Telephone, "Telephone 不匹配")
+				assert.Equal(t, tt.wantResp.UserInfo.Avatar, resp.UserInfo.Avatar, "Avatar 不匹配")
 			}
 		})
 	}

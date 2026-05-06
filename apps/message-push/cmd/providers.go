@@ -111,7 +111,7 @@ func provideMessagePushConnectUserTimeout() messagePushConnectUserTimeout {
 func provideMessagePushUserGRPCAddress() messagePushUserGRPCAddress {
 	addr := os.Getenv("USER_GRPC_ADDR")
 	if addr == "" {
-		addr = ":9090"
+		addr = ":9094"
 	}
 	return messagePushUserGRPCAddress(addr)
 }

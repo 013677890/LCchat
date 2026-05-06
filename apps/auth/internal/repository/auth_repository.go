@@ -348,7 +348,7 @@ func (r *authRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID s
 	if r.redisClient == nil || userUUID == "" {
 		return
 	}
-	key := rediskey.UserInfoKey(userUUID)
+	key := rediskey.UserProfileKey(userUUID)
 	if err := r.redisClient.Del(ctx, key).Err(); err != nil {
 		// 用户信息缓存失效允许最终一致，失败后异步补偿即可。
 		task := mq.BuildDelTask(key).

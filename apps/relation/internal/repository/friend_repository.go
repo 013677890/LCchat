@@ -154,7 +154,7 @@ func (r *friendRepositoryImpl) DeleteFriendRelation(ctx context.Context, userUUI
 
 // CleanupAccountRelations 在账号注销后清理 relation 域中与该用户相关的全部关系记录。
 //
-// 当前迁移阶段好友/黑名单仍共用 user_relation 表，因此这里统一按“软删除 + 缓存失效”处理，
+// relation 域当前统一使用 user_relations 维护好友/黑名单关系，这里按“软删除 + 缓存失效”处理，
 // 避免继续向外暴露已注销账号的关系数据。
 func (r *friendRepositoryImpl) CleanupAccountRelations(ctx context.Context, userUUID string) error {
 	if userUUID == "" {

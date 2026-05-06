@@ -32,11 +32,11 @@ type LoginRequest struct {
 
 // LoginResponse 登录响应 DTO
 type LoginResponse struct {
-	AccessToken  string    `json:"accessToken"`  // 访问令牌
-	RefreshToken string    `json:"refreshToken"` // 刷新令牌
-	TokenType    string    `json:"tokenType"`    // 令牌类型
-	ExpiresIn    int64     `json:"expiresIn"`    // 过期时间(秒)
-	UserInfo     *UserInfo `json:"userInfo"`     // 用户信息
+	AccessToken  string        `json:"accessToken"`  // 访问令牌
+	RefreshToken string        `json:"refreshToken"` // 刷新令牌
+	TokenType    string        `json:"tokenType"`    // 令牌类型
+	ExpiresIn    int64         `json:"expiresIn"`    // 过期时间(秒)
+	UserInfo     *LoginProfile `json:"userInfo"`     // 用户登录资料
 }
 
 // LoginByCodeRequest 验证码登录请求 DTO
@@ -48,11 +48,11 @@ type LoginByCodeRequest struct {
 
 // LoginByCodeResponse 验证码登录响应 DTO（同LoginResponse）
 type LoginByCodeResponse struct {
-	AccessToken  string    `json:"accessToken"`  // 访问令牌
-	RefreshToken string    `json:"refreshToken"` // 刷新令牌
-	TokenType    string    `json:"tokenType"`    // 令牌类型
-	ExpiresIn    int64     `json:"expiresIn"`    // 过期时间(秒)
-	UserInfo     *UserInfo `json:"userInfo"`     // 用户信息
+	AccessToken  string        `json:"accessToken"`  // 访问令牌
+	RefreshToken string        `json:"refreshToken"` // 刷新令牌
+	TokenType    string        `json:"tokenType"`    // 令牌类型
+	ExpiresIn    int64         `json:"expiresIn"`    // 过期时间(秒)
+	UserInfo     *LoginProfile `json:"userInfo"`     // 用户登录资料
 }
 
 // SendVerifyCodeRequest 发送验证码请求 DTO
@@ -252,7 +252,7 @@ func ConvertLoginResponseFromProto(pb *authpb.LoginResponse) *LoginResponse {
 		RefreshToken: pb.RefreshToken,
 		TokenType:    pb.TokenType,
 		ExpiresIn:    pb.ExpiresIn,
-		UserInfo:     ConvertLoginUserInfoFromProto(pb.UserInfo),
+		UserInfo:     ConvertLoginProfileFromProto(pb.UserInfo),
 	}
 }
 
@@ -266,7 +266,7 @@ func ConvertLoginByCodeResponseFromProto(pb *authpb.LoginByCodeResponse) *LoginB
 		RefreshToken: pb.RefreshToken,
 		TokenType:    pb.TokenType,
 		ExpiresIn:    pb.ExpiresIn,
-		UserInfo:     ConvertLoginUserInfoFromProto(pb.UserInfo),
+		UserInfo:     ConvertLoginProfileFromProto(pb.UserInfo),
 	}
 }
 

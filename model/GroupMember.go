@@ -7,7 +7,7 @@ import (
 )
 
 // GroupMember 维护群成员关系（单独一张表，不在群表存成员 JSON）。
-// 外键建议：group_member.group_uuid -> group_info.uuid；group_member.user_uuid -> user_info.uuid（需保持长度一致）。
+// 外键建议：group_members.group_uuid -> groups.uuid；group_members.user_uuid 与 user_uuid 主键长度保持一致。
 type GroupMember struct {
 	Id        int64          `gorm:"column:id;primaryKey;autoIncrement;comment:自增id"`
 	GroupUuid string         `gorm:"column:group_uuid;type:char(20);not null;index;uniqueIndex:uidx_group_user;comment:群uuid"`
@@ -23,4 +23,4 @@ type GroupMember struct {
 	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
 
-func (GroupMember) TableName() string { return "group_member" }
+func (GroupMember) TableName() string { return "group_members" }

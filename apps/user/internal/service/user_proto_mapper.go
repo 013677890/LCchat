@@ -6,52 +6,52 @@ import (
 )
 
 // buildUserInfoProto 将资料域模型转换为对外的用户资料 proto。
-func buildUserInfoProto(userInfo *model.UserInfo) *pb.UserInfo {
-	if userInfo == nil {
+func buildUserInfoProto(profile *model.UserProfile) *pb.UserInfo {
+	if profile == nil {
 		return nil
 	}
 
 	birthday := ""
-	if userInfo.Birthday != nil {
-		birthday = userInfo.Birthday.Format("2006-01-02")
+	if profile.Birthday != nil {
+		birthday = profile.Birthday.Format("2006-01-02")
 	}
 
 	return &pb.UserInfo{
-		Uuid:      userInfo.Uuid,
-		Nickname:  userInfo.Nickname,
-		Avatar:    userInfo.Avatar,
-		Gender:    int32(userInfo.Gender),
-		Signature: userInfo.Signature,
+		Uuid:      profile.UserUuid,
+		Nickname:  profile.Nickname,
+		Avatar:    profile.Avatar,
+		Gender:    int32(profile.Gender),
+		Signature: profile.Signature,
 		Birthday:  birthday,
 	}
 }
 
 // buildSimpleUserInfoProto 将资料模型转换为批量资料查询使用的精简 proto。
-func buildSimpleUserInfoProto(userInfo *model.UserInfo) *pb.SimpleUserInfo {
-	if userInfo == nil {
+func buildSimpleUserInfoProto(profile *model.UserProfile) *pb.SimpleUserInfo {
+	if profile == nil {
 		return nil
 	}
 
 	return &pb.SimpleUserInfo{
-		Uuid:      userInfo.Uuid,
-		Nickname:  userInfo.Nickname,
-		Avatar:    userInfo.Avatar,
-		Gender:    int32(userInfo.Gender),
-		Signature: userInfo.Signature,
+		Uuid:      profile.UserUuid,
+		Nickname:  profile.Nickname,
+		Avatar:    profile.Avatar,
+		Gender:    int32(profile.Gender),
+		Signature: profile.Signature,
 	}
 }
 
 // buildSearchUserItemProto 将搜索结果资料转换为公开搜索项 proto。
-func buildSearchUserItemProto(userInfo *model.UserInfo, isFriend bool) *pb.SimpleUserItem {
-	if userInfo == nil {
+func buildSearchUserItemProto(profile *model.UserProfile, isFriend bool) *pb.SimpleUserItem {
+	if profile == nil {
 		return nil
 	}
 
 	return &pb.SimpleUserItem{
-		Uuid:      userInfo.Uuid,
-		Nickname:  userInfo.Nickname,
-		Avatar:    userInfo.Avatar,
-		Signature: userInfo.Signature,
+		Uuid:      profile.UserUuid,
+		Nickname:  profile.Nickname,
+		Avatar:    profile.Avatar,
+		Signature: profile.Signature,
 		IsFriend:  isFriend,
 	}
 }
@@ -72,30 +72,30 @@ func buildUserPaginationInfoProto(page, pageSize int32, total int64) *pb.Paginat
 }
 
 // buildUserCardProto 将资料模型转换为内部卡片 proto。
-func buildUserCardProto(userInfo *model.UserInfo) *pb.UserCard {
-	if userInfo == nil {
+func buildUserCardProto(profile *model.UserProfile) *pb.UserCard {
+	if profile == nil {
 		return nil
 	}
 
 	return &pb.UserCard{
-		Uuid:     userInfo.Uuid,
-		Nickname: userInfo.Nickname,
-		Avatar:   userInfo.Avatar,
+		Uuid:     profile.UserUuid,
+		Nickname: profile.Nickname,
+		Avatar:   profile.Avatar,
 	}
 }
 
 // buildPublicProfileProto 将资料模型转换为内部公开资料 proto。
-func buildPublicProfileProto(userInfo *model.UserInfo) *pb.PublicProfile {
-	if userInfo == nil {
+func buildPublicProfileProto(profile *model.UserProfile) *pb.PublicProfile {
+	if profile == nil {
 		return nil
 	}
 
 	return &pb.PublicProfile{
-		Uuid:      userInfo.Uuid,
-		Nickname:  userInfo.Nickname,
-		Avatar:    userInfo.Avatar,
-		Gender:    int32(userInfo.Gender),
-		Signature: userInfo.Signature,
+		Uuid:      profile.UserUuid,
+		Nickname:  profile.Nickname,
+		Avatar:    profile.Avatar,
+		Gender:    int32(profile.Gender),
+		Signature: profile.Signature,
 	}
 }
 

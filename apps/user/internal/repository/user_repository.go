@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// userRepositoryImpl 用户信息数据访问层实现
+// userRepositoryImpl 用户资料数据访问层实现。
 type userRepositoryImpl struct {
 	db          *gorm.DB
 	redisClient *redis.Client
@@ -32,35 +32,15 @@ func NewUserRepository(db *gorm.DB, redisClient *redis.Client) IUserRepository {
 	return &userRepositoryImpl{db: db, redisClient: redisClient}
 }
 
-// profileToUserInfo 将 user_profile 模型转换为对外统一的资料聚合模型。
-//
-// user-service 内部实际持久化的是 UserProfile，但 service / proto 映射链路统一使用
-// UserInfo，因此在仓储层先做一次字段裁剪与别名归一。
-func profileToUserInfo(profile *model.UserProfile) *model.UserInfo {
-	if profile == nil {
-		return nil
-	}
-	return &model.UserInfo{
-		Uuid:      profile.UserUuid,
-		Nickname:  profile.Nickname,
-		Avatar:    profile.Avatar,
-		Gender:    profile.Gender,
-		Signature: profile.Signature,
-		Birthday:  profile.Birthday,
-		CreatedAt: profile.CreatedAt,
-		UpdatedAt: profile.UpdatedAt,
-	}
-}
-
 // GetByUUID 根据 UUID 查询用户资料。
 //
 // 查询链路采用“缓存优先 + 空值占位 + 异步回填”策略：
 //  1. 先查 Redis，命中则直接返回；
 //  2. 命中 "{}" 占位时视为用户不存在，避免缓存穿透；
 //  3. 缓存 miss 时回源 MySQL，并把结果异步写回缓存。
-func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model.UserInfo, error) {
+func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model.UserProfile, error) {
 	// ==================== 1. 先从 Redis 缓存中查询 ====================
-	cacheKey := rediskey.UserInfoKey(uuid)
+	cacheKey := rediskey.UserProfileKey(uuid)
 	cachedData, err := r.redisClient.Get(ctx, cacheKey).Result()
 	if err == nil {
 		// 缓存命中，反序列化返回
@@ -68,9 +48,9 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 		if cachedData == "{}" {
 			return nil, nil
 		}
-		var user model.UserInfo
-		if err := json.Unmarshal([]byte(cachedData), &user); err == nil {
-			return &user, nil
+		var profile model.UserProfile
+		if err := json.Unmarshal([]byte(cachedData), &profile); err == nil {
+			return &profile, nil
 		}
 	}
 	if err != nil && err != redis.Nil {
@@ -83,7 +63,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 存一份空到redis 5min过期
-			randomDuration := getRandomExpireTime(rediskey.UserInfoEmptyTTL)
+			randomDuration := getRandomExpireTime(rediskey.UserProfileEmptyTTL)
 			async.RunSafe(ctx, func(runCtx context.Context) {
 				if err := r.redisClient.Set(runCtx, cacheKey, "{}", randomDuration).Err(); err != nil {
 					LogRedisError(runCtx, err)
@@ -96,32 +76,31 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	}
 
 	// ==================== 3. 存入 Redis 缓存 ====================
-	// 序列化用户信息
-	userInfo := profileToUserInfo(&profile)
-	userJSON, err := json.Marshal(userInfo)
+	// 直接缓存资料域权威模型，保持缓存内容与资料域存储模型一致。
+	profileJSON, err := json.Marshal(&profile)
 	if err != nil {
 		// 序列化失败，不影响主流程，只返回数据库数据
-		return userInfo, nil
+		return &profile, nil
 	}
 
 	// 存入缓存，设置过期时间为 1 小时（+-5min缓冲）
 	// 随机时间防止缓存雪崩
 	randomDuration := time.Duration(rand.Intn(10)) * time.Minute
-	ttl := rediskey.UserInfoTTL - randomDuration
+	ttl := rediskey.UserProfileTTL - randomDuration
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		if err := r.redisClient.Set(runCtx, cacheKey, userJSON, ttl).Err(); err != nil {
+		if err := r.redisClient.Set(runCtx, cacheKey, profileJSON, ttl).Err(); err != nil {
 			LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 
-	return userInfo, nil
+	return &profile, nil
 }
 
 // CreateProfile 创建或确认用户资料存在。
 //
 // 该方法服务于账号注册后的资料域初始化：若 profile 已存在则直接复用，
 // 否则在事务内创建默认资料记录，保证重复消费注册事件时仍然幂等。
-func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickname, avatar string) (*model.UserInfo, error) {
+func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickname, avatar string) (*model.UserProfile, error) {
 	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error
@@ -151,7 +130,7 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 	}
 
 	r.invalidateUserCache(ctx, userUUID, "UserRepository.CreateProfile")
-	return profileToUserInfo(&profile), nil
+	return &profile, nil
 }
 
 // BatchGetByUUIDs 批量查询用户资料。
@@ -160,19 +139,19 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 //  1. 先批量读取 Redis；
 //  2. 对 miss 部分回源 MySQL；
 //  3. 异步回填命中和空占位，兼顾性能与防穿透。
-func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string) ([]*model.UserInfo, error) {
+func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string) ([]*model.UserProfile, error) {
 	if len(uuids) == 0 {
-		return []*model.UserInfo{}, nil
+		return []*model.UserProfile{}, nil
 	}
 
-	// 用于汇总所有查询结果 (uuid -> *UserInfo, nil 表示用户不存在)
-	userMap := make(map[string]*model.UserInfo, len(uuids))
+	// 用于汇总所有查询结果 (uuid -> *UserProfile, nil 表示用户不存在)
+	profileMap := make(map[string]*model.UserProfile, len(uuids))
 	missUUIDs := make([]string, 0, len(uuids))
 
 	// ==================== 1. 批量查询 Redis ====================
 	keys := make([]string, 0, len(uuids))
 	for _, uuid := range uuids {
-		keys = append(keys, rediskey.UserInfoKey(uuid))
+		keys = append(keys, rediskey.UserProfileKey(uuid))
 	}
 
 	cachedValues, err := r.redisClient.MGet(ctx, keys...).Result()
@@ -205,17 +184,17 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 
 			// 空占位符 `{}` 表示用户不存在，标记为已处理（nil），不回源
 			if raw == "" || raw == "{}" {
-				userMap[uuid] = nil // 标记为已处理，用户不存在
+				profileMap[uuid] = nil // 标记为已处理，用户不存在
 				continue
 			}
 
-			var user model.UserInfo
-			if err := json.Unmarshal([]byte(raw), &user); err != nil {
+			var profile model.UserProfile
+			if err := json.Unmarshal([]byte(raw), &profile); err != nil {
 				// 反序列化失败，需要回源
 				missUUIDs = append(missUUIDs, uuid)
 				continue
 			}
-			userMap[uuid] = &user
+			profileMap[uuid] = &profile
 		}
 	} else {
 		// Redis 完全不可用，全部回源
@@ -236,17 +215,17 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 		// 将 DB 结果放入 Map
 		foundUUIDs := make(map[string]struct{}, len(dbProfiles))
 		for _, profile := range dbProfiles {
-			user := profileToUserInfo(profile)
-			if user != nil && user.Uuid != "" {
-				userMap[user.Uuid] = user
-				foundUUIDs[user.Uuid] = struct{}{}
+			if profile == nil || profile.UserUuid == "" {
+				continue
 			}
+			profileMap[profile.UserUuid] = profile
+			foundUUIDs[profile.UserUuid] = struct{}{}
 		}
 
 		// 标记不存在的用户
 		for _, uuid := range missUUIDs {
 			if _, ok := foundUUIDs[uuid]; !ok {
-				userMap[uuid] = nil // 用户不存在
+				profileMap[uuid] = nil // 用户不存在
 			}
 		}
 
@@ -255,16 +234,15 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 			pipe := r.redisClient.Pipeline()
 
 			for _, profile := range dbProfiles {
-				user := profileToUserInfo(profile)
-				if user == nil || user.Uuid == "" {
+				if profile == nil || profile.UserUuid == "" {
 					continue
 				}
-				userJSON, err := json.Marshal(user)
+				profileJSON, err := json.Marshal(profile)
 				if err != nil {
 					continue
 				}
-				cacheKey := rediskey.UserInfoKey(user.Uuid)
-				pipe.Set(runCtx, cacheKey, userJSON, getRandomExpireTime(rediskey.UserInfoTTL))
+				cacheKey := rediskey.UserProfileKey(profile.UserUuid)
+				pipe.Set(runCtx, cacheKey, profileJSON, getRandomExpireTime(rediskey.UserProfileTTL))
 			}
 
 			// 对不存在的 UUID 写入空占位，避免缓存穿透
@@ -272,8 +250,8 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 				if _, ok := foundUUIDs[uuid]; ok {
 					continue
 				}
-				cacheKey := rediskey.UserInfoKey(uuid)
-				pipe.Set(runCtx, cacheKey, "{}", getRandomExpireTime(rediskey.UserInfoEmptyTTL))
+				cacheKey := rediskey.UserProfileKey(uuid)
+				pipe.Set(runCtx, cacheKey, "{}", getRandomExpireTime(rediskey.UserProfileEmptyTTL))
 			}
 
 			if _, err := pipe.Exec(runCtx); err != nil {
@@ -283,19 +261,19 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 	}
 
 	// ==================== 4. 按原始 uuids 顺序构建结果 ====================
-	result := make([]*model.UserInfo, 0, len(uuids))
+	result := make([]*model.UserProfile, 0, len(uuids))
 	for _, uuid := range uuids {
-		if user, ok := userMap[uuid]; ok && user != nil {
-			result = append(result, user)
+		if profile, ok := profileMap[uuid]; ok && profile != nil {
+			result = append(result, profile)
 		}
-		// user == nil 表示用户不存在，跳过
+		// profile == nil 表示用户不存在，跳过
 	}
 
 	return result, nil
 }
 
 // UpdateAvatarWithDisplayEvent 更新头像并写入展示字段变更事件。
-func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserInfo, error) {
+func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserProfile, error) {
 	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.UserProfile{}).
@@ -329,11 +307,11 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 	}
 
 	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateAvatarWithDisplayEvent")
-	return profileToUserInfo(&profile), nil
+	return &profile, nil
 }
 
 // UpdateBasicInfoWithDisplayEvent 更新基本信息并写入展示字段变更事件。
-func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) (*model.UserInfo, error) {
+func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) (*model.UserProfile, error) {
 	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := r.applyBasicInfoUpdate(tx, userUUID, nickname, signature, birthday, gender); err != nil {
@@ -365,7 +343,7 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 	}
 
 	r.invalidateUserCache(ctx, userUUID, "UserRepository.UpdateBasicInfoWithDisplayEvent")
-	return profileToUserInfo(&profile), nil
+	return &profile, nil
 }
 
 // Delete 删除用户资料。
@@ -424,7 +402,7 @@ func (r *userRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID, 
 		return
 	}
 
-	cacheKey := rediskey.UserInfoKey(userUUID)
+	cacheKey := rediskey.UserProfileKey(userUUID)
 	if err := r.redisClient.Del(ctx, cacheKey).Err(); err != nil {
 		task := mq.BuildDelTask(cacheKey).
 			WithSource(source)
@@ -490,7 +468,7 @@ func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userU
 //
 // 当前资料域只支持按 nickname 前缀或 user_uuid 前缀搜索，不跨到 auth 域检索邮箱，
 // 以保持四拆后的边界清晰。
-func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserInfo, int64, error) {
+func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserProfile, int64, error) {
 	// 计算偏移量
 	offset := (page - 1) * pageSize
 
@@ -518,12 +496,5 @@ func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, pag
 		return nil, 0, WrapDBError(err)
 	}
 
-	users := make([]*model.UserInfo, 0, len(profiles))
-	for _, profile := range profiles {
-		if user := profileToUserInfo(profile); user != nil {
-			users = append(users, user)
-		}
-	}
-
-	return users, total, nil
+	return profiles, total, nil
 }

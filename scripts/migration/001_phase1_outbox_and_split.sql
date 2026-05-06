@@ -1,5 +1,5 @@
 -- ============================================================
--- Phase 1: Outbox 基础设施表 + 拆表 DDL
+-- Outbox 基础设施表与非 Group Schema 统一 DDL
 -- 执行前请先做全量 DB 备份！
 -- ============================================================
 
@@ -62,17 +62,11 @@ CREATE TABLE IF NOT EXISTS `user_profile` (
     UNIQUE KEY `uk_user_uuid` (`user_uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户资料表（user-service 归属）';
 
--- ==================== 5. 表名统一（复数命名）====================
+-- ==================== 5. 表名标准化（复数命名）====================
 -- 注意：RENAME TABLE 是原子操作，但会短暂锁表，建议在低峰期执行
 
--- user_relation → user_relations
--- RENAME TABLE `user_relation` TO `user_relations`;
-
--- apply_request → apply_requests
--- RENAME TABLE `apply_request` TO `apply_requests`;
-
--- device_session → device_sessions
--- RENAME TABLE `device_session` TO `device_sessions`;
-
--- ⚠️ 上面 3 行 RENAME 默认注释掉，确认无误后取消注释执行。
--- 取消注释前需要同步更新对应 model 的 TableName() 方法。
+RENAME TABLE `user_relation` TO `user_relations`;
+RENAME TABLE `apply_request` TO `apply_requests`;
+RENAME TABLE `device_session` TO `device_sessions`;
+RENAME TABLE `group_info` TO `groups`;
+RENAME TABLE `group_member` TO `group_members`;

@@ -9,17 +9,21 @@ import (
 
 // ==================== 通用 DTO 定义 ====================
 
-// UserInfo 用户信息 DTO
-type UserInfo struct {
+// UserProfile 用户资料 DTO。
+type UserProfile struct {
 	UUID      string `json:"uuid"`      // 用户UUID
 	Nickname  string `json:"nickname"`  // 昵称
-	Telephone string `json:"telephone"` // 手机号
-	Email     string `json:"email"`     // 邮箱
 	Avatar    string `json:"avatar"`    // 头像
 	Gender    int8   `json:"gender"`    // 性别(1:男 2:女 3:未知)
 	Signature string `json:"signature"` // 个性签名
 	Birthday  string `json:"birthday"`  // 生日(YYYY-MM-DD)
-	Status    int8   `json:"status"`    // 状态(0:正常 1:禁用)
+}
+
+// LoginProfile 登录态最小资料 DTO。
+type LoginProfile struct {
+	UUID     string `json:"uuid"`     // 用户UUID
+	Nickname string `json:"nickname"` // 昵称
+	Avatar   string `json:"avatar"`   // 头像
 }
 
 // SimpleUserInfo 简化用户信息 DTO
@@ -49,29 +53,27 @@ type PaginationInfo struct {
 
 // ==================== 通用 DTO 转换函数 ====================
 
-// ConvertUserInfoFromProto 将 Protobuf 用户信息转换为 DTO
-func ConvertUserInfoFromProto(pb *userpb.UserInfo) *UserInfo {
+// ConvertUserProfileFromProto 将资料域 Protobuf 用户资料转换为 DTO。
+func ConvertUserProfileFromProto(pb *userpb.UserInfo) *UserProfile {
 	if pb == nil {
 		return nil
 	}
-	return &UserInfo{
+	return &UserProfile{
 		UUID:      pb.Uuid,
 		Nickname:  pb.Nickname,
 		Avatar:    pb.Avatar,
 		Gender:    int8(pb.Gender),
 		Signature: pb.Signature,
 		Birthday:  pb.Birthday,
-		// Telephone, Email, Status 已从 UserInfo proto 移除（属于 user_account）
-		// 这些 DTO 字段保留以兼容旧 API 响应格式，待 gateway 迁移后删除
 	}
 }
 
-// ConvertLoginUserInfoFromProto 将 auth 登录返回的最小用户信息转换为 DTO。
-func ConvertLoginUserInfoFromProto(pb *authpb.LoginUserInfo) *UserInfo {
+// ConvertLoginProfileFromProto 将 auth 登录返回的最小资料转换为 DTO。
+func ConvertLoginProfileFromProto(pb *authpb.LoginUserInfo) *LoginProfile {
 	if pb == nil {
 		return nil
 	}
-	return &UserInfo{
+	return &LoginProfile{
 		UUID:     pb.Uuid,
 		Nickname: pb.Nickname,
 		Avatar:   pb.Avatar,

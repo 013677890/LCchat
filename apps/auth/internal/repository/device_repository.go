@@ -25,7 +25,7 @@ type deviceRepositoryImpl struct {
 // NewDeviceRepository 创建设备会话仓储实例。
 //
 // 该仓储同时维护三类设备数据：
-//  1. MySQL 中的 device_session 权威记录；
+//  1. MySQL 中的 device_sessions 权威记录；
 //  2. Redis 中的设备信息 Hash，用于设备列表与会话快照读取；
 //  3. Redis ZSet 中的活跃时间索引，用于在线状态判断。
 func NewDeviceRepository(db *gorm.DB, redisClient *redis.Client) IDeviceRepository {
@@ -111,7 +111,7 @@ func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model
 	//  2. 重复登录时覆盖设备展示信息、IP、UserAgent 和状态；
 	//  3. updated_at 始终刷新为当前登录时间，供设备列表排序使用。
 	err := r.db.WithContext(ctx).Exec(`
-		INSERT INTO device_session (
+		INSERT INTO device_sessions (
 			user_uuid, device_id, device_name, platform,
 			app_version, ip, user_agent, status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

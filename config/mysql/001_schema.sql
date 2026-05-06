@@ -30,32 +30,46 @@ CREATE TABLE IF NOT EXISTS `idempotent_events` (
   UNIQUE KEY `uk_type_event` (`event_type`, `event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='幂等消费记录表';
 
-CREATE TABLE IF NOT EXISTS `user_info` (
+CREATE TABLE IF NOT EXISTS `user_account` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
-  `uuid` CHAR(20) NOT NULL COMMENT '用户唯一id',
-  `nickname` VARCHAR(20) NOT NULL COMMENT '昵称',
+  `user_uuid` CHAR(20) NOT NULL COMMENT '用户唯一id',
+  `email` VARCHAR(100) NOT NULL COMMENT '邮箱',
   `telephone` VARCHAR(20) DEFAULT NULL COMMENT '电话',
-  `email` VARCHAR(100) DEFAULT NULL COMMENT '邮箱',
-  `avatar` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '头像',
-  `gender` TINYINT DEFAULT 3 COMMENT '性别,1.男 2.女 3.未知',
-  `signature` VARCHAR(100) DEFAULT '' COMMENT '个性签名',
-  `password` CHAR(60) NOT NULL COMMENT '密码哈希',
-  `birthday` DATE DEFAULT NULL COMMENT '生日',
+  `password_hash` CHAR(60) NOT NULL COMMENT '密码哈希',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态,0.正常 1.注销',
+  `is_admin` TINYINT NOT NULL DEFAULT 0 COMMENT '是否是管理员,0.不是 1.是',
+  `login_nickname` VARCHAR(20) NOT NULL DEFAULT '' COMMENT '登录展示昵称(冗余)',
+  `login_avatar` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '登录展示头像(冗余)',
+  `last_login_at` DATETIME(3) DEFAULT NULL COMMENT '最近登录时间',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
-  `deleted_at` DATETIME(3) DEFAULT NULL COMMENT '删除时间',
-  `is_admin` TINYINT NOT NULL DEFAULT 0 COMMENT '是否是管理员,0.不是 1.是',
-  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态,0.正常 1.禁用',
+  `deleted_at` DATETIME(3) DEFAULT NULL COMMENT '注销时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_user_info_uuid` (`uuid`),
-  UNIQUE KEY `uk_user_info_telephone` (`telephone`),
-  UNIQUE KEY `uk_user_info_email` (`email`),
-  KEY `idx_user_info_created_at` (`created_at`),
-  KEY `idx_user_info_deleted_at` (`deleted_at`),
-  KEY `idx_user_info_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户基础信息';
+  UNIQUE KEY `uk_user_account_uuid` (`user_uuid`),
+  UNIQUE KEY `uk_user_account_telephone` (`telephone`),
+  UNIQUE KEY `uk_user_account_email` (`email`),
+  KEY `idx_user_account_created_at` (`created_at`),
+  KEY `idx_user_account_deleted_at` (`deleted_at`),
+  KEY `idx_user_account_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户账号信息';
 
-CREATE TABLE IF NOT EXISTS `group_info` (
+CREATE TABLE IF NOT EXISTS `user_profile` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
+  `user_uuid` CHAR(20) NOT NULL COMMENT '用户唯一id',
+  `nickname` VARCHAR(20) NOT NULL DEFAULT '' COMMENT '昵称',
+  `avatar` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '头像',
+  `gender` TINYINT NOT NULL DEFAULT 3 COMMENT '性别,1.男 2.女 3.未知',
+  `signature` VARCHAR(100) NOT NULL DEFAULT '' COMMENT '个性签名',
+  `birthday` DATE DEFAULT NULL COMMENT '生日',
+  `qrcode_token` VARCHAR(64) DEFAULT NULL COMMENT '二维码token',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_profile_user_uuid` (`user_uuid`),
+  KEY `idx_user_profile_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户资料信息';
+
+CREATE TABLE IF NOT EXISTS `groups` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `uuid` CHAR(20) NOT NULL COMMENT '群组唯一id',
   `name` VARCHAR(64) NOT NULL COMMENT '群名称',
@@ -69,13 +83,13 @@ CREATE TABLE IF NOT EXISTS `group_info` (
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   `deleted_at` DATETIME(3) DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_group_info_uuid` (`uuid`),
-  KEY `idx_group_info_owner_uuid` (`owner_uuid`),
-  KEY `idx_group_info_status` (`status`),
-  KEY `idx_group_info_deleted_at` (`deleted_at`)
+  UNIQUE KEY `uk_groups_uuid` (`uuid`),
+  KEY `idx_groups_owner_uuid` (`owner_uuid`),
+  KEY `idx_groups_status` (`status`),
+  KEY `idx_groups_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群基础信息';
 
-CREATE TABLE IF NOT EXISTS `group_member` (
+CREATE TABLE IF NOT EXISTS `group_members` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `group_uuid` CHAR(20) NOT NULL COMMENT '群uuid',
   `user_uuid` CHAR(20) NOT NULL COMMENT '用户uuid',
@@ -90,12 +104,12 @@ CREATE TABLE IF NOT EXISTS `group_member` (
   `deleted_at` DATETIME(3) DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uidx_group_user` (`group_uuid`, `user_uuid`),
-  KEY `idx_group_member_group_uuid` (`group_uuid`),
-  KEY `idx_group_member_user_uuid` (`user_uuid`),
-  KEY `idx_group_member_deleted_at` (`deleted_at`)
+  KEY `idx_group_members_group_uuid` (`group_uuid`),
+  KEY `idx_group_members_user_uuid` (`user_uuid`),
+  KEY `idx_group_members_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群成员关系';
 
-CREATE TABLE IF NOT EXISTS `user_relation` (
+CREATE TABLE IF NOT EXISTS `user_relations` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `user_uuid` CHAR(20) NOT NULL COMMENT '用户uuid',
   `peer_uuid` CHAR(20) NOT NULL COMMENT '对端用户uuid',
@@ -113,10 +127,10 @@ CREATE TABLE IF NOT EXISTS `user_relation` (
   KEY `idx_peer_uuid` (`peer_uuid`),
   KEY `idx_user_status_deleted_created` (`user_uuid`, `status`, `deleted_at`, `created_at`, `id`),
   KEY `idx_user_blacklist_deleted_time` (`user_uuid`, `status`, `deleted_at`, `blacklisted_at`, `id`),
-  KEY `idx_user_relation_deleted_at` (`deleted_at`)
+  KEY `idx_user_relations_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户单向关系';
 
-CREATE TABLE IF NOT EXISTS `apply_request` (
+CREATE TABLE IF NOT EXISTS `apply_requests` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `apply_type` TINYINT NOT NULL COMMENT '0好友 1加群',
   `applicant_uuid` CHAR(20) NOT NULL COMMENT '申请人uuid',
@@ -136,10 +150,10 @@ CREATE TABLE IF NOT EXISTS `apply_request` (
   KEY `idx_apply_pending_list` (`apply_type`, `target_uuid`, `status`, `deleted_at`, `created_at`, `id`),
   KEY `idx_apply_sent_list` (`apply_type`, `applicant_uuid`, `status`, `deleted_at`, `created_at`, `id`),
   KEY `idx_apply_target_read` (`target_uuid`, `apply_type`, `is_read`, `deleted_at`),
-  KEY `idx_apply_deleted_at` (`deleted_at`)
+  KEY `idx_apply_requests_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='好友/加群申请';
 
-CREATE TABLE IF NOT EXISTS `device_session` (
+CREATE TABLE IF NOT EXISTS `device_sessions` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_uuid` CHAR(20) NOT NULL COMMENT '用户uuid',
   `device_id` VARCHAR(64) NOT NULL COMMENT '设备唯一指纹',

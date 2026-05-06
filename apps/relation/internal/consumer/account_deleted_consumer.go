@@ -78,7 +78,7 @@ func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) err
 		return nil
 	}
 
-	// 迁移阶段 relation 侧仍使用 user_relation/apply_request，共享表下先做幂等清理骨架。
+	// relation 侧收到账号注销事件后，统一清理 user_relations / apply_requests 中的残留数据。
 	if err := c.friendRepo.CleanupAccountRelations(ctx, payload.UserUUID); err != nil {
 		return fmt.Errorf("清理 relation 用户关系失败: %w", err)
 	}

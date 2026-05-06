@@ -20,10 +20,10 @@ const (
 	// DeviceActiveTTL 设备活跃时间缓存 TTL
 	DeviceActiveTTL = 7 * 24 * time.Hour
 
-	// UserInfoTTL 用户信息缓存 TTL
-	UserInfoTTL = 1 * time.Hour
-	// UserInfoEmptyTTL 用户信息空值缓存 TTL
-	UserInfoEmptyTTL = 5 * time.Minute
+	// UserProfileTTL 用户资料缓存 TTL
+	UserProfileTTL = 1 * time.Hour
+	// UserProfileEmptyTTL 用户资料空值缓存 TTL
+	UserProfileEmptyTTL = 5 * time.Minute
 
 	// FriendRelationTTL 好友关系缓存 TTL
 	FriendRelationTTL = 24 * time.Hour
@@ -93,9 +93,9 @@ func UserRoutingKey(userUUID string) string {
 	return fmt.Sprintf("user:routing:%s", userUUID)
 }
 
-// UserInfoKey 生成用户信息缓存 Key: user:info:{uuid}
-func UserInfoKey(uuid string) string {
-	return fmt.Sprintf("user:info:%s", uuid)
+// UserProfileKey 生成用户资料缓存 Key: user:profile:{uuid}
+func UserProfileKey(uuid string) string {
+	return fmt.Sprintf("user:profile:%s", uuid)
 }
 
 // QRCodeTokenKey 生成二维码 token Key: user:qrcode:token:{token}

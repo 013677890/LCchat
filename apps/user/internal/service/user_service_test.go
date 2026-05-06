@@ -33,38 +33,38 @@ func initUserSvcTestLogger() {
 type fakeUserSvcRepo struct {
 	repository.IUserRepository
 
-	getByUUIDFn                       func(context.Context, string) (*model.UserInfo, error)
-	searchUserFn                      func(context.Context, string, int, int) ([]*model.UserInfo, int64, error)
-	updateBasicInfoWithDisplayEventFn func(context.Context, string, string, string, string, int8) (*model.UserInfo, error)
-	updateAvatarWithDisplayEventFn    func(context.Context, string, string) (*model.UserInfo, error)
+	getByUUIDFn                       func(context.Context, string) (*model.UserProfile, error)
+	searchUserFn                      func(context.Context, string, int, int) ([]*model.UserProfile, int64, error)
+	updateBasicInfoWithDisplayEventFn func(context.Context, string, string, string, string, int8) (*model.UserProfile, error)
+	updateAvatarWithDisplayEventFn    func(context.Context, string, string) (*model.UserProfile, error)
 	getQRCodeByUserUUIDFn             func(context.Context, string) (string, time.Time, error)
 	saveQRCodeFn                      func(context.Context, string, string) error
 	getUUIDByQRCodeTokenFn            func(context.Context, string) (string, error)
-	batchGetByUUIDsFn                 func(context.Context, []string) ([]*model.UserInfo, error)
+	batchGetByUUIDsFn                 func(context.Context, []string) ([]*model.UserProfile, error)
 }
 
-func (f *fakeUserSvcRepo) GetByUUID(ctx context.Context, uuid string) (*model.UserInfo, error) {
+func (f *fakeUserSvcRepo) GetByUUID(ctx context.Context, uuid string) (*model.UserProfile, error) {
 	if f.getByUUIDFn == nil {
 		return nil, errors.New("unexpected GetByUUID call")
 	}
 	return f.getByUUIDFn(ctx, uuid)
 }
 
-func (f *fakeUserSvcRepo) SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserInfo, int64, error) {
+func (f *fakeUserSvcRepo) SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserProfile, int64, error) {
 	if f.searchUserFn == nil {
 		return nil, 0, errors.New("unexpected SearchUser call")
 	}
 	return f.searchUserFn(ctx, keyword, page, pageSize)
 }
 
-func (f *fakeUserSvcRepo) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID, nickname, signature, birthday string, gender int8) (*model.UserInfo, error) {
+func (f *fakeUserSvcRepo) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID, nickname, signature, birthday string, gender int8) (*model.UserProfile, error) {
 	if f.updateBasicInfoWithDisplayEventFn == nil {
 		return nil, errors.New("unexpected UpdateBasicInfoWithDisplayEvent call")
 	}
 	return f.updateBasicInfoWithDisplayEventFn(ctx, userUUID, nickname, signature, birthday, gender)
 }
 
-func (f *fakeUserSvcRepo) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserInfo, error) {
+func (f *fakeUserSvcRepo) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserProfile, error) {
 	if f.updateAvatarWithDisplayEventFn == nil {
 		return nil, errors.New("unexpected UpdateAvatarWithDisplayEvent call")
 	}
@@ -92,7 +92,7 @@ func (f *fakeUserSvcRepo) GetUUIDByQRCodeToken(ctx context.Context, token string
 	return f.getUUIDByQRCodeTokenFn(ctx, token)
 }
 
-func (f *fakeUserSvcRepo) BatchGetByUUIDs(ctx context.Context, uuids []string) ([]*model.UserInfo, error) {
+func (f *fakeUserSvcRepo) BatchGetByUUIDs(ctx context.Context, uuids []string) ([]*model.UserProfile, error) {
 	if f.batchGetByUUIDsFn == nil {
 		return nil, errors.New("unexpected BatchGetByUUIDs call")
 	}
@@ -126,9 +126,9 @@ func TestUserServiceProfileAndSearch(t *testing.T) {
 
 	t.Run("get_profile_success", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{
-			getByUUIDFn: func(_ context.Context, uuid string) (*model.UserInfo, error) {
+			getByUUIDFn: func(_ context.Context, uuid string) (*model.UserProfile, error) {
 				require.Equal(t, "u1", uuid)
-				return &model.UserInfo{Uuid: "u1", Nickname: "n1"}, nil
+				return &model.UserProfile{UserUuid: "u1", Nickname: "n1"}, nil
 			},
 		})
 		resp, err := svc.GetProfile(userSvcCtx("u1"), &pb.GetProfileRequest{})
@@ -147,7 +147,7 @@ func TestUserServiceProfileAndSearch(t *testing.T) {
 
 	t.Run("search_user_repo_error", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{
-			searchUserFn: func(_ context.Context, _ string, _, _ int) ([]*model.UserInfo, int64, error) {
+			searchUserFn: func(_ context.Context, _ string, _, _ int) ([]*model.UserProfile, int64, error) {
 				return nil, 0, errors.New("db error")
 			},
 		})
@@ -158,11 +158,11 @@ func TestUserServiceProfileAndSearch(t *testing.T) {
 
 	t.Run("search_user_success", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{
-			searchUserFn: func(_ context.Context, keyword string, page, pageSize int) ([]*model.UserInfo, int64, error) {
+			searchUserFn: func(_ context.Context, keyword string, page, pageSize int) ([]*model.UserProfile, int64, error) {
 				require.Equal(t, "alice", keyword)
 				require.Equal(t, 1, page)
 				require.Equal(t, 20, pageSize)
-				return []*model.UserInfo{{Uuid: "u2", Nickname: "n2"}}, 1, nil
+				return []*model.UserProfile{{UserUuid: "u2", Nickname: "n2"}}, 1, nil
 			},
 		})
 		resp, err := svc.SearchUser(userSvcCtx("u1"), &pb.SearchUserRequest{Keyword: "alice", Page: 1, PageSize: 20})
@@ -192,10 +192,10 @@ func TestUserServiceUpdateAndAvatar(t *testing.T) {
 
 	t.Run("update_profile_success", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{
-			updateBasicInfoWithDisplayEventFn: func(_ context.Context, userUUID, nickname, _, _ string, _ int8) (*model.UserInfo, error) {
+			updateBasicInfoWithDisplayEventFn: func(_ context.Context, userUUID, nickname, _, _ string, _ int8) (*model.UserProfile, error) {
 				require.Equal(t, "u1", userUUID)
 				require.Equal(t, "new-nick", nickname)
-				return &model.UserInfo{Uuid: "u1", Nickname: "new-nick"}, nil
+				return &model.UserProfile{UserUuid: "u1", Nickname: "new-nick"}, nil
 			},
 		})
 		resp, err := svc.UpdateProfile(userSvcCtx("u1"), &pb.UpdateProfileRequest{Nickname: "new-nick"})
@@ -213,10 +213,10 @@ func TestUserServiceUpdateAndAvatar(t *testing.T) {
 
 	t.Run("upload_avatar_success", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{
-			updateAvatarWithDisplayEventFn: func(_ context.Context, userUUID, avatar string) (*model.UserInfo, error) {
+			updateAvatarWithDisplayEventFn: func(_ context.Context, userUUID, avatar string) (*model.UserProfile, error) {
 				require.Equal(t, "u1", userUUID)
 				require.Equal(t, "https://cdn/a.png", avatar)
-				return &model.UserInfo{Uuid: userUUID, Avatar: avatar}, nil
+				return &model.UserProfile{UserUuid: userUUID, Avatar: avatar}, nil
 			},
 		})
 		resp, err := svc.UploadAvatar(userSvcCtx("u1"), &pb.UploadAvatarRequest{AvatarUrl: "https://cdn/a.png"})
@@ -285,8 +285,8 @@ func TestUserServiceQRCodeDeleteAndBatch(t *testing.T) {
 
 	t.Run("batch_get_profile_empty_too_many_success", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{
-			batchGetByUUIDsFn: func(_ context.Context, _ []string) ([]*model.UserInfo, error) {
-				return []*model.UserInfo{{Uuid: "u1", Nickname: "n1"}}, nil
+			batchGetByUUIDsFn: func(_ context.Context, _ []string) ([]*model.UserProfile, error) {
+				return []*model.UserProfile{{UserUuid: "u1", Nickname: "n1"}}, nil
 			},
 		})
 

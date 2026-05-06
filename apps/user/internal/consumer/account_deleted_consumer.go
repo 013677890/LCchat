@@ -70,7 +70,7 @@ func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) err
 		return nil
 	}
 
-	// 迁移阶段 user_info 仍是共享表，这里继续做幂等删除与缓存清理，避免残留资料缓存。
+	// 资料域收到账号注销事件后，直接删除 user_profile 权威记录并清理缓存。
 	if err := c.userRepo.Delete(ctx, payload.UserUUID); err != nil {
 		return fmt.Errorf("执行 user-service 资料清理失败: %w", err)
 	}

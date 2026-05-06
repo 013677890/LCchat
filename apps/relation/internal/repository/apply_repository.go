@@ -287,7 +287,7 @@ func (r *applyRepositoryImpl) GetSentList(ctx context.Context, applicantUUID str
 
 // CleanupAccountApplies 在账号注销后清理 relation 域中与该用户相关的申请记录。
 //
-// 当前迁移阶段 apply_request 仍是共享表，因此这里先做“软删除 + 相关缓存失效”的清理骨架，
+// relation 域当前以 apply_requests 作为权威申请表，这里统一做“软删除 + 相关缓存失效”，
 // 避免已注销账号继续出现在待处理申请列表与未读红点中。
 func (r *applyRepositoryImpl) CleanupAccountApplies(ctx context.Context, userUUID string) error {
 	if userUUID == "" {

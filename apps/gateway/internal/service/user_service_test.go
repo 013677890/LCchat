@@ -244,7 +244,7 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 		require.Equal(t, consts.CodeInternalError, apperr.Code(err))
 	})
 
-	t.Run("friend_service_error_downgrade_and_mask", func(t *testing.T) {
+	t.Run("friend_service_error_downgrade", func(t *testing.T) {
 		svc := NewUserService(&fakeGatewayUserServiceClient{
 			getOtherProfileFn: func(_ context.Context, _ *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error) {
 				return &userpb.GetOtherProfileResponse{
@@ -269,7 +269,7 @@ func TestGatewayUserServiceGetOtherProfile(t *testing.T) {
 		assert.Equal(t, "alice", resp.UserInfo.Nickname)
 	})
 
-	t.Run("friend_true_no_mask", func(t *testing.T) {
+	t.Run("friend_true_returns_profile", func(t *testing.T) {
 		svc := NewUserService(&fakeGatewayUserServiceClient{
 			getOtherProfileFn: func(_ context.Context, _ *userpb.GetOtherProfileRequest) (*userpb.GetOtherProfileResponse, error) {
 				return &userpb.GetOtherProfileResponse{
