@@ -289,6 +289,20 @@ func TestRouterAuthLogoutUnauthorized(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, consts.CodeUnauthorized, decodeRouterAuthCode(t, w))
+}
+
+func TestRouterAuthLogoutInvalidToken(t *testing.T) {
+	initRouterAuthTestLogger()
+	r := buildAuthTestRouter(&fakeRouterAuthService{})
+
+	req := newRouterJSONRequest(t, http.MethodPost, "/api/v1/auth/user/logout", `{"deviceId":"d1"}`)
+	req.Header.Set("Authorization", "Bearer invalid-token")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, consts.CodeInvalidToken, decodeRouterAuthCode(t, w))
 }
 
 func TestRouterAuthLogoutAuthorizedSuccess(t *testing.T) {

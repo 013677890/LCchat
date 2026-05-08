@@ -2,96 +2,28 @@ package grpc
 
 import (
 	"context"
-	"net"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
 	"github.com/013677890/LCchat-Backend/apps/connect/pb"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
-	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/proto"
 )
 
-const connectGRPCDefaultTimeout = 300 * time.Millisecond
-
-// Server 封装 connect gRPC 服务的启动与停机。
+// Server 只保留 ConnectService 的 RPC 处理逻辑。
+//
+// 第二波改造后，gRPC 运行时的拦截器链、监听器与停机流程
+// 统一由 pkg/grpcx.NewServer / Run / GracefulStop 负责，
+// 这里不再重复包一层自定义 runtime。
 type Server struct {
 	pb.UnimplementedConnectServiceServer
-	grpcServer  *grpc.Server
 	connManager *manager.ConnectionManager
-	addr        string
 }
 
-// NewServer 创建 connect gRPC Server。
-// addr 示例：":9091"。
-func NewServer(addr string, connManager *manager.ConnectionManager) *Server {
-	s := &Server{
-		connManager: connManager,
-		addr:        addr,
-	}
-
-	// 构建拦截器链：Recovery → Metadata → Timeout → RateLimit → Metrics → Logging
-	// connect 的 RPS 阈值高于 user 服务（大量推送调用），
-	// 但服务端预算仍应保持在 300ms 级别，避免内部 hop 拉长整体推送尾延迟。
-	rateLimitCfg := grpcx.RateLimitConfig{
-		RequestsPerSecond: 5000,
-		Burst:             8000,
-	}
-	metrics := grpcx.NewMetrics(grpcx.MetricsConfig{Namespace: "connect"})
-
-	// 顺序保持与通用 grpcx.Start 一致，避免 connect 服务链路行为漂移。
-	unaryInters := []grpc.UnaryServerInterceptor{
-		grpcx.RecoveryUnaryInterceptor(),
-		grpcx.MetadataUnaryInterceptor(),
-		grpcx.TimeoutUnaryInterceptor(grpcx.TimeoutConfig{DefaultTimeout: connectGRPCDefaultTimeout}),
-		grpcx.ValidateUnaryInterceptor(),
-		grpcx.RateLimitUnaryInterceptor(rateLimitCfg),
-		metrics.UnaryInterceptor(),
-		grpcx.ErrorNormalizeUnaryInterceptor(),
-		grpcx.LoggingUnaryInterceptor(grpcx.LoggingConfig{
-			SlowThreshold: 200 * time.Millisecond,
-			IgnoreMethods: []string{"/grpc.health.v1.Health/Check"},
-		}),
-	}
-
-	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(unaryInters...))
-	pb.RegisterConnectServiceServer(grpcServer, s)
-
-	// 开发/调试阶段开启反射，方便 grpcurl 等工具调用。
-	ginMode := os.Getenv("GIN_MODE")
-	if ginMode == "" || ginMode == "debug" {
-		reflection.Register(grpcServer)
-	}
-
-	s.grpcServer = grpcServer
-	return s
-}
-
-// Start 启动 gRPC 监听，阻塞直到服务关闭。
-func (s *Server) Start() error {
-	lis, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return err
-	}
-	return s.grpcServer.Serve(lis)
-}
-
-// Stop 优雅停机。
-func (s *Server) Stop() {
-	s.grpcServer.GracefulStop()
-}
-
-// Addr 返回 gRPC 监听地址，便于启动日志复用。
-func (s *Server) Addr() string {
-	if s == nil {
-		return ""
-	}
-	return s.addr
+// NewServer 创建 connect gRPC 业务处理器。
+func NewServer(connManager *manager.ConnectionManager) *Server {
+	return &Server{connManager: connManager}
 }
 
 // PushToDevice 向指定设备投递消息。

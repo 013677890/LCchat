@@ -121,6 +121,7 @@ func TestRouterDeviceUnauthorized(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, consts.CodeUnauthorized, decodeRouterDeviceCode(t, w))
 }
 
 func TestRouterDeviceRoutesAndSuccess(t *testing.T) {

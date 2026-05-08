@@ -201,6 +201,7 @@ func TestRouterFriendUnauthorized(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, consts.CodeUnauthorized, decodeRouterFriendCode(t, w))
 }
 
 func TestRouterFriendRoutesAndSuccess(t *testing.T) {

@@ -45,7 +45,7 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	userServiceClient := provideGatewayUserClient(mainGatewayAuthConn, mainGatewayUserConn, mainGatewayRelationConn, mainGatewayAuthBreaker, mainGatewayUserBreaker, mainGatewayRelationBreaker)
+	userServiceClient := provideGatewayUserClient(mainGatewayAuthConn, mainGatewayUserConn, mainGatewayRelationConn)
 	authService := service.NewAuthService(userServiceClient)
 	authHandler := v1.NewAuthHandler(authService)
 	userService := service.NewUserService(userServiceClient)
@@ -62,7 +62,7 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	msgServiceClient := provideGatewayMsgClient(mainGatewayMsgConn, mainGatewayMsgBreaker)
+	msgServiceClient := provideGatewayMsgClient(mainGatewayMsgConn)
 	msgService := service.NewMsgService(msgServiceClient)
 	msgHandler := v1.NewMsgHandler(msgService)
 	handler := provideGatewayRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, msgHandler)

@@ -114,13 +114,13 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 	// Prometheus 监控中间件
 	r.Use(middleware.PrometheusMiddleware())
 
+	// 跨域中间件
+	r.Use(middleware.CorsMiddleware())
+
 	// 全局请求级超时控制：探活/指标接口跳过，其余路由统一纳入 timeout budget。
 	// 放在日志/监控中间件之后，确保超时兜底写回的最终响应能被完整观测到；
 	// 同时放在业务 handler 之前，保证后续所有下游调用都能继承同一个请求级 deadline。
 	r.Use(gatewayTimeoutMiddleware())
-
-	// 跨域中间件
-	r.Use(middleware.CorsMiddleware())
 
 	// ==================== 全局 IP 限流中间件 ====================
 	// 参数说明：

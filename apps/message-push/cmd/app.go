@@ -12,7 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
-	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc"
 )
 
 // MessagePushApp 统一管理 message-push 生命周期。
@@ -21,12 +21,12 @@ type MessagePushApp struct {
 	consumer     *consumer.Consumer
 	redis        *goredis.Client
 	connectCli   *connectcli.ClientManager
-	userGRPCConn *googlegrpc.ClientConn
+	userGRPCConn *grpc.ClientConn
 	httpServer   *mpserver.Server
 }
 
 // NewMessagePushApp 创建 app。
-func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *goredis.Client, connectCli *connectcli.ClientManager, userGRPCConn *googlegrpc.ClientConn, httpServer *mpserver.Server) (*MessagePushApp, error) {
+func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *goredis.Client, connectCli *connectcli.ClientManager, userGRPCConn *grpc.ClientConn, httpServer *mpserver.Server) (*MessagePushApp, error) {
 	if log == nil {
 		return nil, errors.New("logger 未初始化")
 	}

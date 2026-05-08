@@ -25,7 +25,6 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"gorm.io/gorm"
 )
 
@@ -139,9 +138,7 @@ func provideUserAccountDeletedConsumer(cfg config.KafkaConfig, userRepo reposito
 }
 
 func provideUserMetricsServer(addr userMetricsAddress, built *grpcx.BuiltServer) *http.Server {
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", built.Metrics.Handler())
-	return &http.Server{Addr: string(addr), Handler: metricsMux}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
 }
 
 func userInternalMethodWhitelist() map[string][]string {
@@ -159,17 +156,10 @@ func provideUserRegistration(
 	internalProfileHandler *handler.InternalProfileHandler,
 	groupHandler *handler.GroupHandler,
 ) grpcx.RegistrationFunc {
-	return func(s *grpc.Server, hs healthgrpc.HealthServer) {
+	return func(s *grpc.Server) {
 		userpb.RegisterUserServiceServer(s, userHandler)
 		userpb.RegisterInternalProfileServiceServer(s, internalProfileHandler)
 		userpb.RegisterGroupServiceServer(s, groupHandler)
-		if hs != nil {
-			if setter, ok := hs.(interface {
-				SetServingStatus(string, healthgrpc.HealthCheckResponse_ServingStatus)
-			}); ok {
-				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
-			}
-		}
 	}
 }
 

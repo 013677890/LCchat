@@ -144,10 +144,27 @@ function Invoke-Endpoint {
 			$bodyText = [string]$resp.Content
 		} catch {
 			if ($_.Exception.Response) {
-				$http = [int]$_.Exception.Response.StatusCode.value__
-				$reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-				$bodyText = $reader.ReadToEnd()
-				$reader.Close()
+				$response = $_.Exception.Response
+				if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+					$bodyText = $_.ErrorDetails.Message
+				}
+				if ($response -is [System.Net.Http.HttpResponseMessage]) {
+					$http = [int]$response.StatusCode
+					if ([string]::IsNullOrEmpty($bodyText) -and $response.Content) {
+						try {
+							$bodyText = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+						} catch {
+						}
+					}
+					if ([string]::IsNullOrEmpty($bodyText)) {
+						$bodyText = $_.Exception.Message
+					}
+				} else {
+					$http = [int]$response.StatusCode.value__
+					$reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+					$bodyText = $reader.ReadToEnd()
+					$reader.Close()
+				}
 			} else {
 				$curlExit = 1
 				$bodyText = $_.Exception.Message
@@ -411,7 +428,7 @@ try {
 	Assert-BizError $friendTags
 
 	$clientMsgId = 'cli-' + ([guid]::NewGuid().ToString())
-	$sendMsg = Invoke-Endpoint -Name 'auth.messages.send' -Method 'POST' -Path '/api/v1/auth/messages/send' -Headers @{ Authorization = "Bearer $($A.Access)" } -Body @{ clientMsgId = $clientMsgId; convType = 1; targetUuid = $B.Uuid; msgType = 1; content = 'hello from A' } -Services @('gateway', 'msg', 'relation', 'user')
+	$sendMsg = Invoke-Endpoint -Name 'auth.messages.send' -Method 'POST' -Path '/api/v1/auth/messages/send' -Headers @{ Authorization = "Bearer $($A.Access)" } -Body @{ clientMsgId = $clientMsgId; convType = 1; targetUuid = $B.Uuid; msgType = 1; content = '{"text":"hello from A"}' } -Services @('gateway', 'msg', 'relation', 'user')
 	Assert-Pass $sendMsg
 	$convId = [string](Get-PropValue $sendMsg.data @('convId'))
 	$msgId = [string](Get-PropValue $sendMsg.data @('msgId'))

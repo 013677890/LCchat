@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"net"
 	"os"
+	"time"
 
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	connectgrpc "github.com/013677890/LCchat-Backend/apps/connect/internal/grpc"
@@ -10,6 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
 	connectserver "github.com/013677890/LCchat-Backend/apps/connect/internal/server"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/svc"
+	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
@@ -17,13 +20,16 @@ import (
 	"github.com/google/wire"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
-	googlegrpc "google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc"
 )
 
 type connectAuthGRPCAddress string
 
 type connectGRPCAddress string
+
+type connectGRPCShutdownTimeout time.Duration
+
+const connectGRPCDefaultTimeout = 300 * time.Millisecond
 
 func provideConnectLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 
@@ -64,15 +70,33 @@ func provideConnectGRPCAddress() connectGRPCAddress {
 	return connectGRPCAddress(addr)
 }
 
+func provideConnectGRPCShutdownTimeout() connectGRPCShutdownTimeout {
+	return connectGRPCShutdownTimeout(10 * time.Second)
+}
+
+func connectEnableReflection() bool {
+	ginMode := os.Getenv("GIN_MODE")
+	return ginMode == "" || ginMode == "debug"
+}
+
+func connectInternalMethodWhitelist() map[string][]string {
+	return map[string][]string{
+		"/connect.ConnectService/PushToDevice":     {"message-push"},
+		"/connect.ConnectService/PushToUser":       {"message-push"},
+		"/connect.ConnectService/BroadcastToUsers": {"message-push"},
+		"/connect.ConnectService/KickConnection":   {"message-push"},
+	}
+}
+
 // auth-service gRPC 连接失败时允许降级运行，因此这里返回 nil 连接和 nil 错误。
-func provideAuthGRPCConn(log *zap.Logger, addr connectAuthGRPCAddress) (*googlegrpc.ClientConn, error) {
-	conn, err := googlegrpc.NewClient(
-		string(addr),
-		googlegrpc.WithTransportCredentials(insecure.NewCredentials()),
-		googlegrpc.WithChainUnaryInterceptor(
-			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
-		),
-	)
+func provideAuthGRPCConn(log *zap.Logger, addr connectAuthGRPCAddress) (*grpc.ClientConn, error) {
+	// connect 只依赖 auth.DeviceService 做设备在线状态同步，
+	// 因此重试与超时配置都围绕这一组 service 收敛，不再手写零散拦截器链。
+	conn, err := grpcx.NewClient(grpcx.ClientOptions{
+		Address: string(addr),
+		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
+		Retry:   grpcx.DefaultClientRetryConfig("auth.DeviceService"),
+	})
 	if err != nil {
 		logger.Warn(context.Background(), "auth-service gRPC 连接创建失败，降级为无设备状态同步模式",
 			logger.String("addr", string(addr)),
@@ -84,7 +108,7 @@ func provideAuthGRPCConn(log *zap.Logger, addr connectAuthGRPCAddress) (*googleg
 	return conn, nil
 }
 
-func provideAuthDeviceClient(conn *googlegrpc.ClientConn) authpb.DeviceServiceClient {
+func provideAuthDeviceClient(conn *grpc.ClientConn) authpb.DeviceServiceClient {
 	if conn == nil {
 		return nil
 	}
@@ -97,8 +121,42 @@ func provideConnectHTTPServer(wsHandler *handler.WSHandler, connManager *manager
 	return connectserver.New(connectserver.DefaultConfig(), wsHandler, connManager)
 }
 
-func provideConnectGRPCServer(addr connectGRPCAddress, connManager *manager.ConnectionManager) *connectgrpc.Server {
-	return connectgrpc.NewServer(string(addr), connManager)
+func provideConnectGRPCHandler(connManager *manager.ConnectionManager) *connectgrpc.Server {
+	return connectgrpc.NewServer(connManager)
+}
+
+// provideConnectGRPCRegistration 只负责“注册哪些服务”，不负责决定监听与运行方式。
+func provideConnectGRPCRegistration(handler *connectgrpc.Server) grpcx.RegistrationFunc {
+	return func(s *grpc.Server) {
+		connectpb.RegisterConnectServiceServer(s, handler)
+	}
+}
+
+func provideConnectGRPCServer(register grpcx.RegistrationFunc, addr connectGRPCAddress) (*grpcx.BuiltServer, error) {
+	return grpcx.NewServer(grpcx.ServerOptions{
+		Address:   string(addr),
+		Namespace: "connect",
+		RateLimit: &grpcx.RateLimitConfig{
+			RequestsPerSecond: 5000,
+			Burst:             8000,
+		},
+		Logging: &grpcx.LoggingConfig{
+			SlowThreshold: 200 * time.Millisecond,
+			IgnoreMethods: []string{"/grpc.health.v1.Health/Check"},
+		},
+		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: connectGRPCDefaultTimeout},
+		EnableHealth:     true,
+		EnableReflection: connectEnableReflection(),
+		ExtraUnaryInterceptors: []grpc.UnaryServerInterceptor{
+			// connect 的 gRPC 入口只面向内部调用方开放，
+			// 第二波统一后由 grpcx 统一处理 internal-caller 鉴权。
+			grpcx.InternalCallerInterceptor(connectInternalMethodWhitelist()),
+		},
+	}, register)
+}
+
+func provideConnectGRPCListener(addr connectGRPCAddress) (net.Listener, error) {
+	return grpcx.NewListener(string(addr))
 }
 
 var connectProviderSet = wire.NewSet(
@@ -109,12 +167,16 @@ var connectProviderSet = wire.NewSet(
 	provideConnectRedisClient,
 	provideConnectAuthGRPCAddress,
 	provideConnectGRPCAddress,
+	provideConnectGRPCShutdownTimeout,
 	provideAuthGRPCConn,
 	provideAuthDeviceClient,
 	provideConnectManager,
 	svc.NewConnectService,
 	handler.NewWSHandler,
 	provideConnectHTTPServer,
+	provideConnectGRPCHandler,
+	provideConnectGRPCRegistration,
 	provideConnectGRPCServer,
+	provideConnectGRPCListener,
 	NewConnectApp,
 )

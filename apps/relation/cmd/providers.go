@@ -23,7 +23,6 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"gorm.io/gorm"
 )
 
@@ -109,25 +108,16 @@ func provideRelationAccountDeletedConsumer(
 }
 
 func provideRelationMetricsServer(addr relationMetricsAddress, built *grpcx.BuiltServer) *http.Server {
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", built.Metrics.Handler())
-	return &http.Server{Addr: string(addr), Handler: metricsMux}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
 }
 
 func provideRelationRegistration(
 	friendHandler *handler.FriendHandler,
 	blacklistHandler *handler.BlacklistHandler,
 ) grpcx.RegistrationFunc {
-	return func(s *grpc.Server, hs healthgrpc.HealthServer) {
+	return func(s *grpc.Server) {
 		relationpb.RegisterFriendServiceServer(s, friendHandler)
 		relationpb.RegisterBlacklistServiceServer(s, blacklistHandler)
-		if hs != nil {
-			if setter, ok := hs.(interface {
-				SetServingStatus(string, healthgrpc.HealthCheckResponse_ServingStatus)
-			}); ok {
-				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
-			}
-		}
 	}
 }
 

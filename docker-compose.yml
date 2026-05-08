@@ -17,7 +17,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-chat_server}
       MYSQL_ROOT_HOST: "%"
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - "${MYSQL_PORT:-13306}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
       - ./config/mysql/001_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
@@ -125,10 +125,10 @@ services:
     entrypoint:
       - /bin/sh
       - -ec
-    command: |
-      export MINIO_ROOT_USER="${MINIO_ACCESS_KEY:-minioadmin}"
-      export MINIO_ROOT_PASSWORD="${MINIO_SECRET_KEY:-minioadmin}"
-      exec minio server /data --console-address ":9001"
+      - |
+        export MINIO_ROOT_USER="$$MINIO_ACCESS_KEY"
+        export MINIO_ROOT_PASSWORD="$$MINIO_SECRET_KEY"
+        exec minio server /data --console-address ":9001"
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -281,6 +281,8 @@ services:
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_MSG_PUSH_TOPIC: msg.push
+      USER_GRPC_ADDR: "user:9094"
+      RELATION_GRPC_ADDR: "relation:9093"
       MSG_GRPC_ADDR: ":9092"
       MSG_METRICS_ADDR: ":9192"
     depends_on:

@@ -23,7 +23,6 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"gorm.io/gorm"
 )
 
@@ -121,9 +120,7 @@ func provideAuthGRPCShutdownTimeout() authGRPCShutdownTimeout {
 }
 
 func provideAuthMetricsServer(addr authMetricsAddress, built *grpcx.BuiltServer) *http.Server {
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", built.Metrics.Handler())
-	return &http.Server{Addr: string(addr), Handler: metricsMux}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
 }
 
 func authInternalMethodWhitelist() map[string][]string {
@@ -142,18 +139,11 @@ func provideAuthRegistration(
 	accountHandler *handler.AccountHandler,
 	internalAuthHandler *handler.InternalAuthHandler,
 ) grpcx.RegistrationFunc {
-	return func(s *grpc.Server, hs healthgrpc.HealthServer) {
+	return func(s *grpc.Server) {
 		authpb.RegisterAuthServiceServer(s, authHandler)
 		authpb.RegisterDeviceServiceServer(s, deviceHandler)
 		authpb.RegisterAccountServiceServer(s, accountHandler)
 		authpb.RegisterInternalAuthServiceServer(s, internalAuthHandler)
-		if hs != nil {
-			if setter, ok := hs.(interface {
-				SetServingStatus(string, healthgrpc.HealthCheckResponse_ServingStatus)
-			}); ok {
-				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
-			}
-		}
 	}
 }
 

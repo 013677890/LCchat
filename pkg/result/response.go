@@ -1,21 +1,21 @@
 package result
 
 import (
-	"github.com/013677890/LCchat-Backend/consts" // 你的错误码定义包
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/consts" // 你的错误码定义包
 	"github.com/gin-gonic/gin"
 )
 
 // Response 响应结构体
 type Response struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
-	TraceId string      `json:"trace_id"`
-	Timestamp int64     `json:"timestamp"` //时间戳
+	Code      int         `json:"code"`
+	Message   string      `json:"message"`
+	Data      interface{} `json:"data"`
+	TraceId   string      `json:"trace_id"`
+	Timestamp int64       `json:"timestamp"` //时间戳
 }
 
 var responsePool = &sync.Pool{
@@ -45,15 +45,18 @@ func PutResponse(resp *Response) {
 //   - 业务成功或业务失败（如参数错误、密码错误等）：返回 200，业务状态码在 body 的 code 字段
 //   - 系统内部错误（code >= 30000）：返回 500
 func Result(c *gin.Context, data interface{}, message string, code int) {
+	ResultWithStatus(c, data, message, code, resolveHTTPStatus(code))
+}
+
+// ResultWithStatus 返回响应，并允许显式覆盖 HTTP 状态码。
+func ResultWithStatus(c *gin.Context, data interface{}, message string, code int, httpStatus int) {
 	traceId := c.GetString("trace_id")
 	if message == "" {
 		message = consts.GetMessage(code)
 	}
 
-	// 判断是否为系统内部错误（3xxxx）
-	httpStatus := http.StatusOK
-	if code >= 30000 && code < 40000 {
-		httpStatus = http.StatusInternalServerError
+	if httpStatus == 0 {
+		httpStatus = resolveHTTPStatus(code)
 	}
 
 	// 将业务状态码存储到 context 中供监控中间件使用
@@ -68,7 +71,6 @@ func Result(c *gin.Context, data interface{}, message string, code int) {
 	resp.Timestamp = time.Now().Unix()
 
 	c.JSON(httpStatus, resp)
-
 }
 
 // Success 返回成功响应
@@ -79,6 +81,11 @@ func Success(c *gin.Context, data interface{}) {
 // Fail 返回失败响应
 func Fail(c *gin.Context, data interface{}, code int) {
 	Result(c, data, "", code)
+}
+
+// FailWithStatus 返回失败响应，并显式指定 HTTP 状态码。
+func FailWithStatus(c *gin.Context, data interface{}, code int, httpStatus int) {
+	ResultWithStatus(c, data, "", code, httpStatus)
 }
 
 // FailServer 返回失败响应，并将 upstreamErr 挂入 gin 错误链，供 GinLogger 在请求结束时统一记录（含当前层 apperr 堆栈）。
@@ -100,8 +107,20 @@ func FailWithMessage(c *gin.Context, data interface{}, message string, code int)
 	Result(c, data, message, code)
 }
 
+// FailWithStatusMessage 返回失败响应，并显式指定 HTTP 状态码与消息。
+func FailWithStatusMessage(c *gin.Context, data interface{}, message string, code int, httpStatus int) {
+	ResultWithStatus(c, data, message, code, httpStatus)
+}
+
 // SystemError 返回系统错误响应(500)
 // 已废弃：建议直接使用 Fail 函数，会自动根据 code 判断返回 200 还是 500
 func SystemError(c *gin.Context, code int) {
 	Result(c, nil, "", code)
+}
+
+func resolveHTTPStatus(code int) int {
+	if code >= 30000 && code < 40000 {
+		return http.StatusInternalServerError
+	}
+	return http.StatusOK
 }

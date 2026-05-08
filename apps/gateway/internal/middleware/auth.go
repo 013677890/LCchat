@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/gin-gonic/gin"
@@ -18,10 +20,7 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			// 客户端请求错误,属于正常业务流程,不记录日志
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "未提供认证信息",
-			})
+			result.FailWithStatusMessage(c, nil, "未提供认证信息", consts.CodeUnauthorized, http.StatusUnauthorized)
 			c.Abort()
 			return
 		}
@@ -30,10 +29,7 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			// 客户端请求格式错误,属于正常业务流程,不记录日志
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "认证格式错误",
-			})
+			result.FailWithStatusMessage(c, nil, "认证格式错误", consts.CodeUnauthorized, http.StatusUnauthorized)
 			c.Abort()
 			return
 		}
@@ -44,10 +40,7 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		claims, err := util.ParseToken(tokenString)
 		if err != nil {
 			// Token 无效或过期,属于正常业务流程,不记录日志
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "Token 无效或已过期",
-			})
+			result.FailWithStatusMessage(c, nil, "Token 无效或已过期", consts.CodeInvalidToken, http.StatusUnauthorized)
 			c.Abort()
 			return
 		}

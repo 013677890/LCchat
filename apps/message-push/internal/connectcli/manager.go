@@ -9,7 +9,6 @@ import (
 	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // ClientManager 管理按地址复用的 connect gRPC client。
@@ -37,13 +36,13 @@ func (m *ClientManager) Get(addr string) (connectpb.ConnectServiceClient, error)
 
 	// 首次访问某个 connect 地址时才建立连接。
 	// 建好后放入缓存，后续相同地址的推送请求直接复用。
-	conn, err := grpc.NewClient(
-		addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithChainUnaryInterceptor(
-			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
-		),
-	)
+	// 这条连接只调用 connect.ConnectService，
+	// 因此 service config、timeout 与日志策略都可以直接复用统一 builder。
+	conn, err := grpcx.NewClient(grpcx.ClientOptions{
+		Address: string(addr),
+		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
+		Retry:   grpcx.DefaultClientRetryConfig("connect.ConnectService"),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("创建 connect gRPC 连接失败: %w", err)
 	}

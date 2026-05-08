@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"context"
 	"strconv"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -111,6 +113,9 @@ func PrometheusMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.FullPath()
+		if path == "" {
+			path = c.Request.URL.Path
+		}
 		method := c.Request.Method
 
 		// 记录当前正在处理的请求数 (+1)
@@ -120,46 +125,51 @@ func PrometheusMiddleware() gin.HandlerFunc {
 			httpRequestsInProgress.WithLabelValues(method).Dec()
 		}()
 
-	// 处理请求
-	c.Next()
+		// 处理请求
+		c.Next()
 
-	// 请求完成后，计算耗时
-	duration := time.Since(start).Seconds()
-	status := strconv.Itoa(c.Writer.Status())
+		// 请求完成后，计算耗时
+		duration := time.Since(start).Seconds()
+		status := strconv.Itoa(c.Writer.Status())
 
-	// 获取请求和响应大小
-	requestSize := float64(c.Request.ContentLength)
-	responseSize := float64(c.Writer.Size())
+		// 获取请求和响应大小
+		requestSize := float64(c.Request.ContentLength)
+		responseSize := float64(c.Writer.Size())
 
-	// 获取业务状态码（从响应封装中设置的值）
-	businessCode := int32(-1)
-	if code, exists := c.Get("business_code"); exists {
-		if codeInt32, ok := code.(int32); ok {
-			businessCode = codeInt32
+		// 获取业务状态码（从响应封装中设置的值）
+		businessCode := -1
+		if code, exists := c.Get("business_code"); exists {
+			switch v := code.(type) {
+			case int:
+				businessCode = v
+			case int32:
+				businessCode = int(v)
+			case int64:
+				businessCode = int(v)
+			}
 		}
-	}
 
-	// 记录指标
-	// 1. 请求总数 +1（按 HTTP 状态码统计）
-	httpRequestsTotal.WithLabelValues(method, path, status).Inc()
+		// 记录指标
+		// 1. 请求总数 +1（按 HTTP 状态码统计）
+		httpRequestsTotal.WithLabelValues(method, path, status).Inc()
 
-	// 2. 业务状态码统计（如果存在）
-	if businessCode >= 0 {
-		httpBusinessCodeTotal.WithLabelValues(method, path, strconv.Itoa(int(businessCode))).Inc()
-	}
+		// 2. 业务状态码统计（如果存在）
+		if businessCode >= 0 {
+			httpBusinessCodeTotal.WithLabelValues(method, path, strconv.Itoa(businessCode)).Inc()
+		}
 
-	// 3. 记录耗时
-	httpRequestDuration.WithLabelValues(method, path).Observe(duration)
+		// 3. 记录耗时
+		httpRequestDuration.WithLabelValues(method, path).Observe(duration)
 
-	// 4. 记录请求大小（如果有）
-	if requestSize > 0 {
-		httpRequestSize.WithLabelValues(method, path).Observe(requestSize)
-	}
+		// 4. 记录请求大小（如果有）
+		if requestSize > 0 {
+			httpRequestSize.WithLabelValues(method, path).Observe(requestSize)
+		}
 
-	// 5. 记录响应大小（如果有）
-	if responseSize > 0 {
-		httpResponseSize.WithLabelValues(method, path).Observe(responseSize)
-	}
+		// 5. 记录响应大小（如果有）
+		if responseSize > 0 {
+			httpResponseSize.WithLabelValues(method, path).Observe(responseSize)
+		}
 	}
 }
 
@@ -173,6 +183,14 @@ func RecordGRPCRequest(service, method string, duration float64, err error) {
 
 	gRPCRequestsTotal.WithLabelValues(service, method, status).Inc()
 	gRPCRequestDuration.WithLabelValues(service, method).Observe(duration)
+}
+
+// GRPCMetricsObserver 把 gateway 的下游 gRPC 指标采集挂到 grpcx 统一 observer 上。
+// 这样 facade 本身不再负责手动计时与上报，职责边界收敛到建连阶段。
+func GRPCMetricsObserver() grpcx.ClientCallObserver {
+	return func(_ context.Context, result grpcx.ClientCallResult) {
+		RecordGRPCRequest(result.Service, result.Method, result.Cost.Seconds(), result.Err)
+	}
 }
 
 // GetHTTPRequestsTotal 获取 HTTP 请求总数指标（可用于监控面板）

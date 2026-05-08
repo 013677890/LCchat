@@ -148,7 +148,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 		pushEvent := &pb.MsgPushEvent{
 			ReceiverUuid: req.TargetUuid, // 单聊=对端 UUID, 群聊=群 UUID
 			DeviceId:     req.DeviceId,   // 发送方设备 ID（多端同步时排除）
-			Type:         "MSG_PUSH",     // 新消息推送
+			Type:         "MSG_PUSH",    // 新消息推送
 			ConvType:     req.ConvType,   // Push-Job 据此判断扩散策略
 			Data:         msgItemData,    // MsgItem 序列化 bytes
 			FromUuid:     req.FromUuid,   // 多端同步用
@@ -157,13 +157,16 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 			Seq:          msg.Seq,
 		}
 
-		if err := w.producer.Publish(ctx, msg.ConvId, pushEvent); err != nil {
-			logger.Warn(ctx, "发送消息：投递 Kafka 失败（不阻断）",
-				logger.String("conv_id", msg.ConvId),
-				logger.String("msg_id", msg.MsgId),
-				logger.ErrorField("error", err),
-			)
-		}
+		// Kafka 投递是非阻断步骤，异步执行并与主请求 deadline 解耦，避免把已成功落库的发送路径拖成超时失败。
+		async.RunSafe(ctx, func(taskCtx context.Context) {
+			if err := w.producer.Publish(taskCtx, msg.ConvId, pushEvent); err != nil {
+				logger.Warn(taskCtx, "发送消息：投递 Kafka 失败（不阻断）",
+					logger.String("conv_id", msg.ConvId),
+					logger.String("msg_id", msg.MsgId),
+					logger.ErrorField("error", err),
+				)
+			}
+		}, 2*time.Second)
 	}
 
 	// ============================================================

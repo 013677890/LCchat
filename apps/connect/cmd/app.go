@@ -4,41 +4,47 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"time"
 
-	connectgrpc "github.com/013677890/LCchat-Backend/apps/connect/internal/grpc"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
 	connectserver "github.com/013677890/LCchat-Backend/apps/connect/internal/server"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/svc"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
+	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
-	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc"
 )
 
 // ConnectApp 统一管理 connect 服务的运行与资源释放。
 type ConnectApp struct {
-	logger             *zap.Logger
-	httpServer         *connectserver.Server
-	grpcServer         *connectgrpc.Server
-	connManager        *manager.ConnectionManager
-	connectService     *svc.ConnectService
-	authGRPCConn       *googlegrpc.ClientConn
-	deviceActiveConfig config.DeviceActiveConfig
+	logger              *zap.Logger
+	httpServer          *connectserver.Server
+	grpcServer          *grpc.Server
+	grpcListener        net.Listener
+	grpcShutdownTimeout time.Duration
+	connManager         *manager.ConnectionManager
+	connectService      *svc.ConnectService
+	authGRPCConn        *grpc.ClientConn
+	deviceActiveConfig  config.DeviceActiveConfig
 }
 
 // NewConnectApp 只做资源聚合与合法性校验，不在构造阶段启动阻塞逻辑。
 func NewConnectApp(
 	log *zap.Logger,
 	httpServer *connectserver.Server,
-	grpcServer *connectgrpc.Server,
+	built *grpcx.BuiltServer,
+	grpcListener net.Listener,
+	grpcShutdownTimeout connectGRPCShutdownTimeout,
 	connManager *manager.ConnectionManager,
 	connectService *svc.ConnectService,
-	authGRPCConn *googlegrpc.ClientConn,
+	authGRPCConn *grpc.ClientConn,
 	deviceActiveConfig config.DeviceActiveConfig,
 ) (*ConnectApp, error) {
 	if log == nil {
@@ -47,8 +53,11 @@ func NewConnectApp(
 	if httpServer == nil {
 		return nil, errors.New("http server 未初始化")
 	}
-	if grpcServer == nil {
+	if built == nil || built.Server == nil {
 		return nil, errors.New("grpc server 未初始化")
+	}
+	if grpcListener == nil {
+		return nil, errors.New("grpc listener 未初始化")
 	}
 	if connManager == nil {
 		return nil, errors.New("connection manager 未初始化")
@@ -58,13 +67,15 @@ func NewConnectApp(
 	}
 
 	return &ConnectApp{
-		logger:             log,
-		httpServer:         httpServer,
-		grpcServer:         grpcServer,
-		connManager:        connManager,
-		connectService:     connectService,
-		authGRPCConn:       authGRPCConn,
-		deviceActiveConfig: deviceActiveConfig,
+		logger:              log,
+		httpServer:          httpServer,
+		grpcServer:          built.Server,
+		grpcListener:        grpcListener,
+		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
+		connManager:         connManager,
+		connectService:      connectService,
+		authGRPCConn:        authGRPCConn,
+		deviceActiveConfig:  deviceActiveConfig,
 	}, nil
 }
 
@@ -88,8 +99,8 @@ func (a *ConnectApp) Run(ctx context.Context) error {
 	}()
 
 	go func() {
-		logger.Info(ctx, "Connect gRPC 服务启动中", logger.String("addr", a.grpcServer.Addr()))
-		if err := a.grpcServer.Start(); err != nil {
+		logger.Info(ctx, "Connect gRPC 服务启动中", logger.String("addr", a.grpcListener.Addr().String()))
+		if err := grpcx.Run(ctx, a.grpcServer, a.grpcListener); err != nil {
 			errCh <- fmt.Errorf("运行 gRPC 服务失败: %w", err)
 		}
 	}()
@@ -107,7 +118,14 @@ func (a *ConnectApp) Shutdown(ctx context.Context) error {
 	var errs []error
 
 	if a.grpcServer != nil {
-		a.grpcServer.Stop()
+		if err := grpcx.GracefulStop(ctx, a.grpcServer, a.grpcShutdownTimeout); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			errs = append(errs, fmt.Errorf("关闭 gRPC 服务失败: %w", err))
+		}
+	}
+	if a.grpcListener != nil {
+		if err := a.grpcListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, fmt.Errorf("关闭 gRPC 监听器失败: %w", err))
+		}
 	}
 	if a.httpServer != nil {
 		if err := a.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {

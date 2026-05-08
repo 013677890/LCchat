@@ -34,10 +34,20 @@ func initializeConnectApp() (*ConnectApp, error) {
 	connectService := svc.NewConnectService(client, deviceServiceClient)
 	wsHandler := handler.NewWSHandler(connectionManager, connectService)
 	server := provideConnectHTTPServer(wsHandler, connectionManager)
+	grpcServer := provideConnectGRPCHandler(connectionManager)
+	registrationFunc := provideConnectGRPCRegistration(grpcServer)
 	mainConnectGRPCAddress := provideConnectGRPCAddress()
-	grpcServer := provideConnectGRPCServer(mainConnectGRPCAddress, connectionManager)
+	builtServer, err := provideConnectGRPCServer(registrationFunc, mainConnectGRPCAddress)
+	if err != nil {
+		return nil, err
+	}
+	listener, err := provideConnectGRPCListener(mainConnectGRPCAddress)
+	if err != nil {
+		return nil, err
+	}
+	mainConnectGRPCShutdownTimeout := provideConnectGRPCShutdownTimeout()
 	deviceActiveConfig := provideConnectDeviceActiveConfig()
-	connectApp, err := NewConnectApp(logger, server, grpcServer, connectionManager, connectService, clientConn, deviceActiveConfig)
+	connectApp, err := NewConnectApp(logger, server, builtServer, listener, mainConnectGRPCShutdownTimeout, connectionManager, connectService, clientConn, deviceActiveConfig)
 	if err != nil {
 		return nil, err
 	}

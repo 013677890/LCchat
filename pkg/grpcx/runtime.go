@@ -14,14 +14,45 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+// ServerOptions 定义 gRPC Server 的启动参数。
+type ServerOptions struct {
+	// Address 监听地址，例如 ":9090"。
+	Address string
+	// Namespace 服务名前缀，用于 Prometheus 指标命名空间。
+	Namespace string
+
+	// RateLimit 限流参数，nil 时使用 DefaultRateLimitConfig()。
+	RateLimit *RateLimitConfig
+	// Logging 日志参数，nil 时使用 DefaultLoggingConfig()。
+	Logging *LoggingConfig
+	// Timeout 请求级兜底 deadline，nil 或 DefaultTimeout<=0 时不启用服务端兜底。
+	Timeout *TimeoutConfig
+	// MetricsConfig 指标参数，nil 时使用 DefaultMetricsConfig() + Namespace。
+	MetricsConfig *MetricsConfig
+
+	// ExtraUnaryInterceptors 业务方自定义的额外 Unary 拦截器，
+	// 追加到内置拦截器链之后。
+	ExtraUnaryInterceptors []grpc.UnaryServerInterceptor
+	// ExtraStreamInterceptors 业务方自定义的额外 Stream 拦截器。
+	ExtraStreamInterceptors []grpc.StreamServerInterceptor
+
+	// MaxRecvMsgSize 最大接收包大小（字节），0 表示不限制。
+	MaxRecvMsgSize int
+	// MaxSendMsgSize 最大发送包大小（字节），0 表示不限制。
+	MaxSendMsgSize int
+	// EnableHealth 是否注册 gRPC 健康检查服务。
+	EnableHealth bool
+	// EnableReflection 是否开启 gRPC 反射（建议仅在开发环境开启）。
+	EnableReflection bool
+}
+
 // RegistrationFunc 负责向 gRPC Server 注册业务服务。
-type RegistrationFunc func(s *grpc.Server, healthServer healthgrpc.HealthServer)
+type RegistrationFunc func(s *grpc.Server)
 
 // BuiltServer 表示已构建但尚未运行的 gRPC 运行时对象。
 type BuiltServer struct {
-	Server       *grpc.Server
-	HealthServer healthgrpc.HealthServer
-	Metrics      *Metrics
+	Server  *grpc.Server
+	Metrics *Metrics
 }
 
 // NewServer 仅负责构建 gRPC Server，不负责监听和阻塞运行。
@@ -88,21 +119,18 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 
 	s := grpc.NewServer(serverOpts...)
 
-	var healthServer healthgrpc.HealthServer
 	if opts.EnableHealth {
-		healthServer = newHealthServer()
-		healthgrpc.RegisterHealthServer(s, healthServer)
+		healthgrpc.RegisterHealthServer(s, newHealthServer())
 	}
 
-	register(s, healthServer)
+	register(s)
 	if opts.EnableReflection {
 		reflection.Register(s)
 	}
 
 	return &BuiltServer{
-		Server:       s,
-		HealthServer: healthServer,
-		Metrics:      metrics,
+		Server:  s,
+		Metrics: metrics,
 	}, nil
 }
 
@@ -172,11 +200,6 @@ func GracefulStop(ctx context.Context, server *grpc.Server, timeout time.Duratio
 		server.Stop()
 		return context.DeadlineExceeded
 	}
-}
-
-// NewHealthServer 保留显式 health server 构造入口，便于 Wire provider 复用。
-func NewHealthServer() healthgrpc.HealthServer {
-	return newHealthServer()
 }
 
 func newHealthServer() healthgrpc.HealthServer {

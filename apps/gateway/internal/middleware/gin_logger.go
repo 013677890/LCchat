@@ -29,7 +29,7 @@ func GinLogger() gin.HandlerFunc {
 		}
 
 		c.Next()
-		if path == "/health" && c.Writer.Status() < 500 {
+		if IsPlatformPath(path) && c.Writer.Status() < 500 {
 			return
 		}
 

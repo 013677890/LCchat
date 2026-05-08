@@ -1,15 +1,16 @@
-package middleware
+package grpcx
 
 import (
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"context"
 
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
-// GRPCMetadataInterceptor 将上下文信息注入 gRPC metadata（用于透传 trace/user/device/ip）
-func GRPCMetadataInterceptor() grpc.UnaryClientInterceptor {
+// MetadataUnaryClientInterceptor 把 trace/user/device/ip 等已知上下文元数据
+// 注入到出站 gRPC metadata，保证跨服务链路能继续读取这些字段。
+func MetadataUnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		md, ok := metadata.FromOutgoingContext(ctx)
 		if !ok {

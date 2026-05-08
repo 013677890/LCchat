@@ -18,8 +18,7 @@ import (
 	"github.com/google/wire"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
-	googlegrpc "google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc"
 )
 
 // messagePushRouteTTL = 路由存活窗口。
@@ -117,21 +116,21 @@ func provideMessagePushUserGRPCAddress() messagePushUserGRPCAddress {
 }
 
 // 群聊扩散依赖 user-service 提供群成员列表，因此该连接是启动必需依赖。
-func provideMessagePushUserGRPCConn(_ *zap.Logger, addr messagePushUserGRPCAddress) (*googlegrpc.ClientConn, error) {
-	conn, err := googlegrpc.NewClient(
-		string(addr),
-		googlegrpc.WithTransportCredentials(insecure.NewCredentials()),
-		googlegrpc.WithChainUnaryInterceptor(
-			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
-		),
-	)
+func provideMessagePushUserGRPCConn(_ *zap.Logger, addr messagePushUserGRPCAddress) (*grpc.ClientConn, error) {
+	// message-push 访问 user-service 只会命中 GroupService，
+	// 因此把重试范围收敛到这一组 service，避免配置面无谓扩大。
+	conn, err := grpcx.NewClient(grpcx.ClientOptions{
+		Address: string(addr),
+		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
+		Retry:   grpcx.DefaultClientRetryConfig("user.GroupService"),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("message-push 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
 	}
 	return conn, nil
 }
 
-func provideGroupClient(conn *googlegrpc.ClientConn) *groupcli.Client {
+func provideGroupClient(conn *grpc.ClientConn) *groupcli.Client {
 	return groupcli.NewClient(conn)
 }
 

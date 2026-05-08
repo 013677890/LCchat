@@ -1,15 +1,17 @@
 package middleware
 
 import (
-	"github.com/013677890/LCchat-Backend/consts/redisKey"
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"context"
 	"errors"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -256,6 +258,10 @@ func InitRedisRateLimiter(rate float64, burst int, redisClient *redis.Client) {
 func IPRateLimitMiddleware(blacklistKey string, rate float64, burst int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c
+		if ShouldBypassGlobalGuards(c) {
+			c.Next()
+			return
+		}
 
 		// 1. 获取客户端 IP
 		ip, exists := GetClientIPSafe(c)
@@ -281,10 +287,7 @@ func IPRateLimitMiddleware(blacklistKey string, rate float64, burst int) gin.Han
 				logger.String("method", c.Request.Method),
 			)
 
-			c.JSON(http.StatusForbidden, gin.H{
-				"code":    403,
-				"message": "访问被禁止，请联系管理员",
-			})
+			result.FailWithStatusMessage(c, nil, "访问被禁止，请联系管理员", consts.CodePermissionDeny, http.StatusForbidden)
 			c.Abort()
 			return
 		}
@@ -321,10 +324,7 @@ func IPRateLimitMiddleware(blacklistKey string, rate float64, burst int) gin.Han
 				logger.String("method", c.Request.Method),
 			)
 
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code":    10005,
-				"message": "请求过于频繁，请稍后再试",
-			})
+			result.FailWithStatusMessage(c, nil, "请求过于频繁，请稍后再试", consts.CodeTooManyRequests, http.StatusTooManyRequests)
 			c.Abort()
 			return
 		}
@@ -394,10 +394,7 @@ func UserRateLimitMiddleware(rate float64, burst int) gin.HandlerFunc {
 				logger.String("method", c.Request.Method),
 			)
 
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code":    10005,
-				"message": "请求过于频繁，请稍后再试",
-			})
+			result.FailWithStatusMessage(c, nil, "请求过于频繁，请稍后再试", consts.CodeTooManyRequests, http.StatusTooManyRequests)
 			c.Abort()
 			return
 		}
@@ -465,10 +462,7 @@ func UserRateLimitMiddlewareWithConfig(rate float64, burst int) gin.HandlerFunc 
 				logger.String("method", c.Request.Method),
 			)
 
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code":    10005,
-				"message": "请求过于频繁，请稍后再试",
-			})
+			result.FailWithStatusMessage(c, nil, "请求过于频繁，请稍后再试", consts.CodeTooManyRequests, http.StatusTooManyRequests)
 			c.Abort()
 			return
 		}
@@ -499,6 +493,10 @@ func IPRateLimitMiddlewareWithConfig(blacklistKey string, rate float64, burst in
 
 	return func(c *gin.Context) {
 		ctx := c
+		if ShouldBypassGlobalGuards(c) {
+			c.Next()
+			return
+		}
 
 		// 懒加载 Redis Client，只执行一次
 		once.Do(func() {
@@ -531,10 +529,7 @@ func IPRateLimitMiddlewareWithConfig(blacklistKey string, rate float64, burst in
 				logger.String("method", c.Request.Method),
 			)
 
-			c.JSON(http.StatusForbidden, gin.H{
-				"code":    403,
-				"message": "访问被禁止，请联系管理员",
-			})
+			result.FailWithStatusMessage(c, nil, "访问被禁止，请联系管理员", consts.CodePermissionDeny, http.StatusForbidden)
 			c.Abort()
 			return
 		}
@@ -563,10 +558,7 @@ func IPRateLimitMiddlewareWithConfig(blacklistKey string, rate float64, burst in
 				logger.String("method", c.Request.Method),
 			)
 
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code":    10005,
-				"message": "请求过于频繁，请稍后再试",
-			})
+			result.FailWithStatusMessage(c, nil, "请求过于频繁，请稍后再试", consts.CodeTooManyRequests, http.StatusTooManyRequests)
 			c.Abort()
 			return
 		}

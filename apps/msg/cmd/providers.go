@@ -27,8 +27,6 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	"gorm.io/gorm"
 )
 
@@ -41,7 +39,10 @@ type msgRelationGRPCConn struct{ *grpc.ClientConn }
 type msgAsyncReleaseTimeout time.Duration
 type msgGRPCShutdownTimeout time.Duration
 
-const msgGRPCDefaultTimeout = 500 * time.Millisecond
+const (
+	msgGRPCDefaultTimeout = 500 * time.Millisecond
+	msgSendMessageTimeout = 900 * time.Millisecond
+)
 
 func provideLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideAsyncConfig() config.AsyncConfig   { return config.DefaultAsyncConfig() }
@@ -91,13 +92,13 @@ func provideMsgRelationGRPCAddress() msgRelationGRPCAddress {
 }
 
 func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (msgUserGRPCConn, error) {
-	conn, err := grpc.NewClient(
-		string(addr),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithChainUnaryInterceptor(
-			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
-		),
-	)
+	// msg 访问 user-service 只会落到 GroupService，
+	// 因此重试策略也只声明这一组实际会调用的方法，避免把无关 service 塞进同一份配置。
+	conn, err := grpcx.NewClient(grpcx.ClientOptions{
+		Address: string(addr),
+		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
+		Retry:   grpcx.DefaultClientRetryConfig("user.GroupService"),
+	})
 	if err != nil {
 		return msgUserGRPCConn{}, fmt.Errorf("msg 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
 	}
@@ -105,13 +106,16 @@ func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (msgUserGRPC
 }
 
 func provideMsgRelationGRPCConn(_ *zap.Logger, addr msgRelationGRPCAddress) (msgRelationGRPCConn, error) {
-	conn, err := grpc.NewClient(
-		string(addr),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithChainUnaryInterceptor(
-			grpcx.ClientTimeoutUnaryInterceptor(grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()}),
+	// relation 侧只会校验好友与黑名单，
+	// 这里显式列出两个 service，保证重试配置与实际调用面完全一致。
+	conn, err := grpcx.NewClient(grpcx.ClientOptions{
+		Address: string(addr),
+		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
+		Retry: grpcx.DefaultClientRetryConfig(
+			"relation.FriendService",
+			"relation.BlacklistService",
 		),
-	)
+	})
 	if err != nil {
 		return msgRelationGRPCConn{}, fmt.Errorf("msg 创建 relation-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
 	}
@@ -121,7 +125,7 @@ func provideMsgRelationGRPCConn(_ *zap.Logger, addr msgRelationGRPCAddress) (msg
 func provideMsgGroupClient(conn msgUserGRPCConn) *groupcli.Client {
 	return groupcli.NewClient(conn.ClientConn)
 }
-func provideMsgPermissionChecker(relationConn msgRelationGRPCConn, userConn msgUserGRPCConn) *usercli.PermissionChecker {
+func provideMsgPermissionChecker(relationConn msgRelationGRPCConn, userConn msgUserGRPCConn) usecase.PermissionChecker {
 	return usercli.NewPermissionChecker(relationConn.ClientConn, userConn.ClientConn)
 }
 
@@ -154,23 +158,21 @@ func provideGRPCShutdownTimeout() msgGRPCShutdownTimeout {
 }
 
 func provideMsgRegistration(msgHandler *handler.MsgHandler) grpcx.RegistrationFunc {
-	return func(s *grpc.Server, hs healthgrpc.HealthServer) {
+	return func(s *grpc.Server) {
 		msgpb.RegisterMsgServiceServer(s, msgHandler)
-		if hs != nil {
-			if setter, ok := hs.(interface {
-				SetServingStatus(service string, status healthgrpc.HealthCheckResponse_ServingStatus)
-			}); ok {
-				setter.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)
-			}
-		}
 	}
 }
 
 func provideMsgGRPCServer(register grpcx.RegistrationFunc, addr grpcAddress) (*grpcx.BuiltServer, error) {
 	opts := grpcx.ServerOptions{
-		Address:          string(addr),
-		Namespace:        "msg",
-		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: msgGRPCDefaultTimeout},
+		Address:   string(addr),
+		Namespace: "msg",
+		Timeout: &grpcx.TimeoutConfig{
+			DefaultTimeout: msgGRPCDefaultTimeout,
+			MethodTimeouts: map[string]time.Duration{
+				"/msg.MsgService/SendMessage": msgSendMessageTimeout,
+			},
+		},
 		EnableHealth:     true,
 		EnableReflection: true,
 	}
@@ -182,9 +184,7 @@ func provideMsgGRPCListener(addr grpcAddress) (net.Listener, error) {
 }
 
 func provideMetricsServer(addr metricsAddress, built *grpcx.BuiltServer) *http.Server {
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("/metrics", built.Metrics.Handler())
-	return &http.Server{Addr: string(addr), Handler: metricsMux}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
 }
 
 var _ = conversation.NewRepository

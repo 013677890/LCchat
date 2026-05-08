@@ -10,6 +10,7 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/async"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -97,12 +98,14 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 			Seq:          0,
 		}
 
-		if err := w.producer.Publish(ctx, req.ConvId, selfSyncEvent); err != nil {
-			logger.Warn(ctx, "标记已读：投递 Kafka（self-sync）失败（不阻断）",
-				logger.String("conv_id", req.ConvId),
-				logger.ErrorField("error", err),
-			)
-		}
+		async.RunSafe(ctx, func(taskCtx context.Context) {
+			if err := w.producer.Publish(taskCtx, req.ConvId, selfSyncEvent); err != nil {
+				logger.Warn(taskCtx, "标记已读：投递 Kafka（self-sync）失败（不阻断）",
+					logger.String("conv_id", req.ConvId),
+					logger.ErrorField("error", err),
+				)
+			}
+		}, 2*time.Second)
 
 		// 事件 2：P2P 已读回执 → 通知对端显示"已读"
 		if isP2P {
@@ -118,13 +121,15 @@ func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest)
 					ServerTs:     serverTs,
 					Seq:          0,
 				}
-				if err := w.producer.Publish(ctx, req.ConvId, receiptEvent); err != nil {
-					logger.Warn(ctx, "标记已读：投递 Kafka（read-receipt）失败（不阻断）",
-						logger.String("conv_id", req.ConvId),
-						logger.String("peer_uuid", peerUUID),
-						logger.ErrorField("error", err),
-					)
-				}
+				async.RunSafe(ctx, func(taskCtx context.Context) {
+					if err := w.producer.Publish(taskCtx, req.ConvId, receiptEvent); err != nil {
+						logger.Warn(taskCtx, "标记已读：投递 Kafka（read-receipt）失败（不阻断）",
+							logger.String("conv_id", req.ConvId),
+							logger.String("peer_uuid", peerUUID),
+							logger.ErrorField("error", err),
+						)
+					}
+				}, 2*time.Second)
 			}
 		}
 	}

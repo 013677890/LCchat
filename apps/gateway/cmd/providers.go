@@ -251,9 +251,6 @@ func provideGatewayUserClient(
 	authConn gatewayAuthConn,
 	userConn gatewayUserConn,
 	relationConn gatewayRelationConn,
-	authBreaker gatewayAuthBreaker,
-	userBreaker gatewayUserBreaker,
-	relationBreaker gatewayRelationBreaker,
 ) pb.UserServiceClient {
 	return pb.NewUserServiceClient(
 		authConn.value,
@@ -261,15 +258,12 @@ func provideGatewayUserClient(
 		relationConn.value,
 		relationConn.value,
 		authConn.value,
-		authBreaker.value,
-		userBreaker.value,
-		relationBreaker.value,
 	)
 }
 
 // provideGatewayMsgClient 构造消息服务客户端。
-func provideGatewayMsgClient(conn gatewayMsgConn, breaker gatewayMsgBreaker) pb.MsgServiceClient {
-	return pb.NewMsgServiceClient(conn.value, breaker.value)
+func provideGatewayMsgClient(conn gatewayMsgConn) pb.MsgServiceClient {
+	return pb.NewMsgServiceClient(conn.value)
 }
 
 // provideGatewayRouter 统一设置 Gin 模式并构造路由树。
