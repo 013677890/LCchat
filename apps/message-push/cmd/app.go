@@ -17,16 +17,16 @@ import (
 
 // MessagePushApp 统一管理 message-push 生命周期。
 type MessagePushApp struct {
-	logger       *zap.Logger
-	consumer     *consumer.Consumer
-	redis        *goredis.Client
-	connectCli   *connectcli.ClientManager
-	userGRPCConn *grpc.ClientConn
-	httpServer   *mpserver.Server
+	logger        *zap.Logger
+	consumer      *consumer.Consumer
+	redis         *goredis.Client
+	connectCli    *connectcli.ClientManager
+	groupGRPCConn *grpc.ClientConn
+	httpServer    *mpserver.Server
 }
 
 // NewMessagePushApp 创建 app。
-func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *goredis.Client, connectCli *connectcli.ClientManager, userGRPCConn *grpc.ClientConn, httpServer *mpserver.Server) (*MessagePushApp, error) {
+func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *goredis.Client, connectCli *connectcli.ClientManager, groupGRPCConn *grpc.ClientConn, httpServer *mpserver.Server) (*MessagePushApp, error) {
 	if log == nil {
 		return nil, errors.New("logger 未初始化")
 	}
@@ -36,13 +36,13 @@ func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *gore
 	if connectCli == nil {
 		return nil, errors.New("connect client manager 未初始化")
 	}
-	if userGRPCConn == nil {
-		return nil, errors.New("user-service gRPC 连接未初始化")
+	if groupGRPCConn == nil {
+		return nil, errors.New("group-service gRPC 连接未初始化")
 	}
 	if httpServer == nil {
 		return nil, errors.New("http server 未初始化")
 	}
-	return &MessagePushApp{logger: log, consumer: consumer, redis: redis, connectCli: connectCli, userGRPCConn: userGRPCConn, httpServer: httpServer}, nil
+	return &MessagePushApp{logger: log, consumer: consumer, redis: redis, connectCli: connectCli, groupGRPCConn: groupGRPCConn, httpServer: httpServer}, nil
 }
 
 // Run 启动服务。
@@ -94,9 +94,9 @@ func (a *MessagePushApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
-	if a.userGRPCConn != nil {
-		if err := a.userGRPCConn.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("关闭 user-service gRPC 连接失败: %w", err))
+	if a.groupGRPCConn != nil {
+		if err := a.groupGRPCConn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 group-service gRPC 连接失败: %w", err))
 		}
 	}
 	if a.redis != nil {

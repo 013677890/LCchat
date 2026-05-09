@@ -32,9 +32,9 @@ import (
 
 type msgGRPCAddress string
 type msgMetricsAddress string
-type msgUserGRPCAddress string
+type msgGroupGRPCAddress string
 type msgRelationGRPCAddress string
-type msgUserGRPCConn struct{ *grpc.ClientConn }
+type msgGroupGRPCConn struct{ *grpc.ClientConn }
 type msgRelationGRPCConn struct{ *grpc.ClientConn }
 type msgAsyncReleaseTimeout time.Duration
 type msgGRPCShutdownTimeout time.Duration
@@ -57,30 +57,39 @@ func provideRedisConfig() config.RedisConfig {
 
 func provideKafkaConfig() config.KafkaConfig                     { return config.DefaultKafkaConfig() }
 func provideLogger(cfg config.LoggerConfig) (*zap.Logger, error) { return logger.Build(cfg) }
+
 func provideAsyncPool(_ *zap.Logger, cfg config.AsyncConfig) (*ants.Pool, error) {
 	return async.Build(cfg)
 }
+
 func provideAsyncReleaseTimeout(cfg config.AsyncConfig) msgAsyncReleaseTimeout {
 	return msgAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
-func provideMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) { return mysql.Build(cfg) }
+
+func provideMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
+	return mysql.Build(cfg)
+}
+
 func provideRedisClient(_ *zap.Logger, cfg config.RedisConfig) (*goredis.Client, error) {
 	return pkgredis.Build(cfg)
 }
+
 func provideKafkaProducer(cfg config.KafkaConfig) *kafka.Producer {
 	return kafka.NewProducer(cfg.Brokers, cfg.MsgPushTopic)
 }
+
 func provideMsgProducer(cfg config.KafkaConfig, producer *kafka.Producer) *mq.Producer {
 	return mq.NewProducer(producer, cfg.MsgPushTopic)
 }
+
 func provideMsgConfig() message.Config { return message.DefaultConfig() }
 
-func provideMsgUserGRPCAddress() msgUserGRPCAddress {
-	addr := os.Getenv("USER_GRPC_ADDR")
+func provideMsgGroupGRPCAddress() msgGroupGRPCAddress {
+	addr := os.Getenv("GROUP_GRPC_ADDR")
 	if addr == "" {
-		addr = ":9094"
+		addr = ":9095"
 	}
-	return msgUserGRPCAddress(addr)
+	return msgGroupGRPCAddress(addr)
 }
 
 func provideMsgRelationGRPCAddress() msgRelationGRPCAddress {
@@ -91,18 +100,18 @@ func provideMsgRelationGRPCAddress() msgRelationGRPCAddress {
 	return msgRelationGRPCAddress(addr)
 }
 
-func provideMsgUserGRPCConn(_ *zap.Logger, addr msgUserGRPCAddress) (msgUserGRPCConn, error) {
-	// msg 访问 user-service 只会落到 GroupService，
+func provideMsgGroupGRPCConn(_ *zap.Logger, addr msgGroupGRPCAddress) (msgGroupGRPCConn, error) {
+	// msg 访问 group-service 当前只会命中 GroupService，
 	// 因此重试策略也只声明这一组实际会调用的方法，避免把无关 service 塞进同一份配置。
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
-		Retry:   grpcx.DefaultClientRetryConfig("user.GroupService"),
+		Retry:   grpcx.DefaultClientRetryConfig("group.GroupService"),
 	})
 	if err != nil {
-		return msgUserGRPCConn{}, fmt.Errorf("msg 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
+		return msgGroupGRPCConn{}, fmt.Errorf("msg 创建 group-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
 	}
-	return msgUserGRPCConn{ClientConn: conn}, nil
+	return msgGroupGRPCConn{ClientConn: conn}, nil
 }
 
 func provideMsgRelationGRPCConn(_ *zap.Logger, addr msgRelationGRPCAddress) (msgRelationGRPCConn, error) {
@@ -122,11 +131,12 @@ func provideMsgRelationGRPCConn(_ *zap.Logger, addr msgRelationGRPCAddress) (msg
 	return msgRelationGRPCConn{ClientConn: conn}, nil
 }
 
-func provideMsgGroupClient(conn msgUserGRPCConn) *groupcli.Client {
+func provideMsgGroupClient(conn msgGroupGRPCConn) *groupcli.Client {
 	return groupcli.NewClient(conn.ClientConn)
 }
-func provideMsgPermissionChecker(relationConn msgRelationGRPCConn, userConn msgUserGRPCConn) usecase.PermissionChecker {
-	return usercli.NewPermissionChecker(relationConn.ClientConn, userConn.ClientConn)
+
+func provideMsgPermissionChecker(relationConn msgRelationGRPCConn, groupConn msgGroupGRPCConn) usecase.PermissionChecker {
+	return usercli.NewPermissionChecker(relationConn.ClientConn, groupConn.ClientConn)
 }
 
 func provideMsgService(repo message.Repository, cfg message.Config, gc *groupcli.Client) *message.Service {
@@ -204,9 +214,9 @@ var msgInfraProviderSet = wire.NewSet(
 	provideKafkaProducer,
 	provideMsgProducer,
 	provideMsgConfig,
-	provideMsgUserGRPCAddress,
+	provideMsgGroupGRPCAddress,
 	provideMsgRelationGRPCAddress,
-	provideMsgUserGRPCConn,
+	provideMsgGroupGRPCConn,
 	provideMsgRelationGRPCConn,
 	provideMsgGroupClient,
 	provideMsgPermissionChecker,

@@ -28,8 +28,8 @@ func initializeMessagePushApp() (*MessagePushApp, error) {
 	clientManager := provideConnectClientManager()
 	mainMessagePushConnectUserTimeout := provideMessagePushConnectUserTimeout()
 	sender := provideConnectSender(clientManager, mainMessagePushConnectUserTimeout)
-	mainMessagePushUserGRPCAddress := provideMessagePushUserGRPCAddress()
-	clientConn, err := provideMessagePushUserGRPCConn(logger, mainMessagePushUserGRPCAddress)
+	mainMessagePushGroupGRPCAddress := provideMessagePushGroupGRPCAddress()
+	clientConn, err := provideMessagePushGroupGRPCConn(logger, mainMessagePushGroupGRPCAddress)
 	if err != nil {
 		return nil, err
 	}

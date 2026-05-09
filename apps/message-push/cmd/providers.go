@@ -29,7 +29,7 @@ type messagePushRouteTTL time.Duration
 // 用于限制 message-push 调用 connect 节点时的最长等待时间。
 type messagePushConnectUserTimeout time.Duration
 
-type messagePushUserGRPCAddress string
+type messagePushGroupGRPCAddress string
 
 // provideMessagePushLoggerConfig 提供 message-push 专用日志配置。
 func provideMessagePushLoggerConfig() config.LoggerConfig {
@@ -70,10 +70,12 @@ func provideMessagePushGroupID() string {
 // 环境变量单位为秒。
 func provideMessagePushRouteTTL() messagePushRouteTTL {
 	const defaultTTL = 180 * time.Second
+
 	v := os.Getenv("MESSAGE_PUSH_ROUTE_TTL_SECONDS")
 	if v == "" {
 		return messagePushRouteTTL(defaultTTL)
 	}
+
 	d, err := time.ParseDuration(v + "s")
 	if err != nil {
 		// 环境变量格式非法时静默回退会掩盖配置错误，这里显式告警以便运维发现。
@@ -91,10 +93,12 @@ func provideMessagePushRouteTTL() messagePushRouteTTL {
 // 环境变量单位为毫秒。
 func provideMessagePushConnectUserTimeout() messagePushConnectUserTimeout {
 	const defaultTimeout = 150 * time.Millisecond
+
 	v := os.Getenv("MESSAGE_PUSH_CONNECT_TIMEOUT_USER_MS")
 	if v == "" {
 		return messagePushConnectUserTimeout(defaultTimeout)
 	}
+
 	d, err := time.ParseDuration(v + "ms")
 	if err != nil {
 		logger.Warn(context.Background(), "message-push MESSAGE_PUSH_CONNECT_TIMEOUT_USER_MS 解析失败，使用默认值",
@@ -107,25 +111,25 @@ func provideMessagePushConnectUserTimeout() messagePushConnectUserTimeout {
 	return messagePushConnectUserTimeout(d)
 }
 
-func provideMessagePushUserGRPCAddress() messagePushUserGRPCAddress {
-	addr := os.Getenv("USER_GRPC_ADDR")
+func provideMessagePushGroupGRPCAddress() messagePushGroupGRPCAddress {
+	addr := os.Getenv("GROUP_GRPC_ADDR")
 	if addr == "" {
-		addr = ":9094"
+		addr = ":9095"
 	}
-	return messagePushUserGRPCAddress(addr)
+	return messagePushGroupGRPCAddress(addr)
 }
 
-// 群聊扩散依赖 user-service 提供群成员列表，因此该连接是启动必需依赖。
-func provideMessagePushUserGRPCConn(_ *zap.Logger, addr messagePushUserGRPCAddress) (*grpc.ClientConn, error) {
-	// message-push 访问 user-service 只会命中 GroupService，
+// 群聊扩散依赖 group-service 提供群成员列表，因此该连接是启动必需依赖。
+func provideMessagePushGroupGRPCConn(_ *zap.Logger, addr messagePushGroupGRPCAddress) (*grpc.ClientConn, error) {
+	// message-push 访问 group-service 只会命中 GroupService，
 	// 因此把重试范围收敛到这一组 service，避免配置面无谓扩大。
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
-		Retry:   grpcx.DefaultClientRetryConfig("user.GroupService"),
+		Retry:   grpcx.DefaultClientRetryConfig("group.GroupService"),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("message-push 创建 user-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
+		return nil, fmt.Errorf("message-push 创建 group-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
 	}
 	return conn, nil
 }
@@ -152,7 +156,7 @@ func provideConnectSender(manager *connectcli.ClientManager, timeout messagePush
 }
 
 // provideEventHandler 创建 Kafka 事件处理器。
-// 它负责把 MsgPushEvent 解释为“查路由 / 查群成员 → 调 connect 推送”的执行流程。
+// 它负责把 MsgPushEvent 解释为“查路由 / 查群成员 -> 调 connect 推送”的执行流程。
 func provideEventHandler(routes *route.RedisRepository, sender *connectcli.Sender, groups *groupcli.Client) *consumer.EventHandler {
 	return consumer.NewEventHandler(routes, sender, groups)
 }
@@ -182,8 +186,8 @@ var messagePushProviderSet = wire.NewSet(
 	provideMessagePushGroupID,
 	provideMessagePushRouteTTL,
 	provideMessagePushConnectUserTimeout,
-	provideMessagePushUserGRPCAddress,
-	provideMessagePushUserGRPCConn,
+	provideMessagePushGroupGRPCAddress,
+	provideMessagePushGroupGRPCConn,
 	provideGroupClient,
 	provideMessagePushHTTPConfig,
 	provideMessagePushHTTPServer,

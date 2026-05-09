@@ -4,24 +4,24 @@ import (
 	"context"
 	"fmt"
 
+	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"google.golang.org/grpc"
 )
 
-// Client 通过 user-service gRPC 查询群成员角色，实现 message.GroupRoleQuerier。
+// Client 通过 group-service gRPC 查询群成员与角色，实现 message.GroupRoleQuerier。
 type Client struct {
-	groupClient userpb.GroupServiceClient
+	groupClient grouppb.GroupServiceClient
 }
 
 var _ msgsvc.GroupRoleQuerier = (*Client)(nil)
 
-// NewClient 创建群组客户端。conn 为指向 user-service 的 gRPC 连接。
+// NewClient 创建群组客户端。conn 为指向 group-service 的 gRPC 连接。
 func NewClient(conn *grpc.ClientConn) *Client {
 	if conn == nil {
 		return nil
 	}
-	return &Client{groupClient: userpb.NewGroupServiceClient(conn)}
+	return &Client{groupClient: grouppb.NewGroupServiceClient(conn)}
 }
 
 // QueryMemberRole 返回 userUUID 在 groupUUID 中的角色。
@@ -30,9 +30,9 @@ func (c *Client) QueryMemberRole(ctx context.Context, groupUUID, userUUID string
 	if c == nil || c.groupClient == nil {
 		return -1, fmt.Errorf("group service client 未初始化")
 	}
-	resp, err := c.groupClient.GetGroupMembers(ctx, &userpb.GetGroupMembersRequest{GroupUuid: groupUUID})
+	resp, err := c.groupClient.GetMemberList(ctx, &grouppb.GetMemberListRequest{GroupUuid: groupUUID})
 	if err != nil {
-		return -1, fmt.Errorf("调用 GroupService.GetGroupMembers 失败: %w", err)
+		return -1, fmt.Errorf("调用 GroupService.GetMemberList 失败: %w", err)
 	}
 	for _, m := range resp.GetMembers() {
 		if m != nil && m.UserUuid == userUUID {
@@ -47,15 +47,21 @@ func (c *Client) GetGroupMemberUUIDs(ctx context.Context, groupUUID string) ([]s
 	if c == nil || c.groupClient == nil {
 		return nil, fmt.Errorf("group service client 未初始化")
 	}
-	resp, err := c.groupClient.GetGroupMembers(ctx, &userpb.GetGroupMembersRequest{GroupUuid: groupUUID})
+	resp, err := c.groupClient.GetGroupMemberIds(ctx, &grouppb.GetGroupMemberIdsRequest{GroupUuid: groupUUID})
 	if err != nil {
-		return nil, fmt.Errorf("调用 GroupService.GetGroupMembers 失败: %w", err)
+		return nil, fmt.Errorf("调用 GroupService.GetGroupMemberIds 失败: %w", err)
 	}
-	uuids := make([]string, 0, len(resp.GetMembers()))
-	for _, m := range resp.GetMembers() {
-		if m != nil && m.UserUuid != "" {
-			uuids = append(uuids, m.UserUuid)
+	uuids := make([]string, 0, len(resp.GetUserUuids()))
+	seen := make(map[string]struct{}, len(resp.GetUserUuids()))
+	for _, userUUID := range resp.GetUserUuids() {
+		if userUUID == "" {
+			continue
 		}
+		if _, exists := seen[userUUID]; exists {
+			continue
+		}
+		seen[userUUID] = struct{}{}
+		uuids = append(uuids, userUUID)
 	}
 	return uuids, nil
 }

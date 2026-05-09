@@ -266,6 +266,37 @@ services:
       start_period: 20s
     networks:
       - chat-network
+  group:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    working_dir: /app/apps/group
+    command: ["go", "run", "./cmd"]
+    env_file:
+      - ./deploy/env/chatserver.env
+    environment:
+      TZ: ${TZ:-UTC}
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      GROUP_GRPC_ADDR: ":9095"
+      GROUP_METRICS_ADDR: ":9195"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${GROUP_GRPC_PORT:-19095}:9095"
+      - "${GROUP_METRICS_PORT:-19195}:9195"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9195/metrics >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - chat-network
   msg:
     build:
       context: .
@@ -281,7 +312,7 @@ services:
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_MSG_PUSH_TOPIC: msg.push
-      USER_GRPC_ADDR: "user:9094"
+      GROUP_GRPC_ADDR: "group:9095"
       RELATION_GRPC_ADDR: "relation:9093"
       MSG_GRPC_ADDR: ":9092"
       MSG_METRICS_ADDR: ":9192"
@@ -291,6 +322,8 @@ services:
       redis:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      group:
         condition: service_healthy
     ports:
       - "${MSG_GRPC_PORT:-19092}:9092"
@@ -392,10 +425,10 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_MSG_PUSH_TOPIC: msg.push
       KAFKA_MSG_PUSH_GROUP_ID: message-push-consumer-group
-      USER_GRPC_ADDR: user:9094
+      GROUP_GRPC_ADDR: group:9095
       MESSAGE_PUSH_HTTP_ADDR: ":8084"
     depends_on:
-      user:
+      group:
         condition: service_healthy
       connect:
         condition: service_healthy

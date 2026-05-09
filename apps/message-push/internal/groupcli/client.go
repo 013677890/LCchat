@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
+	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"google.golang.org/grpc"
 )
 
-// Client 封装群组成员查询 gRPC 调用。
+// Client 封装 group-service 的群成员查询 gRPC 调用。
 type Client struct {
-	groupClient userpb.GroupServiceClient
+	groupClient grouppb.GroupServiceClient
 }
 
 // NewClient 创建群组客户端。
@@ -18,7 +18,7 @@ func NewClient(conn *grpc.ClientConn) *Client {
 	if conn == nil {
 		return nil
 	}
-	return &Client{groupClient: userpb.NewGroupServiceClient(conn)}
+	return &Client{groupClient: grouppb.NewGroupServiceClient(conn)}
 }
 
 // GetGroupMembers 获取群组成员 UUID 列表。
@@ -26,24 +26,24 @@ func (c *Client) GetGroupMembers(ctx context.Context, groupUUID string) ([]strin
 	if c == nil || c.groupClient == nil {
 		return nil, fmt.Errorf("group service client 未初始化")
 	}
-	resp, err := c.groupClient.GetGroupMembers(ctx, &userpb.GetGroupMembersRequest{GroupUuid: groupUUID})
+	resp, err := c.groupClient.GetGroupMemberIds(ctx, &grouppb.GetGroupMemberIdsRequest{GroupUuid: groupUUID})
 	if err != nil {
-		return nil, fmt.Errorf("调用 user GroupService.GetGroupMembers 失败: %w", err)
+		return nil, fmt.Errorf("调用 group GroupService.GetGroupMemberIds 失败: %w", err)
 	}
-	if resp == nil || len(resp.Members) == 0 {
+	if resp == nil || len(resp.GetUserUuids()) == 0 {
 		return []string{}, nil
 	}
-	userUUIDs := make([]string, 0, len(resp.Members))
-	seen := make(map[string]struct{}, len(resp.Members))
-	for _, member := range resp.Members {
-		if member == nil || member.UserUuid == "" {
+	userUUIDs := make([]string, 0, len(resp.GetUserUuids()))
+	seen := make(map[string]struct{}, len(resp.GetUserUuids()))
+	for _, userUUID := range resp.GetUserUuids() {
+		if userUUID == "" {
 			continue
 		}
-		if _, exists := seen[member.UserUuid]; exists {
+		if _, exists := seen[userUUID]; exists {
 			continue
 		}
-		seen[member.UserUuid] = struct{}{}
-		userUUIDs = append(userUUIDs, member.UserUuid)
+		seen[userUUID] = struct{}{}
+		userUUIDs = append(userUUIDs, userUUID)
 	}
 	return userUUIDs, nil
 }

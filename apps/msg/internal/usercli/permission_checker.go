@@ -4,27 +4,27 @@ import (
 	"context"
 	"fmt"
 
+	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"google.golang.org/grpc"
 )
 
-// PermissionChecker 通过 relation/user 服务校验消息发送权限。
+// PermissionChecker 通过 relation/group 服务校验消息发送权限。
 //
 // msg-service 只持久化已授权的消息；好友、黑名单、群成员等跨领域规则
-// 通过 gRPC 查询 relation-service 与 user-service，避免 message 领域直接依赖社交/群组表。
+// 通过 gRPC 查询 relation-service 与 group-service，避免 message 领域直接依赖社交/群组表。
 type PermissionChecker struct {
 	friendClient    relationpb.FriendServiceClient
 	blacklistClient relationpb.BlacklistServiceClient
-	groupClient     userpb.GroupServiceClient
+	groupClient     grouppb.GroupServiceClient
 }
 
 // NewPermissionChecker 创建消息发送权限校验器。
-func NewPermissionChecker(relationConn, userConn *grpc.ClientConn) *PermissionChecker {
-	if relationConn == nil && userConn == nil {
+func NewPermissionChecker(relationConn, groupConn *grpc.ClientConn) *PermissionChecker {
+	if relationConn == nil && groupConn == nil {
 		return nil
 	}
 	checker := &PermissionChecker{}
@@ -32,8 +32,8 @@ func NewPermissionChecker(relationConn, userConn *grpc.ClientConn) *PermissionCh
 		checker.friendClient = relationpb.NewFriendServiceClient(relationConn)
 		checker.blacklistClient = relationpb.NewBlacklistServiceClient(relationConn)
 	}
-	if userConn != nil {
-		checker.groupClient = userpb.NewGroupServiceClient(userConn)
+	if groupConn != nil {
+		checker.groupClient = grouppb.NewGroupServiceClient(groupConn)
 	}
 	return checker
 }
@@ -103,12 +103,12 @@ func (c *PermissionChecker) checkGroup(ctx context.Context, fromUUID, groupUUID 
 		return apperr.NewWithMessage(consts.CodeInternalError, "群组权限校验器未初始化")
 	}
 
-	resp, err := c.groupClient.GetGroupMembers(ctx, &userpb.GetGroupMembersRequest{GroupUuid: groupUUID})
+	resp, err := c.groupClient.GetGroupMemberIds(ctx, &grouppb.GetGroupMemberIdsRequest{GroupUuid: groupUUID})
 	if err != nil {
 		return normalizeRemoteError(err, "检查群成员关系失败")
 	}
-	for _, member := range resp.GetMembers() {
-		if member != nil && member.UserUuid == fromUUID {
+	for _, userUUID := range resp.GetUserUuids() {
+		if userUUID == fromUUID {
 			return nil
 		}
 	}

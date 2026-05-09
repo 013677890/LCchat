@@ -34,12 +34,12 @@ func initializeMsgApp() (*MsgApp, error) {
 	}
 	repository := message.NewRepository(db, client)
 	config := provideMsgConfig()
-	mainMsgUserGRPCAddress := provideMsgUserGRPCAddress()
-	mainMsgUserGRPCConn, err := provideMsgUserGRPCConn(logger, mainMsgUserGRPCAddress)
+	mainMsgGroupGRPCAddress := provideMsgGroupGRPCAddress()
+	mainMsgGroupGRPCConn, err := provideMsgGroupGRPCConn(logger, mainMsgGroupGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
-	groupcliClient := provideMsgGroupClient(mainMsgUserGRPCConn)
+	groupcliClient := provideMsgGroupClient(mainMsgGroupGRPCConn)
 	service := provideMsgService(repository, config, groupcliClient)
 	conversationRepository := conversation.NewRepository(db)
 	conversationService := conversation.NewService(conversationRepository)
@@ -51,7 +51,7 @@ func initializeMsgApp() (*MsgApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	permissionChecker := provideMsgPermissionChecker(mainMsgRelationGRPCConn, mainMsgUserGRPCConn)
+	permissionChecker := provideMsgPermissionChecker(mainMsgRelationGRPCConn, mainMsgGroupGRPCConn)
 	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, mqProducer, groupcliClient, permissionChecker)
 	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(service, mqProducer)
 	markReadWorkflow := usecase.NewMarkReadWorkflow(conversationService, mqProducer)
