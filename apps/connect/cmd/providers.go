@@ -74,11 +74,6 @@ func provideConnectGRPCShutdownTimeout() connectGRPCShutdownTimeout {
 	return connectGRPCShutdownTimeout(10 * time.Second)
 }
 
-func connectEnableReflection() bool {
-	ginMode := os.Getenv("GIN_MODE")
-	return ginMode == "" || ginMode == "debug"
-}
-
 func connectInternalMethodWhitelist() map[string][]string {
 	return map[string][]string{
 		"/connect.ConnectService/PushToDevice":     {"message-push"},
@@ -125,8 +120,8 @@ func provideConnectGRPCHandler(connManager *manager.ConnectionManager) *connectg
 	return connectgrpc.NewServer(connManager)
 }
 
-// provideConnectGRPCRegistration 只负责“注册哪些服务”，不负责决定监听与运行方式。
-func provideConnectGRPCRegistration(handler *connectgrpc.Server) grpcx.RegistrationFunc {
+// provideConnectRegistration 只负责“注册哪些服务”，不负责决定监听与运行方式。
+func provideConnectRegistration(handler *connectgrpc.Server) grpcx.RegistrationFunc {
 	return func(s *grpc.Server) {
 		connectpb.RegisterConnectServiceServer(s, handler)
 	}
@@ -146,7 +141,7 @@ func provideConnectGRPCServer(register grpcx.RegistrationFunc, addr connectGRPCA
 		},
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: connectGRPCDefaultTimeout},
 		EnableHealth:     true,
-		EnableReflection: connectEnableReflection(),
+		EnableReflection: grpcx.EnableDevelopmentReflection(),
 		ExtraUnaryInterceptors: []grpc.UnaryServerInterceptor{
 			// connect 的 gRPC 入口只面向内部调用方开放，
 			// 第二波统一后由 grpcx 统一处理 internal-caller 鉴权。
@@ -175,7 +170,7 @@ var connectProviderSet = wire.NewSet(
 	handler.NewWSHandler,
 	provideConnectHTTPServer,
 	provideConnectGRPCHandler,
-	provideConnectGRPCRegistration,
+	provideConnectRegistration,
 	provideConnectGRPCServer,
 	provideConnectGRPCListener,
 	NewConnectApp,

@@ -30,8 +30,8 @@ import (
 	"gorm.io/gorm"
 )
 
-type grpcAddress string
-type metricsAddress string
+type msgGRPCAddress string
+type msgMetricsAddress string
 type msgUserGRPCAddress string
 type msgRelationGRPCAddress string
 type msgUserGRPCConn struct{ *grpc.ClientConn }
@@ -137,23 +137,23 @@ func provideMsgService(repo message.Repository, cfg message.Config, gc *groupcli
 	return svc
 }
 
-func provideGRPCAddress() grpcAddress {
+func provideMsgGRPCAddress() msgGRPCAddress {
 	addr := os.Getenv("MSG_GRPC_ADDR")
 	if addr == "" {
 		addr = ":9092"
 	}
-	return grpcAddress(addr)
+	return msgGRPCAddress(addr)
 }
 
-func provideMetricsAddress() metricsAddress {
+func provideMsgMetricsAddress() msgMetricsAddress {
 	addr := os.Getenv("MSG_METRICS_ADDR")
 	if addr == "" {
 		addr = ":9192"
 	}
-	return metricsAddress(addr)
+	return msgMetricsAddress(addr)
 }
 
-func provideGRPCShutdownTimeout() msgGRPCShutdownTimeout {
+func provideMsgGRPCShutdownTimeout() msgGRPCShutdownTimeout {
 	return msgGRPCShutdownTimeout(10 * time.Second)
 }
 
@@ -163,7 +163,7 @@ func provideMsgRegistration(msgHandler *handler.MsgHandler) grpcx.RegistrationFu
 	}
 }
 
-func provideMsgGRPCServer(register grpcx.RegistrationFunc, addr grpcAddress) (*grpcx.BuiltServer, error) {
+func provideMsgGRPCServer(register grpcx.RegistrationFunc, addr msgGRPCAddress) (*grpcx.BuiltServer, error) {
 	opts := grpcx.ServerOptions{
 		Address:   string(addr),
 		Namespace: "msg",
@@ -174,16 +174,16 @@ func provideMsgGRPCServer(register grpcx.RegistrationFunc, addr grpcAddress) (*g
 			},
 		},
 		EnableHealth:     true,
-		EnableReflection: true,
+		EnableReflection: grpcx.EnableDevelopmentReflection(),
 	}
 	return grpcx.NewServer(opts, register)
 }
 
-func provideMsgGRPCListener(addr grpcAddress) (net.Listener, error) {
+func provideMsgGRPCListener(addr msgGRPCAddress) (net.Listener, error) {
 	return grpcx.NewListener(string(addr))
 }
 
-func provideMetricsServer(addr metricsAddress, built *grpcx.BuiltServer) *http.Server {
+func provideMsgMetricsServer(addr msgMetricsAddress, built *grpcx.BuiltServer) *http.Server {
 	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
 }
 
@@ -211,13 +211,13 @@ var msgInfraProviderSet = wire.NewSet(
 	provideMsgGroupClient,
 	provideMsgPermissionChecker,
 	provideMsgService,
-	provideGRPCAddress,
-	provideMetricsAddress,
-	provideGRPCShutdownTimeout,
+	provideMsgGRPCAddress,
+	provideMsgMetricsAddress,
+	provideMsgGRPCShutdownTimeout,
 	provideMsgRegistration,
 	provideMsgGRPCServer,
 	provideMsgGRPCListener,
-	provideMetricsServer,
+	provideMsgMetricsServer,
 )
 
 var msgDomainProviderSet = wire.NewSet(

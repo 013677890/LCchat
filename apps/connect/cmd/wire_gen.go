@@ -35,7 +35,7 @@ func initializeConnectApp() (*ConnectApp, error) {
 	wsHandler := handler.NewWSHandler(connectionManager, connectService)
 	server := provideConnectHTTPServer(wsHandler, connectionManager)
 	grpcServer := provideConnectGRPCHandler(connectionManager)
-	registrationFunc := provideConnectGRPCRegistration(grpcServer)
+	registrationFunc := provideConnectRegistration(grpcServer)
 	mainConnectGRPCAddress := provideConnectGRPCAddress()
 	builtServer, err := provideConnectGRPCServer(registrationFunc, mainConnectGRPCAddress)
 	if err != nil {

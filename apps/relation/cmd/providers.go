@@ -127,7 +127,7 @@ func provideRelationGRPCServer(register grpcx.RegistrationFunc, addr relationGRP
 		Namespace:        "relation",
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: relationGRPCDefaultTimeout},
 		EnableHealth:     true,
-		EnableReflection: true,
+		EnableReflection: grpcx.EnableDevelopmentReflection(),
 	}, register)
 }
 

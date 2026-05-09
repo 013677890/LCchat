@@ -4,8 +4,6 @@ import (
 	"context"
 
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
-	"github.com/013677890/LCchat-Backend/pkg/grpcx"
-	"github.com/sony/gobreaker"
 
 	"google.golang.org/grpc"
 )
@@ -29,68 +27,43 @@ func NewMsgServiceClient(conn *grpc.ClientConn) MsgServiceClient {
 
 // SendMessage 发送消息
 func (c *msgServiceClientImpl) SendMessage(ctx context.Context, req *msgpb.SendMessageRequest) (*msgpb.SendMessageResponse, error) {
-	return executeGRPCCall("msg.MsgService", "SendMessage", func() (*msgpb.SendMessageResponse, error) {
-		return c.msgClient.SendMessage(ctx, req)
-	})
+	return c.msgClient.SendMessage(ctx, req)
 }
 
 // ==================== 消息拉取 ====================
 // PullMessages 按会话增量拉取历史消息
 func (c *msgServiceClientImpl) PullMessages(ctx context.Context, req *msgpb.PullMessagesRequest) (*msgpb.PullMessagesResponse, error) {
-	return executeGRPCCall("msg.MsgService", "PullMessages", func() (*msgpb.PullMessagesResponse, error) {
-		return c.msgClient.PullMessages(ctx, req)
-	})
+	return c.msgClient.PullMessages(ctx, req)
 }
 
 // GetMessagesByIds 批量获取指定消息
 func (c *msgServiceClientImpl) GetMessagesByIds(ctx context.Context, req *msgpb.GetMessagesByIdsRequest) (*msgpb.GetMessagesByIdsResponse, error) {
-	return executeGRPCCall("msg.MsgService", "GetMessagesByIds", func() (*msgpb.GetMessagesByIdsResponse, error) {
-		return c.msgClient.GetMessagesByIds(ctx, req)
-	})
+	return c.msgClient.GetMessagesByIds(ctx, req)
 }
 
 // ==================== 消息操作 ====================
 // RecallMessage 撤回消息
 func (c *msgServiceClientImpl) RecallMessage(ctx context.Context, req *msgpb.RecallMessageRequest) (*msgpb.RecallMessageResponse, error) {
-	return executeGRPCCall("msg.MsgService", "RecallMessage", func() (*msgpb.RecallMessageResponse, error) {
-		return c.msgClient.RecallMessage(ctx, req)
-	})
+	return c.msgClient.RecallMessage(ctx, req)
 }
 
 // ==================== 会话管理 ====================
 // GetConversations 获取会话列表
 func (c *msgServiceClientImpl) GetConversations(ctx context.Context, req *msgpb.GetConversationsRequest) (*msgpb.GetConversationsResponse, error) {
-	return executeGRPCCall("msg.MsgService", "GetConversations", func() (*msgpb.GetConversationsResponse, error) {
-		return c.msgClient.GetConversations(ctx, req)
-	})
+	return c.msgClient.GetConversations(ctx, req)
 }
 
 // MarkRead 标记会话已读
 func (c *msgServiceClientImpl) MarkRead(ctx context.Context, req *msgpb.MarkReadRequest) (*msgpb.MarkReadResponse, error) {
-	return executeGRPCCall("msg.MsgService", "MarkRead", func() (*msgpb.MarkReadResponse, error) {
-		return c.msgClient.MarkRead(ctx, req)
-	})
+	return c.msgClient.MarkRead(ctx, req)
 }
 
 // DeleteConversation 删除会话
 func (c *msgServiceClientImpl) DeleteConversation(ctx context.Context, req *msgpb.DeleteConversationRequest) (*msgpb.DeleteConversationResponse, error) {
-	return executeGRPCCall("msg.MsgService", "DeleteConversation", func() (*msgpb.DeleteConversationResponse, error) {
-		return c.msgClient.DeleteConversation(ctx, req)
-	})
+	return c.msgClient.DeleteConversation(ctx, req)
 }
 
 // UpdateConversationSettings 更新会话设置
 func (c *msgServiceClientImpl) UpdateConversationSettings(ctx context.Context, req *msgpb.UpdateConvSettingsRequest) (*msgpb.UpdateConvSettingsResponse, error) {
-	return executeGRPCCall("msg.MsgService", "UpdateConversationSettings", func() (*msgpb.UpdateConvSettingsResponse, error) {
-		return c.msgClient.UpdateConversationSettings(ctx, req)
-	})
-}
-
-// CreateMsgServiceConnection 创建消息服务 gRPC 连接
-// addr: 消息服务地址，格式为 "host:port"
-// 返回: gRPC 连接和错误
-func CreateMsgServiceConnection(addr string, breaker *gobreaker.CircuitBreaker) (*grpc.ClientConn, error) {
-	// gateway 调用 msg-service 只会落到 MsgService，
-	// 因此重试范围保持单一 service，底层装配则复用统一 grpcx builder。
-	return newGatewayConnection(addr, grpcx.DefaultClientRetryConfig("msg.MsgService"), nil, breaker)
+	return c.msgClient.UpdateConversationSettings(ctx, req)
 }

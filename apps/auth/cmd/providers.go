@@ -154,7 +154,7 @@ func provideAuthGRPCServer(register grpcx.RegistrationFunc, addr authGRPCAddress
 		Namespace:        "auth",
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: authGRPCDefaultTimeout},
 		EnableHealth:     true,
-		EnableReflection: true,
+		EnableReflection: grpcx.EnableDevelopmentReflection(),
 		ExtraUnaryInterceptors: []grpc.UnaryServerInterceptor{
 			grpcx.InternalCallerInterceptor(authInternalMethodWhitelist()),
 		},

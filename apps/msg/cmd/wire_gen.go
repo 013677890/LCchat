@@ -21,7 +21,7 @@ func initializeMsgApp() (*MsgApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	mainMetricsAddress := provideMetricsAddress()
+	mainMsgMetricsAddress := provideMsgMetricsAddress()
 	mySQLConfig := provideMySQLConfig()
 	db, err := provideMySQLDB(logger, mySQLConfig)
 	if err != nil {
@@ -57,17 +57,17 @@ func initializeMsgApp() (*MsgApp, error) {
 	markReadWorkflow := usecase.NewMarkReadWorkflow(conversationService, mqProducer)
 	msgHandler := handler.NewMsgHandler(service, conversationService, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)
 	registrationFunc := provideMsgRegistration(msgHandler)
-	mainGrpcAddress := provideGRPCAddress()
-	builtServer, err := provideMsgGRPCServer(registrationFunc, mainGrpcAddress)
+	mainMsgGRPCAddress := provideMsgGRPCAddress()
+	builtServer, err := provideMsgGRPCServer(registrationFunc, mainMsgGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
-	server := provideMetricsServer(mainMetricsAddress, builtServer)
-	listener, err := provideMsgGRPCListener(mainGrpcAddress)
+	server := provideMsgMetricsServer(mainMsgMetricsAddress, builtServer)
+	listener, err := provideMsgGRPCListener(mainMsgGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
-	mainMsgGRPCShutdownTimeout := provideGRPCShutdownTimeout()
+	mainMsgGRPCShutdownTimeout := provideMsgGRPCShutdownTimeout()
 	asyncConfig := provideAsyncConfig()
 	pool, err := provideAsyncPool(logger, asyncConfig)
 	if err != nil {

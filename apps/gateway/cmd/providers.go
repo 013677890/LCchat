@@ -223,7 +223,7 @@ func provideGatewayUserConn(ctx context.Context, addr gatewayUserServiceAddr, br
 // provideGatewayRelationConn 建立到 relation-service 的 gRPC 连接。
 // 好友/黑名单路由已经切分出去，因此这里也视为 gateway 的必需依赖。
 func provideGatewayRelationConn(ctx context.Context, addr gatewayRelationServiceAddr, breaker gatewayRelationBreaker) (gatewayRelationConn, error) {
-	conn, err := pb.CreateRelationFriendServiceConnection(string(addr), breaker.value)
+	conn, err := pb.CreateRelationServiceConnection(string(addr), breaker.value)
 	if err != nil {
 		return gatewayRelationConn{}, err
 	}

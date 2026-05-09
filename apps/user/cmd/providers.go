@@ -169,7 +169,7 @@ func provideUserGRPCServer(register grpcx.RegistrationFunc, addr userGRPCAddress
 		Namespace:        "user",
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: userGRPCDefaultTimeout},
 		EnableHealth:     true,
-		EnableReflection: true,
+		EnableReflection: grpcx.EnableDevelopmentReflection(),
 		ExtraUnaryInterceptors: []grpc.UnaryServerInterceptor{
 			grpcx.InternalCallerInterceptor(userInternalMethodWhitelist()),
 		},
