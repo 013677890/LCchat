@@ -1,9 +1,12 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -20,8 +23,17 @@ var (
 	// 但先统一好错误模型，后续补写接口时不需要再改 service 侧判断风格。
 	ErrDuplicateKey = errors.New("duplicate key")
 
+	// ErrGroupDismissed 表示群已解散。
+	ErrGroupDismissed = errors.New("group dismissed")
+
 	// ErrDatabase 表示通用数据库错误。
 	ErrDatabase = errors.New("database error")
+
+	// ErrRedisNil 表示 Redis key 不存在。
+	ErrRedisNil = errors.New("redis: key not found")
+
+	// ErrRedis 表示 Redis 通用错误。
+	ErrRedis = errors.New("redis error")
 )
 
 var dbErrorRules = map[error]error{
@@ -44,4 +56,23 @@ func WrapDBError(err error) error {
 		}
 	}
 	return fmt.Errorf("%w: %v", ErrDatabase, err)
+}
+
+// WrapRedisError 把底层 Redis 错误映射为 group repository 统一错误。
+func WrapRedisError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, redis.Nil) {
+		return ErrRedisNil
+	}
+	return fmt.Errorf("%w: %v", ErrRedis, err)
+}
+
+// LogRedisError 统一记录 Redis 降级日志。
+func LogRedisError(ctx context.Context, err error) {
+	if err == nil {
+		return
+	}
+	logger.Warn(ctx, "Redis 操作错误，已降级处理", logger.ErrorField("error", err))
 }

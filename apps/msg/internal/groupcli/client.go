@@ -30,16 +30,17 @@ func (c *Client) QueryMemberRole(ctx context.Context, groupUUID, userUUID string
 	if c == nil || c.groupClient == nil {
 		return -1, fmt.Errorf("group service client 未初始化")
 	}
-	resp, err := c.groupClient.GetMemberList(ctx, &grouppb.GetMemberListRequest{GroupUuid: groupUUID})
+	resp, err := c.groupClient.CheckGroupMember(ctx, &grouppb.CheckGroupMemberRequest{
+		GroupUuid: groupUUID,
+		UserUuid:  userUUID,
+	})
 	if err != nil {
-		return -1, fmt.Errorf("调用 GroupService.GetMemberList 失败: %w", err)
+		return -1, fmt.Errorf("调用 GroupService.CheckGroupMember 失败: %w", err)
 	}
-	for _, m := range resp.GetMembers() {
-		if m != nil && m.UserUuid == userUUID {
-			return int8(m.Role), nil
-		}
+	if !resp.GetIsMember() {
+		return -1, nil
 	}
-	return -1, nil
+	return int8(resp.GetRole()), nil
 }
 
 // GetGroupMemberUUIDs 获取群组所有有效成员 UUID 列表。

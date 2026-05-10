@@ -32,7 +32,12 @@ func initializeGroupApp() (*GroupApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	iGroupRepository := repository.NewGroupRepository(db)
+	redisConfig := provideGroupRedisConfig()
+	client, err := provideGroupRedisClient(logger, redisConfig)
+	if err != nil {
+		return nil, err
+	}
+	iGroupRepository := repository.NewGroupRepository(db, client)
 	iGroupService := service.NewGroupService(iGroupRepository)
 	groupHandler := handler.NewGroupHandler(iGroupService)
 	registrationFunc := provideGroupRegistration(groupHandler)
@@ -53,11 +58,6 @@ func initializeGroupApp() (*GroupApp, error) {
 		return nil, err
 	}
 	mainGroupAsyncReleaseTimeout := provideGroupAsyncReleaseTimeout(asyncConfig)
-	redisConfig := provideGroupRedisConfig()
-	client, err := provideGroupRedisClient(logger, redisConfig)
-	if err != nil {
-		return nil, err
-	}
 	groupApp, err := NewGroupApp(logger, server, builtServer, listener, mainGroupGRPCShutdownTimeout, pool, mainGroupAsyncReleaseTimeout, db, client)
 	if err != nil {
 		return nil, err

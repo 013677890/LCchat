@@ -44,6 +44,9 @@ const (
 
 	// QRCodeTTL 用户二维码缓存 TTL
 	QRCodeTTL = 48 * time.Hour
+
+	// GroupMembersTTL 群成员缓存 TTL
+	GroupMembersTTL = 30 * time.Minute
 )
 
 // ==================== Key 构造函数 ====================
@@ -126,6 +129,11 @@ func ApplyPendingKey(targetUUID string) string {
 // ApplyUnreadNotifyKey 生成好友申请未读计数 Key: user:notify:friend_apply:unread:{uuid}
 func ApplyUnreadNotifyKey(targetUUID string) string {
 	return fmt.Sprintf("user:notify:friend_apply:unread:%s", targetUUID)
+}
+
+// GroupMembersKey 生成群成员缓存 Key: group:members:{group_uuid}
+func GroupMembersKey(groupUUID string) string {
+	return fmt.Sprintf("group:members:%s", groupUUID)
 }
 
 // ==================== Gateway Key 构造函数 ====================

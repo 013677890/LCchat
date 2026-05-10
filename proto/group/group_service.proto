@@ -20,6 +20,7 @@ service GroupService {
 	rpc GetMemberList(GetMemberListRequest) returns (GetMemberListResponse);
 	rpc GetGroupList(GetGroupListRequest) returns (GetGroupListResponse);
 	rpc GetGroupMemberIds(GetGroupMemberIdsRequest) returns (GetGroupMemberIdsResponse);
+	rpc CheckGroupMember(CheckGroupMemberRequest) returns (CheckGroupMemberResponse);
 }
 
 message CreateGroupRequest {
@@ -77,3 +78,13 @@ message GetGroupListResponse {
 
 message GetGroupMemberIdsRequest { string group_uuid = 1 [(validate.rules).string.min_len = 1]; }
 message GetGroupMemberIdsResponse { repeated string user_uuids = 1; }
+
+message CheckGroupMemberRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string user_uuid = 2 [(validate.rules).string.min_len = 1];
+}
+
+message CheckGroupMemberResponse {
+	bool is_member = 1;
+	int32 role = 2;
+}

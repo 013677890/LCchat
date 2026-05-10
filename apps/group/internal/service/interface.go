@@ -43,6 +43,9 @@ type IGroupService interface {
 
 	// GetGroupMemberIds 获取群成员 UUID 列表。
 	GetGroupMemberIds(ctx context.Context, req *pb.GetGroupMemberIdsRequest) (*pb.GetGroupMemberIdsResponse, error)
+
+	// CheckGroupMember 检查指定用户是否为群成员并返回角色。
+	CheckGroupMember(ctx context.Context, req *pb.CheckGroupMemberRequest) (*pb.CheckGroupMemberResponse, error)
 }
 
 // GroupService 是 IGroupService 的语义化别名。

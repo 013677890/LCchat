@@ -65,12 +65,10 @@ func provideGroupMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error
 	return mysql.Build(cfg)
 }
 
-// group-service 当前也允许 Redis 缺失后以“仅骨架可启动”模式降级运行。
+// group-service 允许 Redis 缺失后以 MySQL-Only 模式降级运行。
 //
-// 原因：
-//  1. 现阶段尚未真正依赖 Redis 承载群逻辑；
-//  2. 用户当前要的是工程骨架，而不是完整业务闭环；
-//  3. 先保持启动链路稳定，后续接入缓存时再按具体场景收紧约束。
+// 当前高频权限链路会优先使用 Redis 缓存群成员，但 Redis 不可用时仍可通过
+// singleflight 收敛回源查询，保证主链路可用，只是失去缓存加速收益。
 func provideGroupRedisClient(log *zap.Logger, cfg config.RedisConfig) (*goredis.Client, error) {
 	client, err := pkgredis.Build(cfg)
 	if err != nil {

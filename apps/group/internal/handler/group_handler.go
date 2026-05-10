@@ -74,3 +74,8 @@ func (h *GroupHandler) GetGroupList(ctx context.Context, req *pb.GetGroupListReq
 func (h *GroupHandler) GetGroupMemberIds(ctx context.Context, req *pb.GetGroupMemberIdsRequest) (*pb.GetGroupMemberIdsResponse, error) {
 	return h.groupService.GetGroupMemberIds(ctx, req)
 }
+
+// CheckGroupMember 检查指定用户是否为群成员并返回角色。
+func (h *GroupHandler) CheckGroupMember(ctx context.Context, req *pb.CheckGroupMemberRequest) (*pb.CheckGroupMemberResponse, error) {
+	return h.groupService.CheckGroupMember(ctx, req)
+}

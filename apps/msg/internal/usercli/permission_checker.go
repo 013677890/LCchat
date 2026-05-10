@@ -103,14 +103,15 @@ func (c *PermissionChecker) checkGroup(ctx context.Context, fromUUID, groupUUID 
 		return apperr.NewWithMessage(consts.CodeInternalError, "群组权限校验器未初始化")
 	}
 
-	resp, err := c.groupClient.GetGroupMemberIds(ctx, &grouppb.GetGroupMemberIdsRequest{GroupUuid: groupUUID})
+	resp, err := c.groupClient.CheckGroupMember(ctx, &grouppb.CheckGroupMemberRequest{
+		GroupUuid: groupUUID,
+		UserUuid:  fromUUID,
+	})
 	if err != nil {
 		return normalizeRemoteError(err, "检查群成员关系失败")
 	}
-	for _, userUUID := range resp.GetUserUuids() {
-		if userUUID == fromUUID {
-			return nil
-		}
+	if resp.GetIsMember() {
+		return nil
 	}
 	return apperr.New(consts.CodeNotGroupMember)
 }

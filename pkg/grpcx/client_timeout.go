@@ -108,6 +108,7 @@ var defaultClientMethodTimeouts = map[string]time.Duration{
 	"/relation.BlacklistService/GetBlacklistList":        300 * time.Millisecond,
 	"/relation.BlacklistService/CheckIsBlacklist":        300 * time.Millisecond,
 	"/group.GroupService/GetGroupInfo":                   300 * time.Millisecond,
+	"/group.GroupService/CheckGroupMember":               300 * time.Millisecond,
 	"/group.GroupService/GetMemberList":                  800 * time.Millisecond,
 	"/group.GroupService/GetGroupList":                   500 * time.Millisecond,
 	"/group.GroupService/GetGroupMemberIds":              500 * time.Millisecond,

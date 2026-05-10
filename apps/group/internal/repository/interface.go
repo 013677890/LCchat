@@ -21,6 +21,9 @@ type IGroupRepository interface {
 	// GetGroupMembers 获取群内有效成员列表。
 	GetGroupMembers(ctx context.Context, groupUUID string) ([]*model.GroupMember, error)
 
+	// CheckGroupMember 检查指定用户是否仍是群内有效成员，并返回角色。
+	CheckGroupMember(ctx context.Context, groupUUID, userUUID string) (bool, int8, error)
+
 	// ListUserGroups 获取当前用户所属的有效群列表。
 	ListUserGroups(ctx context.Context, userUUID string) ([]*model.GroupInfo, error)
 

@@ -141,6 +141,23 @@ func (s *groupServiceImpl) GetGroupMemberIds(ctx context.Context, req *pb.GetGro
 	return &pb.GetGroupMemberIdsResponse{UserUuids: collectMemberUUIDs(members)}, nil
 }
 
+// CheckGroupMember 检查指定用户是否仍是群内有效成员，并返回角色。
+func (s *groupServiceImpl) CheckGroupMember(ctx context.Context, req *pb.CheckGroupMemberRequest) (*pb.CheckGroupMemberResponse, error) {
+	if req == nil || req.GetGroupUuid() == "" || req.GetUserUuid() == "" {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+
+	isMember, role, err := s.groupRepo.CheckGroupMember(ctx, req.GetGroupUuid(), req.GetUserUuid())
+	if err != nil {
+		if errors.Is(err, repository.ErrRecordNotFound) {
+			return nil, apperr.New(consts.CodeGroupNotFound)
+		}
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查群成员关系失败")
+	}
+
+	return &pb.CheckGroupMemberResponse{IsMember: isMember, Role: int32(role)}, nil
+}
+
 // collectMemberUUIDs 从成员列表中提取去重后的用户 UUID。
 //
 // service 层既要给仓储批量查资料，也要直接返回成员 UUID 列表；
