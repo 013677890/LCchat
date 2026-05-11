@@ -83,6 +83,13 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/conversations/mark-read": 2 * time.Second,
 	"/api/v1/auth/conversations/:convId":   2 * time.Second,
 	"/api/v1/auth/conversations/settings":  2 * time.Second,
+
+	// auth groups
+	"/api/v1/auth/groups":                                2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid":                     2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members":             2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members/:userUuid":   2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/member-ids":          1 * time.Second,
 }
 
 func gatewayTimeoutMiddleware() gin.HandlerFunc {
@@ -96,7 +103,12 @@ func gatewayTimeoutMiddleware() gin.HandlerFunc {
 // blacklistHandler: 黑名单处理器（依赖注入）
 // deviceHandler: 设备处理器（依赖注入）
 // msgHandler: 消息处理器（依赖注入）
-func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friendHandler *v1.FriendHandler, blacklistHandler *v1.BlacklistHandler, deviceHandler *v1.DeviceHandler, msgHandler *v1.MsgHandler) *gin.Engine {
+func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friendHandler *v1.FriendHandler, blacklistHandler *v1.BlacklistHandler, deviceHandler *v1.DeviceHandler, msgHandler *v1.MsgHandler, groupHandlers ...*v1.GroupHandler) *gin.Engine {
+	var groupHandler *v1.GroupHandler
+	if len(groupHandlers) > 0 {
+		groupHandler = groupHandlers[0]
+	}
+
 	r := gin.New()
 
 	// 恢复中间件
@@ -239,6 +251,20 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				conversations.POST("/mark-read", msgHandler.MarkRead)
 				conversations.DELETE("/:convId", msgHandler.DeleteConversation)
 				conversations.PATCH("/settings", msgHandler.UpdateConversationSettings)
+			}
+			if groupHandler != nil {
+				groups := auth.Group("/groups")
+				{
+					groups.POST("", groupHandler.CreateGroup)
+					groups.GET("", groupHandler.GetGroupList)
+					groups.GET("/:groupUuid", groupHandler.GetGroupInfo)
+					groups.PATCH("/:groupUuid", groupHandler.UpdateGroupInfo)
+					groups.DELETE("/:groupUuid", groupHandler.DismissGroup)
+					groups.POST("/:groupUuid/members", groupHandler.AddMember)
+					groups.GET("/:groupUuid/members", groupHandler.GetMemberList)
+					groups.DELETE("/:groupUuid/members/:userUuid", groupHandler.RemoveMember)
+					groups.GET("/:groupUuid/member-ids", groupHandler.GetGroupMemberIDs)
+				}
 			}
 		}
 	}

@@ -39,6 +39,7 @@ type GatewayApp struct {
 	userServiceConn     gatewayUserConn
 	relationServiceConn gatewayRelationConn
 	msgServiceConn      gatewayMsgConn
+	groupServiceConn    gatewayGroupConn
 	minioClient         *pkgminio.MinIOClient
 	deviceActiveConfig  config.DeviceActiveConfig
 	deviceSyncActive    bool
@@ -62,6 +63,7 @@ func NewGatewayApp(
 	userServiceConn gatewayUserConn,
 	relationServiceConn gatewayRelationConn,
 	msgServiceConn gatewayMsgConn,
+	groupServiceConn gatewayGroupConn,
 	minioClient *pkgminio.MinIOClient,
 	deviceActiveConfig config.DeviceActiveConfig,
 ) (*GatewayApp, error) {
@@ -86,6 +88,9 @@ func NewGatewayApp(
 	if msgServiceConn.value == nil {
 		return nil, errors.New("gateway msg-service gRPC 连接未初始化")
 	}
+	if groupServiceConn.value == nil {
+		return nil, errors.New("gateway group-service gRPC 连接未初始化")
+	}
 
 	return &GatewayApp{
 		logger:              log,
@@ -97,6 +102,7 @@ func NewGatewayApp(
 		userServiceConn:     userServiceConn,
 		relationServiceConn: relationServiceConn,
 		msgServiceConn:      msgServiceConn,
+		groupServiceConn:    groupServiceConn,
 		minioClient:         minioClient,
 		deviceActiveConfig:  deviceActiveConfig,
 		deviceSyncActive:    true,
@@ -159,6 +165,11 @@ func (a *GatewayApp) Shutdown(ctx context.Context) error {
 	if a.msgServiceConn.value != nil {
 		if err := a.msgServiceConn.value.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 msg-service gRPC 连接失败: %w", err))
+		}
+	}
+	if a.groupServiceConn.value != nil {
+		if err := a.groupServiceConn.value.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 group-service gRPC 连接失败: %w", err))
 		}
 	}
 	if a.authServiceConn.value != nil {

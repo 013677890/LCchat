@@ -45,6 +45,12 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	if err != nil {
 		return nil, err
 	}
+	mainGatewayGroupServiceAddr := provideGatewayGroupServiceAddr()
+	mainGatewayGroupBreaker := provideGatewayGroupBreaker(context)
+	mainGatewayGroupConn, err := provideGatewayGroupConn(context, mainGatewayGroupServiceAddr, mainGatewayGroupBreaker)
+	if err != nil {
+		return nil, err
+	}
 	userServiceClient := provideGatewayUserClient(mainGatewayAuthConn, mainGatewayUserConn, mainGatewayRelationConn)
 	authService := service.NewAuthService(userServiceClient)
 	authHandler := v1.NewAuthHandler(authService)
@@ -65,7 +71,10 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	msgServiceClient := provideGatewayMsgClient(mainGatewayMsgConn)
 	msgService := service.NewMsgService(msgServiceClient)
 	msgHandler := v1.NewMsgHandler(msgService)
-	handler := provideGatewayRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, msgHandler)
+	groupServiceClient := provideGatewayGroupClient(mainGatewayGroupConn)
+	groupService := service.NewGroupService(groupServiceClient)
+	groupHandler := v1.NewGroupHandler(groupService)
+	handler := provideGatewayRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, msgHandler, groupHandler)
 	server := provideGatewayHTTPServer(mainGatewayHTTPAddr, handler)
 	asyncConfig := provideGatewayAsyncConfig()
 	pool, err := provideGatewayAsyncPool(context, asyncConfig)
@@ -84,7 +93,7 @@ func initializeGatewayApp() (*GatewayApp, error) {
 		return nil, err
 	}
 	deviceActiveConfig := provideGatewayDeviceActiveConfig()
-	gatewayApp, err := NewGatewayApp(logger, server, pool, mainGatewayAsyncReleaseTimeout, client, mainGatewayAuthConn, mainGatewayUserConn, mainGatewayRelationConn, mainGatewayMsgConn, minIOClient, deviceActiveConfig)
+	gatewayApp, err := NewGatewayApp(logger, server, pool, mainGatewayAsyncReleaseTimeout, client, mainGatewayAuthConn, mainGatewayUserConn, mainGatewayRelationConn, mainGatewayMsgConn, mainGatewayGroupConn, minIOClient, deviceActiveConfig)
 	if err != nil {
 		return nil, err
 	}

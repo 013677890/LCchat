@@ -195,3 +195,34 @@ type MsgService interface {
 	// UpdateConversationSettings 更新会话设置
 	UpdateConversationSettings(ctx context.Context, req *dto.UpdateConvSettingsRequest) error
 }
+
+// GroupService 群组服务接口。
+// 职责：调用下游 group-service 暴露群资料与成员写读能力。
+type GroupService interface {
+	// CreateGroup 创建群。
+	CreateGroup(ctx context.Context, req *dto.CreateGroupRequest) (*dto.CreateGroupResponse, error)
+
+	// DismissGroup 解散群。
+	DismissGroup(ctx context.Context, req *dto.DismissGroupRequest) error
+
+	// GetGroupInfo 获取群资料。
+	GetGroupInfo(ctx context.Context, req *dto.GetGroupInfoRequest) (*dto.GroupInfoDTO, error)
+
+	// UpdateGroupInfo 更新群资料。
+	UpdateGroupInfo(ctx context.Context, req *dto.UpdateGroupInfoRequest) error
+
+	// AddMember 添加群成员。
+	AddMember(ctx context.Context, req *dto.AddGroupMemberRequest) error
+
+	// RemoveMember 移除群成员。
+	RemoveMember(ctx context.Context, req *dto.RemoveGroupMemberRequest) error
+
+	// GetMemberList 获取群成员列表。
+	GetMemberList(ctx context.Context, req *dto.GetGroupMemberListRequest) (*dto.GetGroupMemberListResponse, error)
+
+	// GetGroupList 获取当前用户的群列表。
+	GetGroupList(ctx context.Context) (*dto.GetGroupListResponse, error)
+
+	// GetGroupMemberIDs 获取群成员 UUID 列表。
+	GetGroupMemberIDs(ctx context.Context, req *dto.GetGroupMemberIDsRequest) (*dto.GetGroupMemberIDsResponse, error)
+}

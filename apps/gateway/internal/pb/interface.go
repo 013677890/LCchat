@@ -3,6 +3,7 @@ package pb
 import (
 	"context"
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
+	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
@@ -38,6 +39,40 @@ type MsgServiceClient interface {
 
 	// UpdateConversationSettings 更新会话设置
 	UpdateConversationSettings(ctx context.Context, req *msgpb.UpdateConvSettingsRequest) (*msgpb.UpdateConvSettingsResponse, error)
+}
+
+// GroupServiceClient 群组服务 gRPC 客户端接口。
+// 职责：封装 gateway 对 group-service 的出站调用。
+type GroupServiceClient interface {
+	// CreateGroup 创建群。
+	CreateGroup(ctx context.Context, req *grouppb.CreateGroupRequest) (*grouppb.CreateGroupResponse, error)
+
+	// DismissGroup 解散群。
+	DismissGroup(ctx context.Context, req *grouppb.DismissGroupRequest) (*grouppb.DismissGroupResponse, error)
+
+	// GetGroupInfo 获取群资料。
+	GetGroupInfo(ctx context.Context, req *grouppb.GetGroupInfoRequest) (*grouppb.GetGroupInfoResponse, error)
+
+	// UpdateGroupInfo 更新群资料。
+	UpdateGroupInfo(ctx context.Context, req *grouppb.UpdateGroupInfoRequest) (*grouppb.UpdateGroupInfoResponse, error)
+
+	// AddMember 添加群成员。
+	AddMember(ctx context.Context, req *grouppb.AddMemberRequest) (*grouppb.AddMemberResponse, error)
+
+	// RemoveMember 移除群成员。
+	RemoveMember(ctx context.Context, req *grouppb.RemoveMemberRequest) (*grouppb.RemoveMemberResponse, error)
+
+	// GetMemberList 获取群成员列表。
+	GetMemberList(ctx context.Context, req *grouppb.GetMemberListRequest) (*grouppb.GetMemberListResponse, error)
+
+	// GetGroupList 获取当前用户群列表。
+	GetGroupList(ctx context.Context, req *grouppb.GetGroupListRequest) (*grouppb.GetGroupListResponse, error)
+
+	// GetGroupMemberIds 获取群成员 UUID 列表。
+	GetGroupMemberIds(ctx context.Context, req *grouppb.GetGroupMemberIdsRequest) (*grouppb.GetGroupMemberIdsResponse, error)
+
+	// CheckGroupMember 检查群成员关系与角色。
+	CheckGroupMember(ctx context.Context, req *grouppb.CheckGroupMemberRequest) (*grouppb.CheckGroupMemberResponse, error)
 }
 
 // UserServiceClient 用户服务 gRPC 客户端接口
