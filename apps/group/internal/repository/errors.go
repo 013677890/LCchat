@@ -26,6 +26,15 @@ var (
 	// ErrGroupDismissed 表示群已解散。
 	ErrGroupDismissed = errors.New("group dismissed")
 
+	// ErrNoPermission 表示当前操作者没有执行群管理操作的权限。
+	ErrNoPermission = errors.New("no permission")
+
+	// ErrCannotKickOwner 表示不能移除群主。
+	ErrCannotKickOwner = errors.New("cannot kick owner")
+
+	// ErrCannotQuitAsOwner 表示群主不能主动退群。
+	ErrCannotQuitAsOwner = errors.New("cannot quit as owner")
+
 	// ErrDatabase 表示通用数据库错误。
 	ErrDatabase = errors.New("database error")
 

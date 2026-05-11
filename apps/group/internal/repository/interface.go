@@ -6,15 +6,23 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 )
 
-// IGroupRepository 定义 group-service 当前阶段需要的只读仓储抽象。
-//
-// 本轮先补齐“可查询”的最小闭环，因此接口只暴露三类读能力：
-//  1. 群本身的基础资料；
-//  2. 群成员关系；
-//  3. 组装成员展示信息所需的用户资料快照。
-//
-// 写操作仍然故意留空，避免在群管理规则尚未确认前过早固化仓储契约。
+// IGroupRepository 定义 group-service 当前阶段需要的仓储抽象。
 type IGroupRepository interface {
+	// CreateGroup 创建群与初始成员关系。
+	CreateGroup(ctx context.Context, group *model.GroupInfo, members []*model.GroupMember) error
+
+	// AddMembers 向群内添加成员。
+	AddMembers(ctx context.Context, groupUUID, operatorUUID string, members []*model.GroupMember) error
+
+	// RemoveMember 移除或退出群成员。
+	RemoveMember(ctx context.Context, groupUUID, operatorUUID, targetUUID string) error
+
+	// DismissGroup 解散群。
+	DismissGroup(ctx context.Context, groupUUID, operatorUUID string) error
+
+	// UpdateGroupInfo 更新群资料。
+	UpdateGroupInfo(ctx context.Context, groupUUID, operatorUUID string, name, avatar *string) error
+
 	// GetGroupInfo 按群 UUID 获取有效群资料。
 	GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error)
 
