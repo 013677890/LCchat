@@ -43,6 +43,12 @@ var (
 
 	// ErrRedis 表示 Redis 通用错误。
 	ErrRedis = errors.New("redis error")
+
+	// ErrInvalidProjectorPayload 表示 group.cache 事件内容不满足投影所需最小约束。
+	//
+	// 这类错误通常不是基础设施抖动，而是事件内容本身不完整；
+	// 上层 consumer 可以据此决定记录告警后跳过，而不是无限重试同一坏消息。
+	ErrInvalidProjectorPayload = errors.New("invalid projector payload")
 )
 
 var dbErrorRules = map[error]error{

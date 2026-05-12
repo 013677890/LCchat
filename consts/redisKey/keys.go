@@ -45,8 +45,16 @@ const (
 	// QRCodeTTL 用户二维码缓存 TTL
 	QRCodeTTL = 48 * time.Hour
 
+	// GroupInfoTTL 群资料缓存 TTL
+	GroupInfoTTL = 1 * time.Hour
+	// GroupInfoEmptyTTL 群资料空值缓存 TTL
+	GroupInfoEmptyTTL = 5 * time.Minute
 	// GroupMembersTTL 群成员缓存 TTL
-	GroupMembersTTL = 30 * time.Minute
+	GroupMembersTTL = 24 * time.Hour
+	// UserGroupListTTL 用户群列表缓存 TTL
+	UserGroupListTTL = 24 * time.Hour
+	// UserGroupListEmptyTTL 用户群列表空值缓存 TTL
+	UserGroupListEmptyTTL = 5 * time.Minute
 )
 
 // ==================== Key 构造函数 ====================
@@ -134,6 +142,16 @@ func ApplyUnreadNotifyKey(targetUUID string) string {
 // GroupMembersKey 生成群成员缓存 Key: group:members:{group_uuid}
 func GroupMembersKey(groupUUID string) string {
 	return fmt.Sprintf("group:members:%s", groupUUID)
+}
+
+// GroupInfoKey 生成群资料缓存 Key: group:info:{group_uuid}
+func GroupInfoKey(groupUUID string) string {
+	return fmt.Sprintf("group:info:%s", groupUUID)
+}
+
+// UserGroupListKey 生成用户群列表缓存 Key: group:user_groups:{user_uuid}
+func UserGroupListKey(userUUID string) string {
+	return fmt.Sprintf("group:user_groups:%s", userUUID)
 }
 
 // ==================== Gateway Key 构造函数 ====================

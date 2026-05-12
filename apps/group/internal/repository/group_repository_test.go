@@ -54,6 +54,61 @@ func TestIsActiveGroupMember(t *testing.T) {
 	}
 }
 
+func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
+	updatedAt := time.Unix(1710000000, 0)
+	group := &model.GroupInfo{
+		Uuid:      "group-1",
+		Name:      "测试群",
+		Avatar:    "avatar.png",
+		OwnerUuid: "owner-1",
+		MemberCnt: 3,
+		Status:    groupStatusNormal,
+		UpdatedAt: updatedAt,
+	}
+
+	// 事件快照需要完整承接缓存投影所需字段，回放后应能还原出一致的群资料视图。
+	snapshot := buildGroupSnapshot(group)
+	restored := buildGroupInfoFromSnapshot(snapshot)
+
+	if assert.NotNil(t, snapshot) && assert.NotNil(t, restored) {
+		assert.Equal(t, group.Uuid, snapshot.GroupUUID)
+		assert.Equal(t, group.MemberCnt, int(snapshot.MemberCount))
+		assert.Equal(t, group.UpdatedAt.Unix(), snapshot.UpdatedAtUnix)
+
+		assert.Equal(t, group.Uuid, restored.Uuid)
+		assert.Equal(t, group.Name, restored.Name)
+		assert.Equal(t, group.Avatar, restored.Avatar)
+		assert.Equal(t, group.OwnerUuid, restored.OwnerUuid)
+		assert.Equal(t, group.MemberCnt, restored.MemberCnt)
+		assert.Equal(t, group.Status, restored.Status)
+		assert.True(t, group.UpdatedAt.Equal(restored.UpdatedAt))
+	}
+}
+
+func TestBuildGroupMemberSnapshotsDeduplicate(t *testing.T) {
+	joinedAt := time.UnixMilli(1710000000123)
+	members := []*model.GroupMember{
+		{GroupUuid: "group-1", UserUuid: "user-1", Role: memberRoleAdmin, JoinedAt: joinedAt},
+		nil,
+		{GroupUuid: "group-1", UserUuid: "user-1", Role: memberRoleMember, JoinedAt: joinedAt.Add(time.Minute)},
+		{GroupUuid: "group-1", UserUuid: "user-2", Role: memberRoleMember, JoinedAt: joinedAt.Add(2 * time.Minute)},
+	}
+
+	// 写链路合并“新增成员 + 恢复成员”时可能出现重复 UUID，mapper 必须保证先到的有效快照只保留一次。
+	snapshots := buildGroupMemberSnapshots(members)
+	userUUIDs := collectGroupMemberSnapshotUUIDs(members)
+
+	if assert.Len(t, snapshots, 2) {
+		assert.Equal(t, "user-1", snapshots[0].UserUUID)
+		assert.Equal(t, int32(memberRoleAdmin), snapshots[0].Role)
+		assert.Equal(t, joinedAt.UnixMilli(), snapshots[0].JoinedAtUnixMs)
+
+		assert.Equal(t, "user-2", snapshots[1].UserUUID)
+		assert.Equal(t, int32(memberRoleMember), snapshots[1].Role)
+	}
+	assert.Equal(t, []string{"user-1", "user-2"}, userUUIDs)
+}
+
 func deletedAt(t time.Time) gorm.DeletedAt {
 	return gorm.DeletedAt{Time: t, Valid: true}
 }

@@ -17,12 +17,13 @@ const (
 )
 
 type GroupSnapshot struct {
-	GroupUUID   string `json:"group_uuid"`
-	Name        string `json:"name"`
-	Avatar      string `json:"avatar"`
-	OwnerUUID   string `json:"owner_uuid"`
-	MemberCount int32  `json:"member_count"`
-	Status      int32  `json:"status"`
+	GroupUUID     string `json:"group_uuid"`
+	Name          string `json:"name"`
+	Avatar        string `json:"avatar"`
+	OwnerUUID     string `json:"owner_uuid"`
+	MemberCount   int32  `json:"member_count"`
+	Status        int32  `json:"status"`
+	UpdatedAtUnix int64  `json:"updated_at_unix"`
 }
 
 type GroupMemberSnapshot struct {

@@ -71,7 +71,12 @@ func (r *groupRepositoryImpl) CreateGroup(ctx context.Context, group *model.Grou
 		if err := tx.Create(members).Error; err != nil {
 			return WrapDBError(err)
 		}
-		return nil
+		// GORM 通常会在 Create 后回填时间字段，这里再做一次兜底，
+		// 保证写入 outbox 的快照一定带有可用于排序的更新时间。
+		if group.UpdatedAt.IsZero() {
+			group.UpdatedAt = time.Now()
+		}
+		return r.insertGroupCreatedEvent(tx, group, members)
 	})
 	if err != nil {
 		return err
@@ -192,7 +197,14 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 			Update("member_cnt", gorm.Expr("member_cnt + ?", delta)).Error; err != nil {
 			return WrapDBError(err)
 		}
-		return nil
+		// 事件快照需要携带最新 member_cnt 和 updated_at，
+		// 这样 projector 在 patch info / user_groups 时才能和 DB 排序保持一致。
+		group.MemberCnt += delta
+		group.UpdatedAt = now
+		changedMembers := make([]*model.GroupMember, 0, len(newMembers)+len(restoredMembers))
+		changedMembers = append(changedMembers, newMembers...)
+		changedMembers = append(changedMembers, restoredMembers...)
+		return r.insertMemberAddedEvent(tx, group, operatorUUID, changedMembers)
 	})
 	if err != nil {
 		return err
@@ -286,8 +298,14 @@ func (r *groupRepositoryImpl) RemoveMember(ctx context.Context, groupUUID, opera
 			Update("member_cnt", gorm.Expr("CASE WHEN member_cnt > 0 THEN member_cnt - 1 ELSE 0 END")).Error; err != nil {
 			return WrapDBError(err)
 		}
+		// 删除事件同样要带上最新群快照，
+		// 否则缓存侧 member_count 与最近更新时间会落后于事实库。
+		if group.MemberCnt > 0 {
+			group.MemberCnt--
+		}
+		group.UpdatedAt = now
 		removed = true
-		return nil
+		return r.insertMemberRemovedEvent(tx, group, operatorUUID, targetUUID)
 	})
 	if err != nil {
 		return err
@@ -323,17 +341,24 @@ func (r *groupRepositoryImpl) DismissGroup(ctx context.Context, groupUUID, opera
 		if group.Status != groupStatusNormal {
 			return ErrRecordNotFound
 		}
+		userUUIDs, err := r.loadActiveMemberUUIDs(ctx, tx, groupUUID)
+		if err != nil {
+			return err
+		}
 
 		// 解散只更新群状态；成员历史保留，读写路径统一通过群状态拦截。
+		updatedAt := time.Now()
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Updates(map[string]interface{}{
 				"status":     groupStatusDismissed,
-				"updated_at": time.Now(),
+				"updated_at": updatedAt,
 			}).Error; err != nil {
 			return WrapDBError(err)
 		}
-		return nil
+		group.Status = groupStatusDismissed
+		group.UpdatedAt = updatedAt
+		return r.insertGroupDismissedEvent(tx, group, operatorUUID, userUUIDs)
 	})
 	if err != nil {
 		return err
@@ -374,13 +399,21 @@ func (r *groupRepositoryImpl) UpdateGroupInfo(ctx context.Context, groupUUID, op
 			return nil
 		}
 
-		updates["updated_at"] = time.Now()
+		updatedAt := time.Now()
+		updates["updated_at"] = updatedAt
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Updates(updates).Error; err != nil {
 			return WrapDBError(err)
 		}
-		return nil
+		if name != nil {
+			group.Name = *name
+		}
+		if avatar != nil {
+			group.Avatar = *avatar
+		}
+		group.UpdatedAt = updatedAt
+		return r.insertGroupInfoUpdatedEvent(tx, group, operatorUUID)
 	})
 }
 
@@ -414,9 +447,28 @@ func (r *groupRepositoryImpl) loadWritableGroupForUpdate(ctx context.Context, tx
 }
 
 func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID string) error {
+	if r == nil || r.db == nil || groupUUID == "" {
+		return ErrRecordNotFound
+	}
+	groupInfo, cacheHit, err := r.getGroupInfoFromCache(ctx, groupUUID)
+	if err != nil {
+		LogRedisError(ctx, err)
+	} else if cacheHit {
+		if groupInfo == nil {
+			return ErrRecordNotFound
+		}
+		if groupInfo.Status == groupStatusDismissed {
+			return ErrGroupDismissed
+		}
+		if groupInfo.Status != groupStatusNormal {
+			return ErrRecordNotFound
+		}
+		return nil
+	}
+
 	var group model.GroupInfo
 	// 高频读路径只需要 status，避免为了权限检查读取整行群资料。
-	err := r.db.WithContext(ctx).
+	err = r.db.WithContext(ctx).
 		Select("status").
 		Where("uuid = ? AND deleted_at IS NULL", groupUUID).
 		Take(&group).Error
@@ -512,8 +564,212 @@ func (r *groupRepositoryImpl) rebuildGroupMembersCacheAsync(ctx context.Context,
 	// 异步任务使用克隆数据，避免调用方后续复用 slice 时影响缓存写入内容。
 	cloned := cloneGroupMembers(members)
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		r.rebuildGroupMembersCache(runCtx, groupUUID, cloned)
+		if err := r.rebuildGroupMembersCache(runCtx, groupUUID, cloned); err != nil {
+			LogRedisError(runCtx, err)
+		}
 	}, async.AsyncRedisPipelineTimeout)
+}
+
+// getGroupInfoFromCache 读取 group:info:{group_uuid} 主缓存。
+//
+// 返回值语义：
+//  1. (*GroupInfo, true, nil)：命中有效群资料缓存；
+//  2. (nil, true, nil)：命中空值缓存，表示当前群不存在；
+//  3. (nil, false, nil)：缓存未命中或脏 key 已被清理，调用方应回源 DB；
+//  4. (_, _, err)：Redis 出现可观测错误，调用方通常记录告警后降级。
+func (r *groupRepositoryImpl) getGroupInfoFromCache(ctx context.Context, groupUUID string) (*model.GroupInfo, bool, error) {
+	if r == nil || r.redisClient == nil || groupUUID == "" {
+		return nil, false, nil
+	}
+
+	cacheKey := rediskey.GroupInfoKey(groupUUID)
+	raw, err := r.redisClient.Get(ctx, cacheKey).Result()
+	if err != nil {
+		if errors.Is(err, goredis.Nil) {
+			return nil, false, nil
+		}
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil, false, nil
+		}
+		return nil, false, WrapRedisError(err)
+	}
+	if raw == groupInfoEmptyValue {
+		return nil, true, nil
+	}
+
+	entry, decodeErr := decodeGroupInfoCacheValue(raw)
+	if decodeErr != nil {
+		_ = r.redisClient.Del(ctx, cacheKey).Err()
+		return nil, false, nil
+	}
+	if getRandomBool(0.01) {
+		if expireErr := r.redisClient.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.GroupInfoTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
+			LogRedisError(ctx, expireErr)
+		}
+	}
+	return buildGroupInfoFromCache(entry), true, nil
+}
+
+// setGroupInfoCacheAsync 异步回填群资料主缓存。
+//
+// 这里使用值拷贝而不是直接传原对象，避免调用方后续继续修改 group 指针时，
+// 异步任务把“半旧半新”的内容写入 Redis。
+func (r *groupRepositoryImpl) setGroupInfoCacheAsync(ctx context.Context, group *model.GroupInfo) {
+	if r == nil || r.redisClient == nil || group == nil || group.Uuid == "" {
+		return
+	}
+	copyGroup := *group
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		if err := r.setGroupInfoCache(runCtx, &copyGroup); err != nil {
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisTimeout)
+}
+
+// setGroupInfoCache 直接覆盖群资料主缓存。
+//
+// 该方法用于：
+//  1. 读路径回源 DB 后的完整回填；
+//  2. group_created projector 首次初始化主缓存。
+//
+// 对于增量写事实则应优先使用 patch-if-exists，避免写路径承担全量建缓存职责。
+func (r *groupRepositoryImpl) setGroupInfoCache(ctx context.Context, group *model.GroupInfo) error {
+	if r == nil || r.redisClient == nil || group == nil || group.Uuid == "" {
+		return nil
+	}
+	cacheKey := rediskey.GroupInfoKey(group.Uuid)
+	if err := r.redisClient.Set(ctx, cacheKey, encodeGroupInfoCacheValue(group), getRandomExpireTime(rediskey.GroupInfoTTL)).Err(); err != nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil
+		}
+		return WrapRedisError(err)
+	}
+	return nil
+}
+
+// setGroupInfoEmptyCacheAsync 异步写入群资料空值缓存。
+//
+// 这样“查无此群”的结果也会被短 TTL 缓存，
+// 可以显著降低恶意探测和热点 miss 对数据库的压力。
+func (r *groupRepositoryImpl) setGroupInfoEmptyCacheAsync(ctx context.Context, groupUUID string) {
+	if r == nil || r.redisClient == nil || groupUUID == "" {
+		return
+	}
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		cacheKey := rediskey.GroupInfoKey(groupUUID)
+		if err := r.redisClient.Set(runCtx, cacheKey, groupInfoEmptyValue, rediskey.GroupInfoEmptyTTL).Err(); err != nil {
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisTimeout)
+}
+
+// getUserGroupsFromCache 读取用户群列表反向索引缓存。
+//
+// 这里采用“两级缓存拼装”策略：
+//  1. 先从 ZSet 取出 group_uuid 列表；
+//  2. 再逐个读取 group:info 主缓存；
+//  3. 只要任一主缓存缺失，就整体视为未命中并回源 DB，避免返回不完整列表。
+func (r *groupRepositoryImpl) getUserGroupsFromCache(ctx context.Context, userUUID string) ([]*model.GroupInfo, bool, error) {
+	if r == nil || r.redisClient == nil || userUUID == "" {
+		return nil, false, nil
+	}
+
+	cacheKey := rediskey.UserGroupListKey(userUUID)
+	values, err := r.redisClient.ZRevRange(ctx, cacheKey, 0, -1).Result()
+	if err != nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil, false, nil
+		}
+		return nil, false, WrapRedisError(err)
+	}
+	if len(values) == 0 {
+		return nil, false, nil
+	}
+	if len(values) == 1 && values[0] == userGroupsEmptyValue {
+		return []*model.GroupInfo{}, true, nil
+	}
+
+	groups := make([]*model.GroupInfo, 0, len(values))
+	missing := false
+	for _, groupUUID := range values {
+		if groupUUID == "" || groupUUID == userGroupsEmptyValue {
+			continue
+		}
+		group, cacheHit, cacheErr := r.getGroupInfoFromCache(ctx, groupUUID)
+		if cacheErr != nil {
+			return nil, false, cacheErr
+		}
+		if !cacheHit || group == nil || group.Status != groupStatusNormal {
+			missing = true
+			break
+		}
+		groups = append(groups, group)
+	}
+	if missing {
+		return nil, false, nil
+	}
+	if getRandomBool(0.01) {
+		if expireErr := r.redisClient.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.UserGroupListTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
+			LogRedisError(ctx, expireErr)
+		}
+	}
+	return groups, true, nil
+}
+
+// rebuildUserGroupsCacheAsync 异步全量重建单个用户的群列表缓存。
+//
+// 该方法只在读路径 miss 后调用；
+// 写路径和 projector 仍然遵循 patch-if-exists，避免缓存重建职责向写侧扩散。
+func (r *groupRepositoryImpl) rebuildUserGroupsCacheAsync(ctx context.Context, userUUID string, groups []*model.GroupInfo) {
+	if r == nil || r.redisClient == nil || userUUID == "" {
+		return
+	}
+	cloned := cloneGroupInfos(groups)
+	async.RunSafe(ctx, func(runCtx context.Context) {
+		if err := r.rebuildUserGroupsCache(runCtx, userUUID, cloned); err != nil {
+			LogRedisError(runCtx, err)
+		}
+	}, async.AsyncRedisPipelineTimeout)
+}
+
+// rebuildUserGroupsCache 全量重建用户群列表 ZSet。
+//
+// 这里直接删除旧 key 再写入新集合，是因为读路径已经拿到了完整事实集，
+// 此时全量重建比增量 patch 更简单，也更不容易把历史脏 member 留在缓存中。
+func (r *groupRepositoryImpl) rebuildUserGroupsCache(ctx context.Context, userUUID string, groups []*model.GroupInfo) error {
+	if r == nil || r.redisClient == nil || userUUID == "" {
+		return nil
+	}
+	cacheKey := rediskey.UserGroupListKey(userUUID)
+	pipe := r.redisClient.Pipeline()
+	pipe.Del(ctx, cacheKey)
+	if len(groups) == 0 {
+		pipe.ZAdd(ctx, cacheKey, goredis.Z{Score: 0, Member: userGroupsEmptyValue})
+		pipe.Expire(ctx, cacheKey, rediskey.UserGroupListEmptyTTL)
+	} else {
+		items := make([]goredis.Z, 0, len(groups))
+		for _, group := range groups {
+			if group == nil || group.Uuid == "" {
+				continue
+			}
+			items = append(items, goredis.Z{Score: float64(group.UpdatedAt.Unix()), Member: group.Uuid})
+		}
+		if len(items) > 0 {
+			pipe.ZAdd(ctx, cacheKey, items...)
+		}
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.UserGroupListTTL))
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil
+		}
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 func collectWriteMemberUUIDs(members []*model.GroupMember) []string {
@@ -548,6 +804,32 @@ func (r *groupRepositoryImpl) GetGroupInfo(ctx context.Context, groupUUID string
 		return nil, ErrRecordNotFound
 	}
 
+	groupInfo, cacheHit, err := r.getGroupInfoFromCache(ctx, groupUUID)
+	if err != nil {
+		LogRedisError(ctx, err)
+	} else if cacheHit {
+		if groupInfo == nil || groupInfo.Status != groupStatusNormal {
+			return nil, ErrRecordNotFound
+		}
+		return groupInfo, nil
+	}
+
+	groupInfo, err = r.loadGroupInfoFromDB(ctx, groupUUID)
+	if err != nil {
+		if errors.Is(err, ErrRecordNotFound) {
+			r.setGroupInfoEmptyCacheAsync(ctx, groupUUID)
+		}
+		return nil, err
+	}
+	r.setGroupInfoCacheAsync(ctx, groupInfo)
+	return groupInfo, nil
+}
+
+// loadGroupInfoFromDB 从 MySQL 读取群资料权威事实。
+//
+// 这里只返回“有效群”，因此 status!=0、已软删、已解散都统一视为不存在，
+// 上层不需要了解 groups 表的内部状态枚举细节。
+func (r *groupRepositoryImpl) loadGroupInfoFromDB(ctx context.Context, groupUUID string) (*model.GroupInfo, error) {
 	var groupInfo model.GroupInfo
 	if err := r.db.WithContext(ctx).
 		Where("uuid = ? AND status = 0 AND deleted_at IS NULL", groupUUID).
@@ -602,7 +884,11 @@ func (r *groupRepositoryImpl) fetchGroupMembersWithSingleflight(ctx context.Cont
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		r.rebuildGroupMembersCache(ctx, groupUUID, members)
+		// singleflight 合并后的首个回源协程负责尝试回填缓存；
+		// 即便 Redis 回填失败，也不能影响本次已经查到的 MySQL 结果返回。
+		if rebuildErr := r.rebuildGroupMembersCache(ctx, groupUUID, members); rebuildErr != nil {
+			LogRedisError(ctx, rebuildErr)
+		}
 		return cloneGroupMembers(members), nil
 	})
 	if err != nil {
@@ -656,9 +942,15 @@ func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, grou
 	return members, true, nil
 }
 
-func (r *groupRepositoryImpl) rebuildGroupMembersCache(ctx context.Context, groupUUID string, members []*model.GroupMember) {
+// rebuildGroupMembersCache 全量重建群成员 Hash 缓存。
+//
+// 该方法主要服务于读路径 miss 和 group_created 首次建缓存：
+//  1. 输入已经是一份完整成员事实集；
+//  2. 因此直接 Del + HSet 比逐个 patch 更可靠；
+//  3. 返回 error 让调用方自行决定是降级记录还是重试。
+func (r *groupRepositoryImpl) rebuildGroupMembersCache(ctx context.Context, groupUUID string, members []*model.GroupMember) error {
 	if r == nil || r.redisClient == nil || groupUUID == "" {
-		return
+		return nil
 	}
 
 	cacheKey := rediskey.GroupMembersKey(groupUUID)
@@ -670,8 +962,7 @@ func (r *groupRepositoryImpl) rebuildGroupMembersCache(ctx context.Context, grou
 		fields[member.UserUuid] = encodeGroupMemberCacheValue(member)
 	}
 	if len(fields) == 0 {
-		_ = r.redisClient.Del(ctx, cacheKey).Err()
-		return
+		return r.deleteGroupMembersCache(ctx, groupUUID)
 	}
 
 	pipe := r.redisClient.Pipeline()
@@ -681,10 +972,114 @@ func (r *groupRepositoryImpl) rebuildGroupMembersCache(ctx context.Context, grou
 	if _, err := pipe.Exec(ctx); err != nil {
 		if isRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
-			return
+			return nil
 		}
-		LogRedisError(ctx, err)
+		return WrapRedisError(err)
 	}
+	return nil
+}
+
+// insertGroupMemberCacheIfExists 在群成员 Hash 已存在时同步插入新成员 field。
+//
+// 该方法严格遵守 patch-if-exists：
+//  1. key 存在才插入；
+//  2. key 不存在直接跳过，留给读路径全量重建；
+//  3. field 已存在时不覆盖，保证“新增成员”语义稳定。
+func (r *groupRepositoryImpl) insertGroupMemberCacheIfExists(ctx context.Context, groupUUID string, member *model.GroupMember) error {
+	if r == nil || r.redisClient == nil || groupUUID == "" || member == nil || member.UserUuid == "" {
+		return nil
+	}
+
+	cacheKey := rediskey.GroupMembersKey(groupUUID)
+	luaScript := goredis.NewScript(luaInsertGroupMemberIfExists)
+	expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
+
+	_, err := luaScript.Run(ctx, r.redisClient,
+		[]string{cacheKey},
+		member.UserUuid,
+		encodeGroupMemberCacheValue(member),
+		expireSeconds,
+	).Result()
+	if err != nil && err != goredis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil
+		}
+		return WrapRedisError(err)
+	}
+	return nil
+}
+
+// upsertGroupMemberCacheIfExists 在群成员 Hash 已存在时同步覆盖单个成员 field。
+//
+// 该方法适用于恢复入群、角色变更等需要覆盖旧快照的场景。
+func (r *groupRepositoryImpl) upsertGroupMemberCacheIfExists(ctx context.Context, groupUUID string, member *model.GroupMember) error {
+	if r == nil || r.redisClient == nil || groupUUID == "" || member == nil || member.UserUuid == "" {
+		return nil
+	}
+
+	cacheKey := rediskey.GroupMembersKey(groupUUID)
+	luaScript := goredis.NewScript(luaUpsertGroupMemberIfExists)
+	expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
+
+	_, err := luaScript.Run(ctx, r.redisClient,
+		[]string{cacheKey},
+		member.UserUuid,
+		encodeGroupMemberCacheValue(member),
+		expireSeconds,
+	).Result()
+	if err != nil && err != goredis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil
+		}
+		return WrapRedisError(err)
+	}
+	return nil
+}
+
+// removeGroupMemberCacheIfExists 在群成员 Hash 已存在时同步删除单个成员 field。
+//
+// 若删除后集合为空，Lua 脚本会自动写回空集合占位，避免后续重复穿透 DB。
+func (r *groupRepositoryImpl) removeGroupMemberCacheIfExists(ctx context.Context, groupUUID, userUUID string) error {
+	if r == nil || r.redisClient == nil || groupUUID == "" || userUUID == "" {
+		return nil
+	}
+
+	cacheKey := rediskey.GroupMembersKey(groupUUID)
+	luaScript := goredis.NewScript(luaRemoveGroupMemberIfExists)
+	expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
+
+	_, err := luaScript.Run(ctx, r.redisClient,
+		[]string{cacheKey},
+		userUUID,
+		groupMembersEmptyValue,
+		expireSeconds,
+	).Result()
+	if err != nil && err != goredis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil
+		}
+		return WrapRedisError(err)
+	}
+	return nil
+}
+
+// deleteGroupMembersCache 直接删除整份群成员缓存。
+//
+// 该方法用于 group_dismissed 等强失效场景，
+// 此时“整 key 删除”比逐个成员 patch 更安全也更便宜。
+func (r *groupRepositoryImpl) deleteGroupMembersCache(ctx context.Context, groupUUID string) error {
+	if r == nil || r.redisClient == nil || groupUUID == "" {
+		return nil
+	}
+
+	cacheKey := rediskey.GroupMembersKey(groupUUID)
+	if err := r.redisClient.Del(ctx, cacheKey).Err(); err != nil && err != goredis.Nil {
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 // insertGroupMembersCacheAsync 在群成员 Hash 已存在时，异步增量插入新成员 field。
@@ -696,10 +1091,7 @@ func (r *groupRepositoryImpl) insertGroupMembersCacheAsync(ctx context.Context, 
 		return
 	}
 
-	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		luaScript := goredis.NewScript(luaInsertGroupMemberIfExists)
-		expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
 		seen := make(map[string]struct{}, len(members))
 		for _, member := range members {
 			if member == nil || member.UserUuid == "" {
@@ -709,18 +1101,7 @@ func (r *groupRepositoryImpl) insertGroupMembersCacheAsync(ctx context.Context, 
 				continue
 			}
 			seen[member.UserUuid] = struct{}{}
-
-			_, err := luaScript.Run(runCtx, r.redisClient,
-				[]string{cacheKey},
-				member.UserUuid,
-				encodeGroupMemberCacheValue(member),
-				expireSeconds,
-			).Result()
-			if err != nil && err != goredis.Nil {
-				if isRedisWrongType(err) {
-					_ = r.redisClient.Del(runCtx, cacheKey).Err()
-					return
-				}
+			if err := r.insertGroupMemberCacheIfExists(runCtx, groupUUID, member); err != nil {
 				LogRedisError(runCtx, err)
 			}
 		}
@@ -735,22 +1116,8 @@ func (r *groupRepositoryImpl) upsertGroupMemberCacheAsync(ctx context.Context, g
 		return
 	}
 
-	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		luaScript := goredis.NewScript(luaUpsertGroupMemberIfExists)
-		expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
-
-		_, err := luaScript.Run(runCtx, r.redisClient,
-			[]string{cacheKey},
-			member.UserUuid,
-			encodeGroupMemberCacheValue(member),
-			expireSeconds,
-		).Result()
-		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
-				_ = r.redisClient.Del(runCtx, cacheKey).Err()
-				return
-			}
+		if err := r.upsertGroupMemberCacheIfExists(runCtx, groupUUID, member); err != nil {
 			LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
@@ -764,22 +1131,8 @@ func (r *groupRepositoryImpl) removeGroupMemberCacheAsync(ctx context.Context, g
 		return
 	}
 
-	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		luaScript := goredis.NewScript(luaRemoveGroupMemberIfExists)
-		expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
-
-		_, err := luaScript.Run(runCtx, r.redisClient,
-			[]string{cacheKey},
-			userUUID,
-			groupMembersEmptyValue,
-			expireSeconds,
-		).Result()
-		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
-				_ = r.redisClient.Del(runCtx, cacheKey).Err()
-				return
-			}
+		if err := r.removeGroupMemberCacheIfExists(runCtx, groupUUID, userUUID); err != nil {
 			LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
@@ -793,9 +1146,8 @@ func (r *groupRepositoryImpl) deleteGroupMembersCacheAsync(ctx context.Context, 
 		return
 	}
 
-	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		if err := r.redisClient.Del(runCtx, cacheKey).Err(); err != nil && err != goredis.Nil {
+		if err := r.deleteGroupMembersCache(runCtx, groupUUID); err != nil {
 			LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
@@ -886,6 +1238,29 @@ func (r *groupRepositoryImpl) ListUserGroups(ctx context.Context, userUUID strin
 		return []*model.GroupInfo{}, nil
 	}
 
+	groups, cacheHit, err := r.getUserGroupsFromCache(ctx, userUUID)
+	if err != nil {
+		LogRedisError(ctx, err)
+	} else if cacheHit {
+		return groups, nil
+	}
+
+	groups, err = r.loadUserGroupsFromDB(ctx, userUUID)
+	if err != nil {
+		return nil, err
+	}
+	r.rebuildUserGroupsCacheAsync(ctx, userUUID, groups)
+	for _, group := range groups {
+		r.setGroupInfoCacheAsync(ctx, group)
+	}
+	return groups, nil
+}
+
+// loadUserGroupsFromDB 从 MySQL 读取用户当前所在的有效群列表。
+//
+// 查询里同时约束 group_members 和 groups 两张表状态，
+// 避免“成员记录仍在，但群已解散/删除”的脏关系被返回给上层。
+func (r *groupRepositoryImpl) loadUserGroupsFromDB(ctx context.Context, userUUID string) ([]*model.GroupInfo, error) {
 	var groups []*model.GroupInfo
 	if err := r.db.WithContext(ctx).
 		Table("groups AS g").
