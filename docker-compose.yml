@@ -279,6 +279,9 @@ services:
       TZ: ${TZ:-UTC}
       MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
       REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_GROUP_CACHE_TOPIC: group.cache
+      KAFKA_GROUP_CACHE_GROUP_ID: group-cache-projector-group
       GROUP_GRPC_ADDR: ":9095"
       GROUP_METRICS_ADDR: ":9195"
     depends_on:
@@ -286,6 +289,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+      cdc-init:
+        condition: service_completed_successfully
     ports:
       - "${GROUP_GRPC_PORT:-19095}:9095"
       - "${GROUP_METRICS_PORT:-19195}:9195"

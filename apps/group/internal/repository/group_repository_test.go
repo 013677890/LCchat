@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
 )
@@ -107,6 +108,76 @@ func TestBuildGroupMemberSnapshotsDeduplicate(t *testing.T) {
 		assert.Equal(t, int32(memberRoleMember), snapshots[1].Role)
 	}
 	assert.Equal(t, []string{"user-1", "user-2"}, userUUIDs)
+}
+
+func TestValidateGroupCacheEventPayload(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload groupevent.GroupCacheEventPayload
+		wantErr bool
+	}{
+		{
+			name:    "缺少基础字段",
+			payload: groupevent.GroupCacheEventPayload{},
+			wantErr: true,
+		},
+		{
+			name: "建群事件缺少群快照",
+			payload: groupevent.GroupCacheEventPayload{
+				EventID:   "evt-1",
+				Action:    groupevent.ActionGroupCreated,
+				GroupUUID: "group-1",
+			},
+			wantErr: true,
+		},
+		{
+			name: "移除成员事件最小载荷合法",
+			payload: groupevent.GroupCacheEventPayload{
+				EventID:   "evt-2",
+				Action:    groupevent.ActionMemberRemoved,
+				GroupUUID: "group-1",
+				UserUUID:  "user-1",
+				Group: &groupevent.GroupSnapshot{
+					GroupUUID:   "group-1",
+					MemberCount: 2,
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateGroupCacheEventPayload(tc.payload)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestCollectProjectedUserUUIDs(t *testing.T) {
+	payloadWithExplicitUsers := groupevent.GroupCacheEventPayload{
+		UserUUIDs: []string{"user-1", "user-2"},
+		Members: []groupevent.GroupMemberSnapshot{
+			{UserUUID: "ignored-user"},
+		},
+	}
+	assert.Equal(t, []string{"user-1", "user-2"}, collectProjectedUserUUIDs(payloadWithExplicitUsers))
+
+	payloadWithMembers := groupevent.GroupCacheEventPayload{
+		Members: []groupevent.GroupMemberSnapshot{
+			{UserUUID: "user-1"},
+			{UserUUID: "user-1"},
+			{UserUUID: "user-2"},
+		},
+	}
+
+	// 当事件没有显式 user_uuids 时，projector 需要从成员快照中回退提取并去重，
+	// 这样新增成员和恢复成员都能稳定更新 user_groups 反向索引。
+	assert.Equal(t, []string{"user-1", "user-2"}, collectProjectedUserUUIDs(payloadWithMembers))
 }
 
 func deletedAt(t time.Time) gorm.DeletedAt {

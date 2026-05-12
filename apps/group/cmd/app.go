@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/group/internal/consumer"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
@@ -34,6 +35,7 @@ type GroupApp struct {
 	grpcShutdownTimeout time.Duration
 	asyncPool           *ants.Pool
 	asyncReleaseTimeout time.Duration
+	cacheProjector      *consumer.CacheProjector
 	db                  *gorm.DB
 	redisClient         *goredis.Client
 }
@@ -52,6 +54,7 @@ func NewGroupApp(
 	grpcShutdownTimeout groupGRPCShutdownTimeout,
 	asyncPool *ants.Pool,
 	asyncReleaseTimeout groupAsyncReleaseTimeout,
+	cacheProjector *consumer.CacheProjector,
 	db *gorm.DB,
 	redisClient *goredis.Client,
 ) (*GroupApp, error) {
@@ -70,6 +73,7 @@ func NewGroupApp(
 		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
 		asyncPool:           asyncPool,
 		asyncReleaseTimeout: time.Duration(asyncReleaseTimeout),
+		cacheProjector:      cacheProjector,
 		db:                  db,
 		redisClient:         redisClient,
 	}, nil
@@ -77,11 +81,12 @@ func NewGroupApp(
 
 // Run 负责启动所有长生命周期组件。
 //
-// 当前 group-service 还没有 Kafka consumer、内部回调 worker 等后台任务，
-// 因此这里只需要：
+// 当前 group-service 除了 gRPC / metrics 外，还需要启动 group.cache projector，
+// 因此这里统一负责：
 //  1. 安装进程级全局依赖；
 //  2. 启动 metrics HTTP server；
-//  3. 启动 gRPC server 并阻塞当前 goroutine。
+//  3. 启动 group.cache Kafka 消费者；
+//  4. 启动 gRPC server 并阻塞当前 goroutine。
 func (a *GroupApp) Run(ctx context.Context) error {
 	a.installProcessGlobals(ctx)
 
@@ -90,6 +95,14 @@ func (a *GroupApp) Run(ctx context.Context) error {
 			logger.Info(ctx, "Metrics HTTP Server 启动中", logger.String("address", a.metricsServer.Addr))
 			if err := a.metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error(ctx, "Metrics HTTP Server 启动失败", logger.ErrorField("error", err))
+			}
+		}()
+	}
+
+	if a.cacheProjector != nil {
+		go func() {
+			if err := a.cacheProjector.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "Group cache projector 运行错误", logger.ErrorField("error", err))
 			}
 		}()
 	}
@@ -132,6 +145,11 @@ func (a *GroupApp) Shutdown(ctx context.Context) error {
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("释放 Async 协程池失败: %w", err))
+		}
+	}
+	if a.cacheProjector != nil {
+		if err := a.cacheProjector.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Group cache projector 失败: %w", err))
 		}
 	}
 	if a.redisClient != nil {

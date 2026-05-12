@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/group/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/group/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	"github.com/013677890/LCchat-Backend/apps/group/internal/service"
@@ -41,6 +42,7 @@ const groupGRPCDefaultTimeout = 300 * time.Millisecond
 func provideGroupLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideGroupAsyncConfig() config.AsyncConfig   { return config.DefaultAsyncConfig() }
 func provideGroupMySQLConfig() config.MySQLConfig   { return config.DefaultMySQLConfig() }
+func provideGroupKafkaConfig() config.KafkaConfig   { return config.DefaultKafkaConfig() }
 
 func provideGroupRedisConfig() config.RedisConfig {
 	cfg := config.DefaultRedisConfig()
@@ -99,6 +101,24 @@ func provideGroupGRPCShutdownTimeout() groupGRPCShutdownTimeout {
 	return groupGRPCShutdownTimeout(10 * time.Second)
 }
 
+// provideGroupCacheProjector 构造 group.cache 投影消费者。
+//
+// 这里把消费者的 topic / groupID 解析放在 provider，而不是 consumer 内部，原因是：
+//  1. 配置读取职责应留在启动装配层；
+//  2. consumer 只关心“如何消费并处理消息”；
+//  3. 后续若需要按环境覆盖 topic / groupID，改这里即可。
+func provideGroupCacheProjector(
+	cfg config.KafkaConfig,
+	projectorRepo repository.IGroupCacheProjectorRepository,
+	db *gorm.DB,
+) *consumer.CacheProjector {
+	groupID := cfg.GroupCacheGroupID
+	if groupID == "" {
+		groupID = "group-cache-projector-group"
+	}
+	return consumer.NewCacheProjector(cfg.Brokers, cfg.GroupCacheTopic, groupID, projectorRepo, db)
+}
+
 // provideGroupMetricsServer 复用 grpcx 的统一 metrics HTTP server。
 //
 // 当前和 relation/user/msg 一样，先只暴露 /metrics，
@@ -135,6 +155,7 @@ var groupInfraProviderSet = wire.NewSet(
 	provideGroupLoggerConfig,
 	provideGroupAsyncConfig,
 	provideGroupMySQLConfig,
+	provideGroupKafkaConfig,
 	provideGroupRedisConfig,
 	provideGroupLogger,
 	provideGroupAsyncPool,
@@ -153,6 +174,7 @@ var groupInfraProviderSet = wire.NewSet(
 // group-service 当前只有一个聚合仓储，占位承接未来的群资料、成员、审批等持久化能力。
 var groupRepositoryProviderSet = wire.NewSet(
 	repository.NewGroupRepository,
+	repository.NewGroupCacheProjectorRepository,
 )
 
 // service / handler 先只保留单一入口，后续若群审批、群角色拆成独立 service，
@@ -168,6 +190,7 @@ var groupHandlerProviderSet = wire.NewSet(
 var groupAppProviderSet = wire.NewSet(
 	groupInfraProviderSet,
 	groupRepositoryProviderSet,
+	provideGroupCacheProjector,
 	groupServiceProviderSet,
 	groupHandlerProviderSet,
 	NewGroupApp,
