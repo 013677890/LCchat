@@ -1,15 +1,13 @@
 package router
 
 import (
-	"time"
-
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/pkg/util"
-
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"time"
 )
 
 const gatewayDefaultRequestTimeout = 2 * time.Second
@@ -24,7 +22,6 @@ const gatewayDefaultRequestTimeout = 2 * time.Second
 var gatewayRequestTimeouts = map[string]time.Duration{
 	"/health":  0,
 	"/metrics": 0,
-
 	// public user
 	"/api/v1/public/user/login":            2 * time.Second,
 	"/api/v1/public/user/login-by-code":    2 * time.Second,
@@ -34,7 +31,6 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/public/user/refresh-token":    2 * time.Second,
 	"/api/v1/public/user/verify-code":      2 * time.Second,
 	"/api/v1/public/user/parse-qrcode":     1 * time.Second,
-
 	// auth user
 	"/api/v1/auth/user/profile":                 1 * time.Second,
 	"/api/v1/auth/user/profile/:userUuid":       2 * time.Second,
@@ -50,7 +46,6 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/user/change-email":            2 * time.Second,
 	"/api/v1/auth/user/delete-account":          3 * time.Second,
 	"/api/v1/auth/user/logout":                  1 * time.Second,
-
 	// auth friend
 	"/api/v1/auth/friend/apply":        2 * time.Second,
 	"/api/v1/auth/friend/apply-list":   1 * time.Second,
@@ -66,30 +61,28 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/friend/tags":         1 * time.Second,
 	"/api/v1/auth/friend/check":        1 * time.Second,
 	"/api/v1/auth/friend/relation":     1 * time.Second,
-
 	// auth blacklist
 	"/api/v1/auth/blacklist":           2 * time.Second,
 	"/api/v1/auth/blacklist/check":     1 * time.Second,
 	"/api/v1/auth/blacklist/:userUuid": 2 * time.Second,
-
 	// auth messages
 	"/api/v1/auth/messages/send":       3 * time.Second,
 	"/api/v1/auth/messages/pull":       2 * time.Second,
 	"/api/v1/auth/messages/get-by-ids": 2 * time.Second,
 	"/api/v1/auth/messages/recall":     2 * time.Second,
-
 	// auth conversations
 	"/api/v1/auth/conversations":           2 * time.Second,
 	"/api/v1/auth/conversations/mark-read": 2 * time.Second,
 	"/api/v1/auth/conversations/:convId":   2 * time.Second,
 	"/api/v1/auth/conversations/settings":  2 * time.Second,
-
 	// auth groups
-	"/api/v1/auth/groups":                                2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid":                     2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid/members":             2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid/members/:userUuid":   2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid/member-ids":          1 * time.Second,
+	"/api/v1/auth/groups":                                   2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid":                        2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/transfer-owner":         2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members":                2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members/:userUuid":      2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members/:userUuid/role": 2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/member-ids":             1 * time.Second,
 }
 
 func gatewayTimeoutMiddleware() gin.HandlerFunc {
@@ -108,32 +101,23 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 	if len(groupHandlers) > 0 {
 		groupHandler = groupHandlers[0]
 	}
-
 	r := gin.New()
-
 	// 恢复中间件
 	r.Use(middleware.GinRecovery(true))
-
 	// 追踪中间件 (生成 trace_id)
 	r.Use(util.TraceLogger())
-
 	// 客户端 IP 中间件
 	r.Use(middleware.ClientIPMiddleware())
-
 	// 日志中间件
 	r.Use(middleware.GinLogger())
-
 	// Prometheus 监控中间件
 	r.Use(middleware.PrometheusMiddleware())
-
 	// 跨域中间件
 	r.Use(middleware.CorsMiddleware())
-
 	// 全局请求级超时控制：探活/指标接口跳过，其余路由统一纳入 timeout budget。
 	// 放在日志/监控中间件之后，确保超时兜底写回的最终响应能被完整观测到；
 	// 同时放在业务 handler 之前，保证后续所有下游调用都能继承同一个请求级 deadline。
 	r.Use(gatewayTimeoutMiddleware())
-
 	// ==================== 全局 IP 限流中间件 ====================
 	// 参数说明：
 	//   - blacklistKey: gateway:blacklist:ips (黑名单 Redis Set 的 key)
@@ -144,17 +128,14 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 	//   2. 执行令牌桶限流，超过则返回 429
 	//   3. Redis 不可用时降级放行（Fail-Open），不影响服务可用性
 	r.Use(middleware.IPRateLimitMiddleware(rediskey.GatewayIPBlacklistKey(), 10.0, 20))
-
 	// 健康检查（无需认证）
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status": "ok",
 		})
 	})
-
 	// Prometheus 指标暴露接口
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
-
 	// API 路由组
 	api := r.Group("/api/v1")
 	{
@@ -173,11 +154,9 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				user.POST("/parse-qrcode", userHandler.ParseQRCode)
 			}
 		}
-
 		// 需要认证的接口
 		auth := api.Group("/auth")
 		auth.Use(middleware.JWTAuthMiddleware()) // JWT 认证中间件（必须在前）
-
 		// ==================== 用户级别限流中间件 ====================
 		// 只对已认证的用户进行限流
 		// 参数说明：
@@ -198,7 +177,6 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				user.DELETE("/devices/:deviceId", deviceHandler.KickDevice)
 				user.GET("/online-status/:userUuid", deviceHandler.GetOnlineStatus)
 				user.POST("/batch-online-status", deviceHandler.BatchGetOnlineStatus)
-
 				// 敏感操作使用更严格的限流
 				user.POST("/change-password",
 					middleware.UserRateLimitMiddlewareWithConfig(2.0, 5),
@@ -209,7 +187,6 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				user.POST("/delete-account",
 					middleware.UserRateLimitMiddlewareWithConfig(2.0, 5),
 					userHandler.DeleteAccount)
-
 				user.POST("/logout", authHandler.Logout)
 			}
 			friend := auth.Group("/friend")
@@ -259,15 +236,16 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 					groups.GET("", groupHandler.GetGroupList)
 					groups.GET("/:groupUuid", groupHandler.GetGroupInfo)
 					groups.PATCH("/:groupUuid", groupHandler.UpdateGroupInfo)
+					groups.POST("/:groupUuid/transfer-owner", groupHandler.TransferGroupOwner)
 					groups.DELETE("/:groupUuid", groupHandler.DismissGroup)
 					groups.POST("/:groupUuid/members", groupHandler.AddMember)
 					groups.GET("/:groupUuid/members", groupHandler.GetMemberList)
 					groups.DELETE("/:groupUuid/members/:userUuid", groupHandler.RemoveMember)
+					groups.PATCH("/:groupUuid/members/:userUuid/role", groupHandler.UpdateMemberRole)
 					groups.GET("/:groupUuid/member-ids", groupHandler.GetGroupMemberIDs)
 				}
 			}
 		}
 	}
-
 	return r
 }

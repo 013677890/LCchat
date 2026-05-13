@@ -1,13 +1,12 @@
 package repository
 
 import (
-	"testing"
-	"time"
-
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/gorm"
+	"testing"
+	"time"
 )
 
 func TestCanRemoveGroupMemberRoleMatrix(t *testing.T) {
@@ -26,14 +25,33 @@ func TestCanRemoveGroupMemberRoleMatrix(t *testing.T) {
 		{name: "普通成员不能移除普通成员", operatorRole: memberRoleMember, targetRole: memberRoleMember, want: false},
 		{name: "未知角色无权限", operatorRole: -1, targetRole: memberRoleMember, want: false},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, canRemoveGroupMember(tc.operatorRole, tc.targetRole))
 		})
 	}
 }
-
+func TestCanUpdateGroupMemberRoleMatrix(t *testing.T) {
+	cases := []struct {
+		name              string
+		operatorRole      int8
+		currentTargetRole int8
+		nextTargetRole    int8
+		want              bool
+	}{
+		{name: "群主可设置管理员", operatorRole: memberRoleOwner, currentTargetRole: memberRoleMember, nextTargetRole: memberRoleAdmin, want: true},
+		{name: "群主可取消管理员", operatorRole: memberRoleOwner, currentTargetRole: memberRoleAdmin, nextTargetRole: memberRoleMember, want: true},
+		{name: "群主不能设置群主", operatorRole: memberRoleOwner, currentTargetRole: memberRoleMember, nextTargetRole: memberRoleOwner, want: false},
+		{name: "管理员不能设置角色", operatorRole: memberRoleAdmin, currentTargetRole: memberRoleMember, nextTargetRole: memberRoleAdmin, want: false},
+		{name: "普通成员不能设置角色", operatorRole: memberRoleMember, currentTargetRole: memberRoleMember, nextTargetRole: memberRoleAdmin, want: false},
+		{name: "不能更新群主角色", operatorRole: memberRoleOwner, currentTargetRole: memberRoleOwner, nextTargetRole: memberRoleMember, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, canUpdateGroupMemberRole(tc.operatorRole, tc.currentTargetRole, tc.nextTargetRole))
+		})
+	}
+}
 func TestIsActiveGroupMember(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
@@ -47,45 +65,43 @@ func TestIsActiveGroupMember(t *testing.T) {
 		{name: "已踢出", member: &model.GroupMember{Status: memberStatusKicked}, want: false},
 		{name: "软删成员", member: &model.GroupMember{Status: memberStatusNormal, DeletedAt: deletedAt(now)}, want: false},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, isActiveGroupMember(tc.member))
 		})
 	}
 }
-
 func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
 	updatedAt := time.Unix(1710000000, 0)
 	group := &model.GroupInfo{
 		Uuid:      "group-1",
 		Name:      "测试群",
 		Avatar:    "avatar.png",
+		Notice:    "欢迎加入",
 		OwnerUuid: "owner-1",
 		MemberCnt: 3,
+		AddMode:   1,
 		Status:    groupStatusNormal,
 		UpdatedAt: updatedAt,
 	}
-
 	// 事件快照需要完整承接缓存投影所需字段，回放后应能还原出一致的群资料视图。
 	snapshot := buildGroupSnapshot(group)
 	restored := buildGroupInfoFromSnapshot(snapshot)
-
 	if assert.NotNil(t, snapshot) && assert.NotNil(t, restored) {
 		assert.Equal(t, group.Uuid, snapshot.GroupUUID)
 		assert.Equal(t, group.MemberCnt, int(snapshot.MemberCount))
 		assert.Equal(t, group.UpdatedAt.Unix(), snapshot.UpdatedAtUnix)
-
 		assert.Equal(t, group.Uuid, restored.Uuid)
 		assert.Equal(t, group.Name, restored.Name)
 		assert.Equal(t, group.Avatar, restored.Avatar)
+		assert.Equal(t, group.Notice, restored.Notice)
 		assert.Equal(t, group.OwnerUuid, restored.OwnerUuid)
 		assert.Equal(t, group.MemberCnt, restored.MemberCnt)
+		assert.Equal(t, group.AddMode, restored.AddMode)
 		assert.Equal(t, group.Status, restored.Status)
 		assert.True(t, group.UpdatedAt.Equal(restored.UpdatedAt))
 	}
 }
-
 func TestBuildGroupMemberSnapshotsDeduplicate(t *testing.T) {
 	joinedAt := time.UnixMilli(1710000000123)
 	members := []*model.GroupMember{
@@ -94,22 +110,18 @@ func TestBuildGroupMemberSnapshotsDeduplicate(t *testing.T) {
 		{GroupUuid: "group-1", UserUuid: "user-1", Role: memberRoleMember, JoinedAt: joinedAt.Add(time.Minute)},
 		{GroupUuid: "group-1", UserUuid: "user-2", Role: memberRoleMember, JoinedAt: joinedAt.Add(2 * time.Minute)},
 	}
-
 	// 写链路合并“新增成员 + 恢复成员”时可能出现重复 UUID，mapper 必须保证先到的有效快照只保留一次。
 	snapshots := buildGroupMemberSnapshots(members)
 	userUUIDs := collectGroupMemberSnapshotUUIDs(members)
-
 	if assert.Len(t, snapshots, 2) {
 		assert.Equal(t, "user-1", snapshots[0].UserUUID)
 		assert.Equal(t, int32(memberRoleAdmin), snapshots[0].Role)
 		assert.Equal(t, joinedAt.UnixMilli(), snapshots[0].JoinedAtUnixMs)
-
 		assert.Equal(t, "user-2", snapshots[1].UserUUID)
 		assert.Equal(t, int32(memberRoleMember), snapshots[1].Role)
 	}
 	assert.Equal(t, []string{"user-1", "user-2"}, userUUIDs)
 }
-
 func TestValidateGroupCacheEventPayload(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -145,7 +157,6 @@ func TestValidateGroupCacheEventPayload(t *testing.T) {
 			wantErr: false,
 		},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateGroupCacheEventPayload(tc.payload)
@@ -157,7 +168,6 @@ func TestValidateGroupCacheEventPayload(t *testing.T) {
 		})
 	}
 }
-
 func TestCollectProjectedUserUUIDs(t *testing.T) {
 	payloadWithExplicitUsers := groupevent.GroupCacheEventPayload{
 		UserUUIDs: []string{"user-1", "user-2"},
@@ -166,7 +176,6 @@ func TestCollectProjectedUserUUIDs(t *testing.T) {
 		},
 	}
 	assert.Equal(t, []string{"user-1", "user-2"}, collectProjectedUserUUIDs(payloadWithExplicitUsers))
-
 	payloadWithMembers := groupevent.GroupCacheEventPayload{
 		Members: []groupevent.GroupMemberSnapshot{
 			{UserUUID: "user-1"},
@@ -174,12 +183,10 @@ func TestCollectProjectedUserUUIDs(t *testing.T) {
 			{UserUUID: "user-2"},
 		},
 	}
-
 	// 当事件没有显式 user_uuids 时，projector 需要从成员快照中回退提取并去重，
 	// 这样新增成员和恢复成员都能稳定更新 user_groups 反向索引。
 	assert.Equal(t, []string{"user-1", "user-2"}, collectProjectedUserUUIDs(payloadWithMembers))
 }
-
 func deletedAt(t time.Time) gorm.DeletedAt {
 	return gorm.DeletedAt{Time: t, Valid: true}
 }

@@ -235,12 +235,12 @@ func (s *Syncer) consumeLoop() {
         if len(batch) == 0 {
             continue
         }
-        
+
         // 给每次批量发送增加 10 秒超时控制
         ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
         err := s.handler(ctx, batch)
         cancel() // 必须调 cancel 释放资源
-        
+
         if err != nil {
             // 失败回塞到缓冲 map，等待下次消费。
             s.mergePending(batch)

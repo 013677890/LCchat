@@ -15,37 +15,37 @@ service AuthService {
 	// 建议调用超时：500ms。
 	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc Register(RegisterRequest) returns (RegisterResponse);
-	
+
 	// Login 用户登录（密码）
 	// 建议调用超时：500ms。
 	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc Login(LoginRequest) returns (LoginResponse);
-	
+
 	// LoginByCode 验证码登录
 	// 建议调用超时：500ms。
 	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc LoginByCode(LoginByCodeRequest) returns (LoginByCodeResponse);
-	
+
 	// SendVerifyCode 发送验证码
 	// 建议调用超时：500ms。
 	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc SendVerifyCode(SendVerifyCodeRequest) returns (SendVerifyCodeResponse);
-	
+
 	// VerifyCode 校验验证码
 	// 建议调用超时：500ms。
 	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc VerifyCode(VerifyCodeRequest) returns (VerifyCodeResponse);
-	
+
 	// RefreshToken 刷新Token
 	// 建议调用超时：300ms。
 	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
-	
+
 	// Logout 用户登出
 	// 建议调用超时：1000ms。
 	// 若调用方已有更短父 deadline，应优先服从父预算。
 	rpc Logout(LogoutRequest) returns (LogoutResponse);
-	
+
 	// ResetPassword 重置密码
 	// 建议调用超时：500ms。
 	// 若调用方已有更短父 deadline，应优先服从父预算。

@@ -2,40 +2,52 @@ package repository
 
 import (
 	"context"
-
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 )
+
+// GroupInfoUpdates 描述群资料更新意图。
+//
+// 使用显式字段集合而不是继续堆叠方法参数，原因是：
+//  1. 第二批资料字段已经扩展到 name/avatar/notice/add_mode；
+//  2. optional 字段需要保留“未传”和“显式更新为空值”的区别；
+//  3. service 与 repository 共享同一份更新语义，能避免分层间再次发明协议。
+type GroupInfoUpdates struct {
+	Name    *string
+	Avatar  *string
+	Notice  *string
+	AddMode *int8
+}
+
+// IsEmpty 判断当前更新意图是否为空。
+func (u GroupInfoUpdates) IsEmpty() bool {
+	return u.Name == nil && u.Avatar == nil && u.Notice == nil && u.AddMode == nil
+}
 
 // IGroupRepository 定义 group-service 当前阶段需要的仓储抽象。
 type IGroupRepository interface {
 	// CreateGroup 创建群与初始成员关系。
 	CreateGroup(ctx context.Context, group *model.GroupInfo, members []*model.GroupMember) error
-
 	// AddMembers 向群内添加成员。
 	AddMembers(ctx context.Context, groupUUID, operatorUUID string, members []*model.GroupMember) error
-
 	// RemoveMember 移除或退出群成员。
 	RemoveMember(ctx context.Context, groupUUID, operatorUUID, targetUUID string) error
-
 	// DismissGroup 解散群。
 	DismissGroup(ctx context.Context, groupUUID, operatorUUID string) error
-
 	// UpdateGroupInfo 更新群资料。
-	UpdateGroupInfo(ctx context.Context, groupUUID, operatorUUID string, name, avatar *string) error
-
+	UpdateGroupInfo(ctx context.Context, groupUUID, operatorUUID string, updates GroupInfoUpdates) error
+	// TransferGroupOwner 转让群主。
+	TransferGroupOwner(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string) error
+	// UpdateMemberRole 更新群成员角色。
+	UpdateMemberRole(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string, role int8) error
 	// GetGroupInfo 按群 UUID 获取有效群资料。
 	GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error)
-
 	// GetGroupMembers 获取群内有效成员列表。
 	GetGroupMembers(ctx context.Context, groupUUID string) ([]*model.GroupMember, error)
-
 	// CheckGroupMember 检查指定用户是否仍是群内有效成员，并返回角色。
 	CheckGroupMember(ctx context.Context, groupUUID, userUUID string) (bool, int8, error)
-
 	// ListUserGroups 获取当前用户所属的有效群列表。
 	ListUserGroups(ctx context.Context, userUUID string) ([]*model.GroupInfo, error)
-
 	// GetUserProfiles 按用户 UUID 批量查询资料，用于补齐昵称和头像。
 	GetUserProfiles(ctx context.Context, userUUIDs []string) (map[string]*model.UserProfile, error)
 }

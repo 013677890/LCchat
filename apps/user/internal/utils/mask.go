@@ -18,11 +18,11 @@ func MaskEmail(email string) string {
 	if len(parts) != 2 || len(parts[0]) == 0 {
 		return "***"
 	}
-	
+
 	if len(parts[0]) == 1 {
 		return "*@" + parts[1]
 	}
-	
+
 	return parts[0][:1] + "***@" + parts[1]
 }
 
@@ -33,15 +33,15 @@ func MaskName(name string) string {
 	if len(runes) == 0 {
 		return "***"
 	}
-	
+
 	if len(runes) == 1 {
 		return string(runes[0])
 	}
-	
+
 	result := string(runes[0])
 	for i := 1; i < len(runes); i++ {
 		result += "*"
 	}
-	
+
 	return result
 }

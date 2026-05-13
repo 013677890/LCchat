@@ -15,33 +15,33 @@ service UserService {
 	// GetProfile 获取个人信息
 	// 建议调用超时：300ms。
 	rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
-	
+
 	// GetOtherProfile 获取他人信息
 	// 建议调用超时：300ms。
 	rpc GetOtherProfile(GetOtherProfileRequest) returns (GetOtherProfileResponse);
-	
+
 	// SearchUser 搜索用户
 	// 建议调用超时：800ms。
 	rpc SearchUser(SearchUserRequest) returns (SearchUserResponse);
-	
+
 	// UpdateProfile 更新基本信息
 	// 成功后异步回写 auth 冗余字段（见 InternalAuthService.UpdateLoginDisplay）
 	// 建议调用超时：500ms。
 	rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
-	
+
 	// UploadAvatar 上传头像
 	// 成功后异步回写 auth 冗余字段
 	// 建议调用超时：500ms。
 	rpc UploadAvatar(UploadAvatarRequest) returns (UploadAvatarResponse);
-	
+
 	// GetQRCode 获取用户二维码
 	// 建议调用超时：300ms。
 	rpc GetQRCode(GetQRCodeRequest) returns (GetQRCodeResponse);
-	
+
 	// ParseQRCode 解析二维码
 	// 建议调用超时：300ms。
 	rpc ParseQRCode(ParseQRCodeRequest) returns (ParseQRCodeResponse);
-	
+
 	// BatchGetProfile 批量获取用户信息
 	// 建议调用超时：800ms。
 	rpc BatchGetProfile(BatchGetProfileRequest) returns (BatchGetProfileResponse);

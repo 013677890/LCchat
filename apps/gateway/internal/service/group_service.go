@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
@@ -45,6 +44,18 @@ func (s *GroupServiceImpl) GetGroupInfo(ctx context.Context, req *dto.GetGroupIn
 // UpdateGroupInfo 更新群资料。
 func (s *GroupServiceImpl) UpdateGroupInfo(ctx context.Context, req *dto.UpdateGroupInfoRequest) error {
 	_, err := s.groupClient.UpdateGroupInfo(ctx, dto.ConvertToProtoUpdateGroupInfoRequest(req))
+	return err
+}
+
+// TransferGroupOwner 转让群主。
+func (s *GroupServiceImpl) TransferGroupOwner(ctx context.Context, req *dto.TransferGroupOwnerRequest) error {
+	_, err := s.groupClient.TransferGroupOwner(ctx, dto.ConvertToProtoTransferGroupOwnerRequest(req))
+	return err
+}
+
+// UpdateMemberRole 更新群成员角色。
+func (s *GroupServiceImpl) UpdateMemberRole(ctx context.Context, req *dto.UpdateGroupMemberRoleRequest) error {
+	_, err := s.groupClient.UpdateMemberRole(ctx, dto.ConvertToProtoUpdateGroupMemberRoleRequest(req))
 	return err
 }
 

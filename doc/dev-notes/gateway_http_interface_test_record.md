@@ -12,9 +12,9 @@
 - 期望类型: health_success
 - 结果: PASS_NO_HEALTH_LOG
 - HTTP 状态: 200
-- 业务码: 
+- 业务码:
 - 响应摘要: {"status":"ok"}
-- 命中服务: 
+- 命中服务:
 - trace_id: bc3d5ba8-91f4-4329-8961-a67fff90e139
 - 日志摘要: (empty)
 
@@ -26,7 +26,7 @@
 - 期望类型: health_success
 - 结果: PASS
 - HTTP 状态: 200
-- 业务码: 
+- 业务码:
 - 响应摘要: # HELP gateway_grpc_request_duration_seconds gRPC request latency distributions in seconds
 # TYPE gateway_grpc_request_duration_seconds histogram
 gateway_grpc_request_duration_seconds_bucket{method="BatchCheckIsFriend",service="relation.FriendService",le="0.005"} 5
@@ -149,4 +149,3 @@ gateway_grpc_request_duration_seconds_bucket{method="BatchCheckIsFriend",ser...
 - 命中服务: auth-1, gateway-1
 - trace_id: efc204c0-a34a-425c-aed3-6e4f15c8ed37
 - 日志摘要: auth-1     | {"level":"info","ts":"2026-05-07T10:06:26.88186773Z","caller":"grpcx/logging.go:83","msg":"gRPC 请求完成","method":"/auth.AuthService/LoginByCode","cost":12,"grpc_code":"OK","trace_id":"efc204c0-a34a-425c-aed3-6e4f15c8ed37","device_id":"dev-c1"} || gateway-1  | {"level":"info","ts":"2026-05-07T10:06:26.882179737Z","caller":"middleware/grpc_logger.go:40","msg":"Gateway gRPC 请求成功","method":"/auth.AuthService/L...
-

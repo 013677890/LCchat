@@ -83,10 +83,10 @@ func main() {
         )
         panic(err)
     }
-    
+
     // 设置全局 MinIO 客户端
     pkgminio.ReplaceGlobal(minioClient)
-    
+
     logger.Info(context.Background(), "MinIO 初始化成功",
         logger.String("endpoint", minioConfig.Endpoint),
         logger.String("bucket", minioConfig.BucketName),
@@ -128,7 +128,7 @@ func UploadImage(ctx context.Context, reader io.Reader, fileSize int64, fileName
             "upload_time": time.Now().String(),
         },
     })
-    
+
     if err != nil {
         logger.Error(ctx, "上传文件失败", logger.ErrorField("error", err))
         return nil, err
@@ -209,7 +209,7 @@ func UploadAvatarHandler(c *gin.Context) {
         FileName:    fileName,
         ContentType: contentType,
     })
-    
+
     if err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{
             "code":    500,
@@ -345,15 +345,15 @@ func GetTemporaryURL(ctx context.Context, objectName string) (string, error) {
 ```go
 func UploadWithDatePrefix(ctx context.Context, reader io.Reader, size int64) (*pkgminio.UploadResult, error) {
     client := pkgminio.Client()
-    
+
     // 按日期生成路径: images/2024/01/29/
     now := time.Now()
     pathPrefix := fmt.Sprintf("images/%d/%02d/%02d/", now.Year(), now.Month(), now.Day())
-    
+
     result, err := client.Upload(ctx, reader, size, pkgminio.UploadOptions{
         PathPrefix: pathPrefix,
     })
-    
+
     return result, err
 }
 ```
@@ -363,10 +363,10 @@ func UploadWithDatePrefix(ctx context.Context, reader io.Reader, size int64) (*p
 ```go
 func UploadUserFile(ctx context.Context, userID string, reader io.Reader, size int64, fileType string) (*pkgminio.UploadResult, error) {
     client := pkgminio.Client()
-    
+
     // 路径: users/{userID}/{fileType}/
     pathPrefix := fmt.Sprintf("users/%s/%s/", userID, fileType)
-    
+
     result, err := client.Upload(ctx, reader, size, pkgminio.UploadOptions{
         PathPrefix: pathPrefix,
         Metadata: map[string]string{
@@ -374,7 +374,7 @@ func UploadUserFile(ctx context.Context, userID string, reader io.Reader, size i
             "file_type": fileType,
         },
     })
-    
+
     return result, err
 }
 ```
@@ -400,7 +400,7 @@ func (pr *ProgressReader) Read(p []byte) (int, error) {
 
 func UploadWithProgress(ctx context.Context, reader io.Reader, size int64) error {
     client := pkgminio.Client()
-    
+
     // 创建带进度的 reader
     progressReader := &ProgressReader{
         reader: reader,
@@ -414,11 +414,11 @@ func UploadWithProgress(ctx context.Context, reader io.Reader, size int64) error
             )
         },
     }
-    
+
     _, err := client.Upload(ctx, progressReader, size, pkgminio.UploadOptions{
         PathPrefix: "large-files/",
     })
-    
+
     return err
 }
 ```
@@ -513,7 +513,7 @@ if err != nil {
         logger.Int64("size", size),
         logger.ErrorField("error", err),
     )
-    
+
     // 返回用户友好的错误信息
     return nil, errors.New("文件上传失败，请稍后重试")
 }
@@ -538,38 +538,38 @@ data, err := io.ReadAll(reader)
 ```go
 func UploadMultipleFiles(ctx context.Context, files []FileData) error {
     client := pkgminio.Client()
-    
+
     var wg sync.WaitGroup
     errors := make(chan error, len(files))
-    
+
     for _, file := range files {
         wg.Add(1)
         go func(f FileData) {
             defer wg.Done()
-            
+
             _, err := client.Upload(ctx, f.Reader, f.Size, pkgminio.UploadOptions{
                 PathPrefix: "batch/",
             })
-            
+
             if err != nil {
                 errors <- err
             }
         }(file)
     }
-    
+
     wg.Wait()
     close(errors)
-    
+
     // 检查是否有错误
     var uploadErrors []error
     for err := range errors {
         uploadErrors = append(uploadErrors, err)
     }
-    
+
     if len(uploadErrors) > 0 {
         return fmt.Errorf("批量上传失败: %d/%d", len(uploadErrors), len(files))
     }
-    
+
     return nil
 }
 ```

@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"strconv"
 )
 
 // NewGroupCacheProjectorRepository 创建 group.cache 投影仓储实例。
@@ -34,7 +33,6 @@ func (r *groupRepositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload 
 	if err := validateGroupCacheEventPayload(payload); err != nil {
 		return err
 	}
-
 	switch payload.Action {
 	case groupevent.ActionGroupCreated:
 		return r.applyGroupCreatedEvent(ctx, payload)
@@ -46,6 +44,10 @@ func (r *groupRepositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload 
 		return r.applyGroupDismissedEvent(ctx, payload)
 	case groupevent.ActionGroupInfoUpdated:
 		return r.applyGroupInfoUpdatedEvent(ctx, payload)
+	case groupevent.ActionOwnerTransferred:
+		return r.applyOwnerTransferredEvent(ctx, payload)
+	case groupevent.ActionMemberRoleUpdated:
+		return r.applyMemberRoleUpdatedEvent(ctx, payload)
 	default:
 		return fmt.Errorf("%w: unsupported action %s", ErrInvalidProjectorPayload, payload.Action)
 	}
@@ -62,7 +64,6 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 	if payload.EventID == "" || payload.GroupUUID == "" || payload.Action == "" {
 		return fmt.Errorf("%w: missing base fields", ErrInvalidProjectorPayload)
 	}
-
 	switch payload.Action {
 	case groupevent.ActionGroupCreated:
 		if payload.Group == nil {
@@ -86,10 +87,16 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 		if payload.Group == nil {
 			return fmt.Errorf("%w: %s missing group snapshot", ErrInvalidProjectorPayload, payload.Action)
 		}
+	case groupevent.ActionOwnerTransferred, groupevent.ActionMemberRoleUpdated:
+		if payload.Group == nil {
+			return fmt.Errorf("%w: %s missing group snapshot", ErrInvalidProjectorPayload, payload.Action)
+		}
+		if len(payload.Members) == 0 {
+			return fmt.Errorf("%w: %s missing member snapshots", ErrInvalidProjectorPayload, payload.Action)
+		}
 	default:
 		return fmt.Errorf("%w: unsupported action %s", ErrInvalidProjectorPayload, payload.Action)
 	}
-
 	return nil
 }
 
@@ -104,12 +111,10 @@ func (r *groupRepositoryImpl) applyGroupCreatedEvent(ctx context.Context, payloa
 	if err := r.setGroupInfoCache(ctx, group); err != nil {
 		return err
 	}
-
 	members := buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members)
 	if err := r.rebuildGroupMembersCache(ctx, payload.GroupUUID, members); err != nil {
 		return err
 	}
-
 	return r.addGroupToUserGroupsIfExists(ctx, collectProjectedUserUUIDs(payload), group)
 }
 
@@ -124,13 +129,11 @@ func (r *groupRepositoryImpl) applyMemberAddedEvent(ctx context.Context, payload
 	if err := r.setGroupInfoCacheIfExists(ctx, group); err != nil {
 		return err
 	}
-
 	for _, member := range buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members) {
 		if err := r.upsertGroupMemberCacheIfExists(ctx, payload.GroupUUID, member); err != nil {
 			return err
 		}
 	}
-
 	return r.addGroupToUserGroupsIfExists(ctx, collectProjectedUserUUIDs(payload), group)
 }
 
@@ -173,10 +176,43 @@ func (r *groupRepositoryImpl) applyGroupDismissedEvent(ctx context.Context, payl
 
 // applyGroupInfoUpdatedEvent 处理群资料变更后的缓存投影。
 //
-// 资料更新只改 `group:info` 主缓存，不主动触碰 members / user_groups，
-// 因为这两个结构都不依赖 name / avatar 字段。
+// 第二批资料更新只改 `group:info` 主缓存，不主动触碰 members / user_groups，
+// 因为成员结构与反向索引都不依赖 notice / add_mode 这些资料字段。
 func (r *groupRepositoryImpl) applyGroupInfoUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
 	return r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group))
+}
+
+// applyOwnerTransferredEvent 处理群主转让后的缓存投影。
+//
+// 该事件需要同步两类缓存：
+//  1. `group:info` 里的 owner_uuid；
+//  2. `group:members` 中老群主和新群主的 role。
+func (r *groupRepositoryImpl) applyOwnerTransferredEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+	if err := r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group)); err != nil {
+		return err
+	}
+	for _, member := range buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members) {
+		if err := r.upsertGroupMemberCacheIfExists(ctx, payload.GroupUUID, member); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMemberRoleUpdatedEvent 处理成员角色变更后的缓存投影。
+//
+// 角色变更不会改变成员集合和 user_groups 反向索引，
+// 因此这里只 patch 群资料主缓存与目标成员 role 字段。
+func (r *groupRepositoryImpl) applyMemberRoleUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+	if err := r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group)); err != nil {
+		return err
+	}
+	for _, member := range buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members) {
+		if err := r.upsertGroupMemberCacheIfExists(ctx, payload.GroupUUID, member); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // setGroupInfoCacheIfExists 仅在 `group:info` 已存在时覆盖最新群快照并刷新 TTL。
@@ -186,11 +222,9 @@ func (r *groupRepositoryImpl) setGroupInfoCacheIfExists(ctx context.Context, gro
 	if r == nil || r.redisClient == nil || group == nil || group.Uuid == "" {
 		return nil
 	}
-
 	cacheKey := rediskey.GroupInfoKey(group.Uuid)
 	luaScript := goredis.NewScript(luaSetStringIfExists)
 	expireSeconds := int(getRandomExpireTime(rediskey.GroupInfoTTL).Seconds())
-
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
 		encodeGroupInfoCacheValue(group),
@@ -213,7 +247,6 @@ func (r *groupRepositoryImpl) addGroupToUserGroupsIfExists(ctx context.Context, 
 	if r == nil || r.redisClient == nil || group == nil || group.Uuid == "" || len(userUUIDs) == 0 {
 		return nil
 	}
-
 	seen := make(map[string]struct{}, len(userUUIDs))
 	for _, userUUID := range userUUIDs {
 		if userUUID == "" {
@@ -223,7 +256,6 @@ func (r *groupRepositoryImpl) addGroupToUserGroupsIfExists(ctx context.Context, 
 			continue
 		}
 		seen[userUUID] = struct{}{}
-
 		if err := r.addGroupToUserGroupIfExists(ctx, userUUID, group); err != nil {
 			return err
 		}
@@ -236,11 +268,9 @@ func (r *groupRepositoryImpl) addGroupToUserGroupIfExists(ctx context.Context, u
 	if r == nil || r.redisClient == nil || userUUID == "" || group == nil || group.Uuid == "" {
 		return nil
 	}
-
 	cacheKey := rediskey.UserGroupListKey(userUUID)
 	luaScript := goredis.NewScript(luaZAddIfExists)
 	expireSeconds := int(getRandomExpireTime(rediskey.UserGroupListTTL).Seconds())
-
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
 		strconv.FormatInt(group.UpdatedAt.Unix(), 10),
@@ -262,11 +292,9 @@ func (r *groupRepositoryImpl) removeGroupFromUserGroupsIfExists(ctx context.Cont
 	if r == nil || r.redisClient == nil || userUUID == "" || groupUUID == "" {
 		return nil
 	}
-
 	cacheKey := rediskey.UserGroupListKey(userUUID)
 	luaScript := goredis.NewScript(luaZRemIfExists)
 	expireSeconds := int(getRandomExpireTime(rediskey.UserGroupListTTL).Seconds())
-
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
 		groupUUID,
@@ -290,7 +318,6 @@ func collectProjectedUserUUIDs(payload groupevent.GroupCacheEventPayload) []stri
 	if len(payload.UserUUIDs) > 0 {
 		return payload.UserUUIDs
 	}
-
 	result := make([]string, 0, len(payload.Members))
 	seen := make(map[string]struct{}, len(payload.Members))
 	for _, member := range payload.Members {

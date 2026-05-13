@@ -335,7 +335,6 @@ in this project. It is intended for AI agents and new contributors.
   }
   ```
 
-
 #### 3.19 Cross-domain Aggregation (Gateway)
 - 社交域只返回关系数据（UUID、备注、标签等），避免跨库依赖。
 - 网关负责聚合用户信息：

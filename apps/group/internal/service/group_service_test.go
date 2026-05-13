@@ -3,9 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
-	"testing"
-
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"github.com/013677890/LCchat-Backend/consts"
@@ -14,19 +11,23 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"strings"
+	"testing"
 )
 
 type fakeGroupRepoForService struct {
-	createGroupFn     func(context.Context, *model.GroupInfo, []*model.GroupMember) error
-	addMembersFn      func(context.Context, string, string, []*model.GroupMember) error
-	removeMemberFn    func(context.Context, string, string, string) error
-	dismissGroupFn    func(context.Context, string, string) error
-	updateGroupInfoFn func(context.Context, string, string, *string, *string) error
-	getGroupInfoFn    func(context.Context, string) (*model.GroupInfo, error)
-	getGroupMembersFn func(context.Context, string) ([]*model.GroupMember, error)
-	checkMemberFn     func(context.Context, string, string) (bool, int8, error)
-	listUserGroupsFn  func(context.Context, string) ([]*model.GroupInfo, error)
-	getUserProfilesFn func(context.Context, []string) (map[string]*model.UserProfile, error)
+	createGroupFn      func(context.Context, *model.GroupInfo, []*model.GroupMember) error
+	addMembersFn       func(context.Context, string, string, []*model.GroupMember) error
+	removeMemberFn     func(context.Context, string, string, string) error
+	dismissGroupFn     func(context.Context, string, string) error
+	updateGroupInfoFn  func(context.Context, string, string, repository.GroupInfoUpdates) error
+	transferOwnerFn    func(context.Context, string, string, string) error
+	updateMemberRoleFn func(context.Context, string, string, string, int8) error
+	getGroupInfoFn     func(context.Context, string) (*model.GroupInfo, error)
+	getGroupMembersFn  func(context.Context, string) ([]*model.GroupMember, error)
+	checkMemberFn      func(context.Context, string, string) (bool, int8, error)
+	listUserGroupsFn   func(context.Context, string) ([]*model.GroupInfo, error)
+	getUserProfilesFn  func(context.Context, []string) (map[string]*model.UserProfile, error)
 }
 
 func (f *fakeGroupRepoForService) CreateGroup(ctx context.Context, group *model.GroupInfo, members []*model.GroupMember) error {
@@ -35,80 +36,86 @@ func (f *fakeGroupRepoForService) CreateGroup(ctx context.Context, group *model.
 	}
 	return f.createGroupFn(ctx, group, members)
 }
-
 func (f *fakeGroupRepoForService) AddMembers(ctx context.Context, groupUUID, operatorUUID string, members []*model.GroupMember) error {
 	if f.addMembersFn == nil {
 		return nil
 	}
 	return f.addMembersFn(ctx, groupUUID, operatorUUID, members)
 }
-
 func (f *fakeGroupRepoForService) RemoveMember(ctx context.Context, groupUUID, operatorUUID, targetUUID string) error {
 	if f.removeMemberFn == nil {
 		return nil
 	}
 	return f.removeMemberFn(ctx, groupUUID, operatorUUID, targetUUID)
 }
-
 func (f *fakeGroupRepoForService) DismissGroup(ctx context.Context, groupUUID, operatorUUID string) error {
 	if f.dismissGroupFn == nil {
 		return nil
 	}
 	return f.dismissGroupFn(ctx, groupUUID, operatorUUID)
 }
-
-func (f *fakeGroupRepoForService) UpdateGroupInfo(ctx context.Context, groupUUID, operatorUUID string, name, avatar *string) error {
+func (f *fakeGroupRepoForService) UpdateGroupInfo(ctx context.Context, groupUUID, operatorUUID string, updates repository.GroupInfoUpdates) error {
 	if f.updateGroupInfoFn == nil {
 		return nil
 	}
-	return f.updateGroupInfoFn(ctx, groupUUID, operatorUUID, name, avatar)
+	return f.updateGroupInfoFn(ctx, groupUUID, operatorUUID, updates)
 }
-
+func (f *fakeGroupRepoForService) TransferGroupOwner(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string) error {
+	if f.transferOwnerFn == nil {
+		return nil
+	}
+	return f.transferOwnerFn(ctx, groupUUID, operatorUUID, targetUserUUID)
+}
+func (f *fakeGroupRepoForService) UpdateMemberRole(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string, role int8) error {
+	if f.updateMemberRoleFn == nil {
+		return nil
+	}
+	return f.updateMemberRoleFn(ctx, groupUUID, operatorUUID, targetUserUUID, role)
+}
 func (f *fakeGroupRepoForService) GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error) {
 	if f.getGroupInfoFn == nil {
 		return nil, repository.ErrRecordNotFound
 	}
 	return f.getGroupInfoFn(ctx, groupUUID)
 }
-
 func (f *fakeGroupRepoForService) GetGroupMembers(ctx context.Context, groupUUID string) ([]*model.GroupMember, error) {
 	if f.getGroupMembersFn == nil {
 		return nil, nil
 	}
 	return f.getGroupMembersFn(ctx, groupUUID)
 }
-
 func (f *fakeGroupRepoForService) CheckGroupMember(ctx context.Context, groupUUID, userUUID string) (bool, int8, error) {
 	if f.checkMemberFn == nil {
 		return false, -1, nil
 	}
 	return f.checkMemberFn(ctx, groupUUID, userUUID)
 }
-
 func (f *fakeGroupRepoForService) ListUserGroups(ctx context.Context, userUUID string) ([]*model.GroupInfo, error) {
 	if f.listUserGroupsFn == nil {
 		return nil, nil
 	}
 	return f.listUserGroupsFn(ctx, userUUID)
 }
-
 func (f *fakeGroupRepoForService) GetUserProfiles(ctx context.Context, userUUIDs []string) (map[string]*model.UserProfile, error) {
 	if f.getUserProfilesFn == nil {
 		return map[string]*model.UserProfile{}, nil
 	}
 	return f.getUserProfilesFn(ctx, userUUIDs)
 }
-
 func groupServiceTestContext(userUUID string) context.Context {
 	return ctxmeta.WithUserUUID(context.Background(), userUUID)
 }
-
 func requireGroupBizCode(t *testing.T, err error, wantCode int) {
 	t.Helper()
 	require.Error(t, err)
 	require.Equal(t, wantCode, apperr.Code(err))
 }
-
+func stringPtr(value string) *string {
+	return &value
+}
+func int32Ptr(value int32) *int32 {
+	return &value
+}
 func TestCreateGroupBuildsGroupAndInitialMembers(t *testing.T) {
 	var gotGroup *model.GroupInfo
 	var gotMembers []*model.GroupMember
@@ -121,12 +128,10 @@ func TestCreateGroupBuildsGroupAndInitialMembers(t *testing.T) {
 		},
 	}
 	svc := NewGroupService(repo)
-
 	resp, err := svc.CreateGroup(groupServiceTestContext("owner-uuid"), &pb.CreateGroupRequest{
 		Name:        "  群组名称  ",
 		MemberUuids: []string{" member-a ", "owner-uuid", "member-a", "", "member-b"},
 	})
-
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, gotGroup)
@@ -135,22 +140,21 @@ func TestCreateGroupBuildsGroupAndInitialMembers(t *testing.T) {
 	assert.Equal(t, resp.GetGroupUuid(), gotGroup.Uuid)
 	assert.Equal(t, "群组名称", gotGroup.Name)
 	assert.Equal(t, defaultGroupAvatarURL, gotGroup.Avatar)
+	assert.Equal(t, "", gotGroup.Notice)
 	assert.Equal(t, "owner-uuid", gotGroup.OwnerUuid)
 	assert.Equal(t, len(gotMembers), gotGroup.MemberCnt)
+	assert.Equal(t, int8(0), gotGroup.AddMode)
 	assert.Equal(t, int8(0), gotGroup.Status)
-
 	assert.Equal(t, "owner-uuid", gotMembers[0].UserUuid)
 	assert.Equal(t, int8(2), gotMembers[0].Role)
 	assert.Equal(t, gotGroup.Uuid, gotMembers[0].GroupUuid)
 	assert.False(t, gotMembers[0].JoinedAt.IsZero())
-
 	assert.Equal(t, "member-a", gotMembers[1].UserUuid)
 	assert.Equal(t, "owner-uuid", gotMembers[1].Inviter)
 	assert.Equal(t, int8(0), gotMembers[1].Role)
 	assert.Equal(t, gotGroup.Uuid, gotMembers[1].GroupUuid)
 	assert.Equal(t, "member-b", gotMembers[2].UserUuid)
 }
-
 func TestCreateGroupValidation(t *testing.T) {
 	svc := NewGroupService(&fakeGroupRepoForService{})
 	cases := []struct {
@@ -164,7 +168,6 @@ func TestCreateGroupValidation(t *testing.T) {
 		{name: "空名称", ctx: groupServiceTestContext("owner"), req: &pb.CreateGroupRequest{Name: "   "}, want: consts.CodeParamError},
 		{name: "名称过长", ctx: groupServiceTestContext("owner"), req: &pb.CreateGroupRequest{Name: strings.Repeat("群", 65)}, want: consts.CodeGroupNameTooLong},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := svc.CreateGroup(tc.ctx, tc.req)
@@ -172,7 +175,6 @@ func TestCreateGroupValidation(t *testing.T) {
 		})
 	}
 }
-
 func TestAddMemberNormalizesInputAndCallsRepository(t *testing.T) {
 	var gotGroupUUID string
 	var gotOperatorUUID string
@@ -186,12 +188,10 @@ func TestAddMemberNormalizesInputAndCallsRepository(t *testing.T) {
 		},
 	}
 	svc := NewGroupService(repo)
-
 	err := svc.AddMember(groupServiceTestContext("admin-uuid"), &pb.AddMemberRequest{
 		GroupUuid: " group-uuid ",
 		UserUuids: []string{" member-a ", "member-a", "", "member-b"},
 	})
-
 	require.NoError(t, err)
 	assert.Equal(t, "group-uuid", gotGroupUUID)
 	assert.Equal(t, "admin-uuid", gotOperatorUUID)
@@ -200,7 +200,6 @@ func TestAddMemberNormalizesInputAndCallsRepository(t *testing.T) {
 	assert.Equal(t, "group-uuid", gotMembers[0].GroupUuid)
 	assert.Equal(t, "member-b", gotMembers[1].UserUuid)
 }
-
 func TestAddMemberSkipsRepositoryWhenNormalizedMembersEmpty(t *testing.T) {
 	called := false
 	repo := &fakeGroupRepoForService{
@@ -210,59 +209,86 @@ func TestAddMemberSkipsRepositoryWhenNormalizedMembersEmpty(t *testing.T) {
 		},
 	}
 	svc := NewGroupService(repo)
-
 	err := svc.AddMember(groupServiceTestContext("admin-uuid"), &pb.AddMemberRequest{
 		GroupUuid: "group-uuid",
 		UserUuids: []string{" ", ""},
 	})
-
 	require.NoError(t, err)
 	assert.False(t, called)
 }
-
 func TestUpdateGroupInfoParsesFieldsAndSkipsNoop(t *testing.T) {
 	var called int
-	var gotName *string
-	var gotAvatar *string
+	var gotUpdates repository.GroupInfoUpdates
 	repo := &fakeGroupRepoForService{
-		updateGroupInfoFn: func(_ context.Context, _, _ string, name, avatar *string) error {
+		updateGroupInfoFn: func(_ context.Context, _, _ string, updates repository.GroupInfoUpdates) error {
 			called++
-			gotName = name
-			gotAvatar = avatar
+			gotUpdates = updates
 			return nil
 		},
 	}
 	svc := NewGroupService(repo)
-
+	name := "  新群名  "
+	avatar := "  https://example.com/a.png  "
+	notice := "  新公告  "
+	addMode := int32(1)
 	err := svc.UpdateGroupInfo(groupServiceTestContext("admin-uuid"), &pb.UpdateGroupInfoRequest{
 		GroupUuid: " group-uuid ",
-		Name:      "  新群名  ",
-		Avatar:    "  https://example.com/a.png  ",
+		Name:      &name,
+		Avatar:    &avatar,
+		Notice:    &notice,
+		AddMode:   &addMode,
 	})
-
 	require.NoError(t, err)
-	require.NotNil(t, gotName)
-	require.NotNil(t, gotAvatar)
+	require.NotNil(t, gotUpdates.Name)
+	require.NotNil(t, gotUpdates.Avatar)
+	require.NotNil(t, gotUpdates.Notice)
+	require.NotNil(t, gotUpdates.AddMode)
 	assert.Equal(t, 1, called)
-	assert.Equal(t, "新群名", *gotName)
-	assert.Equal(t, "https://example.com/a.png", *gotAvatar)
-
+	assert.Equal(t, "新群名", *gotUpdates.Name)
+	assert.Equal(t, "https://example.com/a.png", *gotUpdates.Avatar)
+	assert.Equal(t, "新公告", *gotUpdates.Notice)
+	assert.Equal(t, int8(1), *gotUpdates.AddMode)
 	err = svc.UpdateGroupInfo(groupServiceTestContext("admin-uuid"), &pb.UpdateGroupInfoRequest{GroupUuid: "group-uuid"})
 	require.NoError(t, err)
 	assert.Equal(t, 1, called)
 }
-
 func TestUpdateGroupInfoRejectsBlankName(t *testing.T) {
 	svc := NewGroupService(&fakeGroupRepoForService{})
-
+	name := "   "
 	err := svc.UpdateGroupInfo(groupServiceTestContext("admin-uuid"), &pb.UpdateGroupInfoRequest{
 		GroupUuid: "group-uuid",
-		Name:      "   ",
+		Name:      &name,
 	})
-
 	requireGroupBizCode(t, err, consts.CodeParamError)
 }
-
+func TestTransferGroupOwnerAndUpdateMemberRolePassOperatorFromContext(t *testing.T) {
+	var transferArgs []string
+	var roleArgs []any
+	repo := &fakeGroupRepoForService{
+		transferOwnerFn: func(_ context.Context, groupUUID, operatorUUID, targetUserUUID string) error {
+			transferArgs = []string{groupUUID, operatorUUID, targetUserUUID}
+			return nil
+		},
+		updateMemberRoleFn: func(_ context.Context, groupUUID, operatorUUID, targetUserUUID string, role int8) error {
+			roleArgs = []any{groupUUID, operatorUUID, targetUserUUID, role}
+			return nil
+		},
+	}
+	svc := NewGroupService(repo)
+	err := svc.TransferGroupOwner(groupServiceTestContext("owner-uuid"), &pb.TransferGroupOwnerRequest{
+		GroupUuid:      " group-uuid ",
+		TargetUserUuid: " member-1 ",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"group-uuid", "owner-uuid", "member-1"}, transferArgs)
+	err = svc.UpdateMemberRole(groupServiceTestContext("owner-uuid"), &pb.UpdateMemberRoleRequest{
+		GroupUuid: " group-uuid ",
+		UserUuid:  " member-2 ",
+		Role:      1,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []any{"group-uuid", "owner-uuid", "member-2", int8(1)}, roleArgs)
+}
 func TestRemoveAndDismissPassOperatorFromContext(t *testing.T) {
 	var removeArgs []string
 	var dismissArgs []string
@@ -277,16 +303,13 @@ func TestRemoveAndDismissPassOperatorFromContext(t *testing.T) {
 		},
 	}
 	svc := NewGroupService(repo)
-
 	err := svc.RemoveMember(groupServiceTestContext("operator-uuid"), &pb.RemoveMemberRequest{GroupUuid: " group-uuid ", UserUuid: " target-uuid "})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"group-uuid", "operator-uuid", "target-uuid"}, removeArgs)
-
 	err = svc.DismissGroup(groupServiceTestContext("owner-uuid"), &pb.DismissGroupRequest{GroupUuid: " group-uuid "})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"group-uuid", "owner-uuid"}, dismissArgs)
 }
-
 func TestGroupWriteErrorMapping(t *testing.T) {
 	cases := []struct {
 		name string
@@ -298,9 +321,9 @@ func TestGroupWriteErrorMapping(t *testing.T) {
 		{name: "无权限", err: repository.ErrNoPermission, want: consts.CodeNoPermission},
 		{name: "不能踢群主", err: repository.ErrCannotKickOwner, want: consts.CodeCannotKickOwner},
 		{name: "群主不能退群", err: repository.ErrCannotQuitAsOwner, want: consts.CodeCannotQuitAsOwner},
+		{name: "成员不存在", err: repository.ErrGroupMemberNotFound, want: consts.CodeGroupMemberNotFound},
 		{name: "未知错误", err: errors.New("db down"), want: consts.CodeInternalError},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := mapGroupWriteError(tc.err, "写群失败")
@@ -308,19 +331,16 @@ func TestGroupWriteErrorMapping(t *testing.T) {
 		})
 	}
 }
-
 func TestCheckGroupMemberMapsDismissedAndNormalizesNonMemberRole(t *testing.T) {
 	svc := NewGroupService(&fakeGroupRepoForService{
 		checkMemberFn: func(context.Context, string, string) (bool, int8, error) {
 			return false, 0, nil
 		},
 	})
-
 	resp, err := svc.CheckGroupMember(context.Background(), &pb.CheckGroupMemberRequest{GroupUuid: " group-uuid ", UserUuid: " user-uuid "})
 	require.NoError(t, err)
 	assert.False(t, resp.GetIsMember())
 	assert.Equal(t, int32(-1), resp.GetRole())
-
 	svc = NewGroupService(&fakeGroupRepoForService{
 		checkMemberFn: func(context.Context, string, string) (bool, int8, error) {
 			return false, -1, repository.ErrGroupDismissed
@@ -329,7 +349,6 @@ func TestCheckGroupMemberMapsDismissedAndNormalizesNonMemberRole(t *testing.T) {
 	_, err = svc.CheckGroupMember(context.Background(), &pb.CheckGroupMemberRequest{GroupUuid: "group-uuid", UserUuid: "user-uuid"})
 	requireGroupBizCode(t, err, consts.CodeGroupAlreadyDismiss)
 }
-
 func TestGetGroupListUsesContextUserAndMapsResponse(t *testing.T) {
 	var gotUserUUID string
 	repo := &fakeGroupRepoForService{
@@ -345,7 +364,6 @@ func TestGetGroupListUsesContextUserAndMapsResponse(t *testing.T) {
 		},
 	}
 	svc := NewGroupService(repo)
-
 	resp, err := svc.GetGroupList(groupServiceTestContext("user-1"), &pb.GetGroupListRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, "user-1", gotUserUUID)
@@ -353,11 +371,9 @@ func TestGetGroupListUsesContextUserAndMapsResponse(t *testing.T) {
 	assert.Equal(t, "group-1", resp.GetGroups()[0].GetGroupUuid())
 	assert.Equal(t, "测试群", resp.GetGroups()[0].GetName())
 	assert.Equal(t, int32(3), resp.GetGroups()[0].GetMemberCount())
-
 	_, err = svc.GetGroupList(context.Background(), &pb.GetGroupListRequest{})
 	requireGroupBizCode(t, err, consts.CodeUnauthorized)
 }
-
 func TestGetGroupMemberIdsDeduplicatesMembers(t *testing.T) {
 	repo := &fakeGroupRepoForService{
 		getGroupMembersFn: func(context.Context, string) ([]*model.GroupMember, error) {
@@ -370,12 +386,10 @@ func TestGetGroupMemberIdsDeduplicatesMembers(t *testing.T) {
 		},
 	}
 	svc := NewGroupService(repo)
-
 	resp, err := svc.GetGroupMemberIds(context.Background(), &pb.GetGroupMemberIdsRequest{GroupUuid: " group-1 "})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"user-1", "user-2"}, resp.GetUserUuids())
 }
-
 func TestGetMemberListBuildsProfileAwareItems(t *testing.T) {
 	repo := &fakeGroupRepoForService{
 		getGroupMembersFn: func(context.Context, string) ([]*model.GroupMember, error) {
@@ -393,7 +407,6 @@ func TestGetMemberListBuildsProfileAwareItems(t *testing.T) {
 		},
 	}
 	svc := NewGroupService(repo)
-
 	resp, err := svc.GetMemberList(context.Background(), &pb.GetMemberListRequest{GroupUuid: "group-1"})
 	require.NoError(t, err)
 	require.Len(t, resp.GetMembers(), 2)

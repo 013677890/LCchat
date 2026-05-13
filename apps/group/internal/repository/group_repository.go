@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
-
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
@@ -13,6 +11,7 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"time"
 )
 
 // groupRepositoryImpl 是 group-service 仓储层的读写实现。
@@ -32,14 +31,12 @@ type groupRepositoryImpl struct {
 const (
 	groupStatusNormal    int8 = 0
 	groupStatusDismissed int8 = 2
-
-	memberRoleMember int8 = 0
-	memberRoleAdmin  int8 = 1
-	memberRoleOwner  int8 = 2
-
-	memberStatusNormal int8 = 0
-	memberStatusQuit   int8 = 1
-	memberStatusKicked int8 = 2
+	memberRoleMember     int8 = 0
+	memberRoleAdmin      int8 = 1
+	memberRoleOwner      int8 = 2
+	memberStatusNormal   int8 = 0
+	memberStatusQuit     int8 = 1
+	memberStatusKicked   int8 = 2
 )
 
 // NewGroupRepository 创建 group 仓储实例。
@@ -62,7 +59,6 @@ func (r *groupRepositoryImpl) CreateGroup(ctx context.Context, group *model.Grou
 		// member_cnt 以初始成员关系为准，避免上层漏填导致群人数与成员表不一致。
 		group.MemberCnt = len(members)
 	}
-
 	// 群基础资料和初始成员必须同事务写入，否则会出现“有群无群主”的不可恢复状态。
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(group).Error; err != nil {
@@ -81,7 +77,6 @@ func (r *groupRepositoryImpl) CreateGroup(ctx context.Context, group *model.Grou
 	if err != nil {
 		return err
 	}
-
 	// 创建群后缓存用全量重建，确保首批成员关系一次性成为缓存事实。
 	r.rebuildGroupMembersCacheAsync(ctx, group.Uuid, members)
 	return nil
@@ -92,13 +87,11 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" || len(members) == 0 {
 		return nil
 	}
-
 	// 同一批新增/恢复成员共享时间戳，避免成员列表排序因毫秒差异产生不稳定顺序。
 	now := time.Now()
 	// newMembers 用于缓存插入；restoredMembers 用于缓存 upsert，两类变更的 patch 语义不同。
 	newMembers := make([]*model.GroupMember, 0, len(members))
 	restoredMembers := make([]*model.GroupMember, 0, len(members))
-
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 先锁群记录，保证解散/禁用与成员写入之间不会并发穿插。
 		group, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID)
@@ -109,13 +102,11 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 		if err := r.ensureOperatorCanAddMembers(ctx, tx, groupUUID, operatorUUID); err != nil {
 			return err
 		}
-
 		// Unscoped 查询可同时发现“已退出/被踢/软删”的历史成员，用于幂等恢复入群。
 		existingMap, err := r.loadExistingMembersForUpdate(ctx, tx, groupUUID, collectWriteMemberUUIDs(members))
 		if err != nil {
 			return err
 		}
-
 		pendingCreates := make([]*model.GroupMember, 0, len(members))
 		restoredCount := 0
 		// 请求内重复 UUID 只处理一次，避免 member_cnt 和缓存 patch 被重复累加。
@@ -128,7 +119,6 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 				continue
 			}
 			seen[member.UserUuid] = struct{}{}
-
 			existing, exists := existingMap[member.UserUuid]
 			if !exists {
 				// 新成员走批量 Create，具体角色/邀请人以当前操作者和业务默认值落库。
@@ -144,12 +134,10 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 				newMembers = append(newMembers, created)
 				continue
 			}
-
 			if existing.Status == 0 && !existing.DeletedAt.Valid {
 				// 已经是有效成员时按幂等成功处理，不重复增加 member_cnt。
 				continue
 			}
-
 			// 历史成员重新入群要清空软删标记，并重置普通成员角色，避免旧管理员身份复活。
 			if err := tx.Unscoped().Model(&model.GroupMember{}).
 				Where("id = ?", existing.Id).
@@ -163,7 +151,6 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 				}).Error; err != nil {
 				return WrapDBError(err)
 			}
-
 			restored := *existing
 			restored.Status = 0
 			restored.Role = 0
@@ -174,7 +161,6 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 			restoredMembers = append(restoredMembers, &restored)
 			restoredCount++
 		}
-
 		insertedCount := 0
 		if len(pendingCreates) > 0 {
 			// OnConflict 兜底处理极端并发重复插入，最终 member_cnt 只按实际影响行数增加。
@@ -184,13 +170,11 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 			}
 			insertedCount = int(result.RowsAffected)
 		}
-
 		delta := insertedCount + restoredCount
 		if delta == 0 {
 			// 本批全部为已在群成员时，不刷新群更新时间，也不触发缓存写入。
 			return nil
 		}
-
 		// 群人数只在真实新增/恢复成员时递增，和 group_members 有效记录保持一致。
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
@@ -209,7 +193,6 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 	if err != nil {
 		return err
 	}
-
 	if len(newMembers) > 0 {
 		// 缓存存在时增量插入新 field；缓存缺失则留给读路径全量重建，避免局部集合污染缓存。
 		r.insertGroupMembersCacheAsync(ctx, groupUUID, newMembers)
@@ -218,7 +201,6 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 		// 恢复成员可能覆盖旧角色/时间/删除态，所以使用 upsert patch 更新完整字段。
 		r.upsertGroupMemberCacheAsync(ctx, groupUUID, member)
 	}
-
 	return nil
 }
 
@@ -227,7 +209,6 @@ func (r *groupRepositoryImpl) RemoveMember(ctx context.Context, groupUUID, opera
 	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" || targetUUID == "" {
 		return nil
 	}
-
 	// 只有事务内确认真实移除后才 patch 缓存，幂等空操作不需要打扰 Redis。
 	removed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -236,13 +217,11 @@ func (r *groupRepositoryImpl) RemoveMember(ctx context.Context, groupUUID, opera
 		if err != nil {
 			return err
 		}
-
 		// 操作者和目标成员一起加锁，避免角色变更/退群与本次移除判断交叉。
 		memberMap, err := r.loadExistingMembersForUpdate(ctx, tx, groupUUID, []string{operatorUUID, targetUUID})
 		if err != nil {
 			return err
 		}
-
 		var operator *model.GroupMember
 		if operatorUUID != targetUUID {
 			// 非本人退群时，操作者必须仍是有效成员，否则没有任何管理权限。
@@ -251,7 +230,6 @@ func (r *groupRepositoryImpl) RemoveMember(ctx context.Context, groupUUID, opera
 				return ErrNoPermission
 			}
 		}
-
 		target := memberMap[targetUUID]
 		if !isActiveGroupMember(target) {
 			// 目标已经不在群时按幂等成功处理，但普通成员不能借此探测或操作他人。
@@ -267,14 +245,12 @@ func (r *groupRepositoryImpl) RemoveMember(ctx context.Context, groupUUID, opera
 			}
 			return ErrCannotKickOwner
 		}
-
 		if operator != nil {
 			// 管理员只能踢普通成员，群主才能踢管理员，具体矩阵集中在 helper 内维护。
 			if !canRemoveGroupMember(operator.Role, target.Role) {
 				return ErrNoPermission
 			}
 		}
-
 		now := time.Now()
 		status := memberStatusQuit
 		if operatorUUID != targetUUID {
@@ -291,7 +267,6 @@ func (r *groupRepositoryImpl) RemoveMember(ctx context.Context, groupUUID, opera
 			}).Error; err != nil {
 			return WrapDBError(err)
 		}
-
 		// 使用 CASE 防御异常数据，避免成员数被并发/脏数据扣成负数。
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
@@ -310,7 +285,6 @@ func (r *groupRepositoryImpl) RemoveMember(ctx context.Context, groupUUID, opera
 	if err != nil {
 		return err
 	}
-
 	if removed {
 		// 只删除单个成员 field，其他成员缓存保持可用，降低写路径缓存成本。
 		r.removeGroupMemberCacheAsync(ctx, groupUUID, targetUUID)
@@ -323,7 +297,6 @@ func (r *groupRepositoryImpl) DismissGroup(ctx context.Context, groupUUID, opera
 	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" {
 		return nil
 	}
-
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 读取并锁定群记录，确保并发解散时只有一个事务执行状态变更。
 		group, err := r.loadGroupForUpdate(ctx, tx, groupUUID)
@@ -345,7 +318,6 @@ func (r *groupRepositoryImpl) DismissGroup(ctx context.Context, groupUUID, opera
 		if err != nil {
 			return err
 		}
-
 		// 解散只更新群状态；成员历史保留，读写路径统一通过群状态拦截。
 		updatedAt := time.Now()
 		if err := tx.Model(&model.GroupInfo{}).
@@ -363,18 +335,16 @@ func (r *groupRepositoryImpl) DismissGroup(ctx context.Context, groupUUID, opera
 	if err != nil {
 		return err
 	}
-
 	// 解散后成员缓存不能继续支撑权限判断，直接删除整份缓存比逐个 patch 更安全。
 	r.deleteGroupMembersCacheAsync(ctx, groupUUID)
 	return nil
 }
 
 // UpdateGroupInfo 更新群资料。
-func (r *groupRepositoryImpl) UpdateGroupInfo(ctx context.Context, groupUUID, operatorUUID string, name, avatar *string) error {
-	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" || (name == nil && avatar == nil) {
+func (r *groupRepositoryImpl) UpdateGroupInfo(ctx context.Context, groupUUID, operatorUUID string, updates GroupInfoUpdates) error {
+	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" || updates.IsEmpty() {
 		return nil
 	}
-
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 锁群记录保证资料更新不会和解散/禁用状态变更交叉提交。
 		group, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID)
@@ -385,38 +355,204 @@ func (r *groupRepositoryImpl) UpdateGroupInfo(ctx context.Context, groupUUID, op
 		if _, err := r.ensureOperatorRoleAtLeast(ctx, tx, groupUUID, operatorUUID, memberRoleAdmin); err != nil {
 			return err
 		}
-
-		updates := make(map[string]interface{}, 3)
-		if name != nil && *name != group.Name {
-			// 只写真实变化字段，避免无意义更新导致群列表排序抖动。
-			updates["name"] = *name
-		}
-		if avatar != nil && *avatar != group.Avatar {
-			updates["avatar"] = *avatar
-		}
-		if len(updates) == 0 {
+		updateMap := buildGroupInfoUpdateMap(group, updates)
+		if len(updateMap) == 0 {
 			// 无实际变化时不刷新 updated_at，保持读侧排序稳定。
 			return nil
 		}
-
 		updatedAt := time.Now()
-		updates["updated_at"] = updatedAt
+		updateMap["updated_at"] = updatedAt
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
-			Updates(updates).Error; err != nil {
+			Updates(updateMap).Error; err != nil {
 			return WrapDBError(err)
 		}
-		if name != nil {
-			group.Name = *name
-		}
-		if avatar != nil {
-			group.Avatar = *avatar
-		}
+		applyGroupInfoUpdates(group, updates)
 		group.UpdatedAt = updatedAt
 		return r.insertGroupInfoUpdatedEvent(tx, group, operatorUUID)
 	})
 }
 
+// TransferGroupOwner 转让群主。
+func (r *groupRepositoryImpl) TransferGroupOwner(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string) error {
+	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" || targetUserUUID == "" {
+		return nil
+	}
+	if operatorUUID == targetUserUUID {
+		return nil
+	}
+	changedMembers := make([]*model.GroupMember, 0, 2)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 群主转让会同时改动群表与两条成员关系，必须放在同一事务里完成。
+		group, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID)
+		if err != nil {
+			return err
+		}
+		if group.OwnerUuid != operatorUUID {
+			return ErrNoPermission
+		}
+		memberMap, err := r.loadExistingMembersForUpdate(ctx, tx, groupUUID, []string{operatorUUID, targetUserUUID})
+		if err != nil {
+			return err
+		}
+		currentOwner := memberMap[operatorUUID]
+		targetMember := memberMap[targetUserUUID]
+		if !isActiveGroupMember(currentOwner) {
+			return ErrNoPermission
+		}
+		if !isActiveGroupMember(targetMember) {
+			return ErrGroupMemberNotFound
+		}
+		if targetMember.Role == memberRoleOwner {
+			return nil
+		}
+		updatedAt := time.Now()
+		if err := tx.Model(&model.GroupInfo{}).
+			Where("id = ?", group.Id).
+			Updates(map[string]interface{}{
+				"owner_uuid": targetUserUUID,
+				"updated_at": updatedAt,
+			}).Error; err != nil {
+			return WrapDBError(err)
+		}
+		if err := tx.Model(&model.GroupMember{}).
+			Where("id = ?", currentOwner.Id).
+			Updates(map[string]interface{}{
+				"role":       memberRoleMember,
+				"updated_at": updatedAt,
+			}).Error; err != nil {
+			return WrapDBError(err)
+		}
+		if err := tx.Model(&model.GroupMember{}).
+			Where("id = ?", targetMember.Id).
+			Updates(map[string]interface{}{
+				"role":       memberRoleOwner,
+				"updated_at": updatedAt,
+			}).Error; err != nil {
+			return WrapDBError(err)
+		}
+		demotedOwner := *currentOwner
+		demotedOwner.Role = memberRoleMember
+		demotedOwner.UpdatedAt = updatedAt
+		promotedOwner := *targetMember
+		promotedOwner.Role = memberRoleOwner
+		promotedOwner.UpdatedAt = updatedAt
+		changedMembers = []*model.GroupMember{&demotedOwner, &promotedOwner}
+		group.OwnerUuid = targetUserUUID
+		group.UpdatedAt = updatedAt
+		return r.insertOwnerTransferredEvent(tx, group, operatorUUID, changedMembers)
+	})
+	if err != nil {
+		return err
+	}
+	for _, member := range changedMembers {
+		// 角色变更是高频权限链路依赖字段，提交后立刻 patch 成员缓存可缩短读侧不一致窗口。
+		r.upsertGroupMemberCacheAsync(ctx, groupUUID, member)
+	}
+	return nil
+}
+
+// UpdateMemberRole 更新群成员角色。
+func (r *groupRepositoryImpl) UpdateMemberRole(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string, role int8) error {
+	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" || targetUserUUID == "" {
+		return nil
+	}
+	var changedMember *model.GroupMember
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 成员角色会影响后续加人、踢人等权限判断，因此写入必须串行化到群维度事务里。
+		group, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID)
+		if err != nil {
+			return err
+		}
+		if group.OwnerUuid != operatorUUID {
+			return ErrNoPermission
+		}
+		operator, err := r.ensureOperatorRoleAtLeast(ctx, tx, groupUUID, operatorUUID, memberRoleOwner)
+		if err != nil {
+			return err
+		}
+		targetMember, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, targetUserUUID)
+		if err != nil {
+			if errors.Is(err, ErrRecordNotFound) {
+				return ErrGroupMemberNotFound
+			}
+			return err
+		}
+		if !canUpdateGroupMemberRole(operator.Role, targetMember.Role, role) {
+			return ErrNoPermission
+		}
+		if targetMember.Role == role {
+			return nil
+		}
+		updatedAt := time.Now()
+		if err := tx.Model(&model.GroupMember{}).
+			Where("id = ?", targetMember.Id).
+			Updates(map[string]interface{}{
+				"role":       role,
+				"updated_at": updatedAt,
+			}).Error; err != nil {
+			return WrapDBError(err)
+		}
+		if err := tx.Model(&model.GroupInfo{}).
+			Where("id = ?", group.Id).
+			Update("updated_at", updatedAt).Error; err != nil {
+			return WrapDBError(err)
+		}
+		updatedMember := *targetMember
+		updatedMember.Role = role
+		updatedMember.UpdatedAt = updatedAt
+		changedMember = &updatedMember
+		group.UpdatedAt = updatedAt
+		return r.insertMemberRoleUpdatedEvent(tx, group, operatorUUID, []*model.GroupMember{changedMember})
+	})
+	if err != nil {
+		return err
+	}
+	if changedMember != nil {
+		r.upsertGroupMemberCacheAsync(ctx, groupUUID, changedMember)
+	}
+	return nil
+}
+
+// buildGroupInfoUpdateMap 只提取真实变化字段，避免无意义更新打乱排序。
+func buildGroupInfoUpdateMap(group *model.GroupInfo, updates GroupInfoUpdates) map[string]interface{} {
+	updateMap := make(map[string]interface{}, 4)
+	if group == nil {
+		return updateMap
+	}
+	if updates.Name != nil && *updates.Name != group.Name {
+		updateMap["name"] = *updates.Name
+	}
+	if updates.Avatar != nil && *updates.Avatar != group.Avatar {
+		updateMap["avatar"] = *updates.Avatar
+	}
+	if updates.Notice != nil && *updates.Notice != group.Notice {
+		updateMap["notice"] = *updates.Notice
+	}
+	if updates.AddMode != nil && *updates.AddMode != group.AddMode {
+		updateMap["add_mode"] = *updates.AddMode
+	}
+	return updateMap
+}
+
+// applyGroupInfoUpdates 把已经提交成功的变更同步回内存对象，供事件快照复用。
+func applyGroupInfoUpdates(group *model.GroupInfo, updates GroupInfoUpdates) {
+	if group == nil {
+		return
+	}
+	if updates.Name != nil {
+		group.Name = *updates.Name
+	}
+	if updates.Avatar != nil {
+		group.Avatar = *updates.Avatar
+	}
+	if updates.Notice != nil {
+		group.Notice = *updates.Notice
+	}
+	if updates.AddMode != nil {
+		group.AddMode = *updates.AddMode
+	}
+}
 func (r *groupRepositoryImpl) loadGroupForUpdate(ctx context.Context, tx *gorm.DB, groupUUID string) (*model.GroupInfo, error) {
 	var group model.GroupInfo
 	// 写路径统一通过行锁读取群记录，作为成员变更、解散和资料更新的并发边界。
@@ -429,7 +565,6 @@ func (r *groupRepositoryImpl) loadGroupForUpdate(ctx context.Context, tx *gorm.D
 	}
 	return &group, nil
 }
-
 func (r *groupRepositoryImpl) loadWritableGroupForUpdate(ctx context.Context, tx *gorm.DB, groupUUID string) (*model.GroupInfo, error) {
 	group, err := r.loadGroupForUpdate(ctx, tx, groupUUID)
 	if err != nil {
@@ -445,7 +580,6 @@ func (r *groupRepositoryImpl) loadWritableGroupForUpdate(ctx context.Context, tx
 	}
 	return group, nil
 }
-
 func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID string) error {
 	if r == nil || r.db == nil || groupUUID == "" {
 		return ErrRecordNotFound
@@ -465,7 +599,6 @@ func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID s
 		}
 		return nil
 	}
-
 	var group model.GroupInfo
 	// 高频读路径只需要 status，避免为了权限检查读取整行群资料。
 	err = r.db.WithContext(ctx).
@@ -483,7 +616,6 @@ func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID s
 	}
 	return nil
 }
-
 func (r *groupRepositoryImpl) loadActiveMemberForUpdate(ctx context.Context, tx *gorm.DB, groupUUID, userUUID string) (*model.GroupMember, error) {
 	var member model.GroupMember
 	// 成员角色是权限判断依据，必须加锁读取，防止并发角色变更造成越权。
@@ -496,7 +628,6 @@ func (r *groupRepositoryImpl) loadActiveMemberForUpdate(ctx context.Context, tx 
 	}
 	return &member, nil
 }
-
 func (r *groupRepositoryImpl) ensureOperatorRoleAtLeast(ctx context.Context, tx *gorm.DB, groupUUID, operatorUUID string, minRole int8) (*model.GroupMember, error) {
 	member, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, operatorUUID)
 	if err != nil {
@@ -511,16 +642,13 @@ func (r *groupRepositoryImpl) ensureOperatorRoleAtLeast(ctx context.Context, tx 
 	}
 	return member, nil
 }
-
 func (r *groupRepositoryImpl) ensureOperatorCanAddMembers(ctx context.Context, tx *gorm.DB, groupUUID, operatorUUID string) error {
 	_, err := r.ensureOperatorRoleAtLeast(ctx, tx, groupUUID, operatorUUID, memberRoleAdmin)
 	return err
 }
-
 func isActiveGroupMember(member *model.GroupMember) bool {
 	return member != nil && member.Status == memberStatusNormal && !member.DeletedAt.Valid
 }
-
 func canRemoveGroupMember(operatorRole, targetRole int8) bool {
 	switch operatorRole {
 	case memberRoleOwner:
@@ -532,12 +660,33 @@ func canRemoveGroupMember(operatorRole, targetRole int8) bool {
 	}
 }
 
+// canUpdateGroupMemberRole 判断是否允许把目标成员调整为指定角色。
+//
+// 当前规则保持最小闭环：
+//  1. 只有群主可以设置管理员；
+//  2. 目标必须是当前有效的普通成员或管理员；
+//  3. 不能通过该接口直接产生第二个群主。
+func canUpdateGroupMemberRole(operatorRole, currentTargetRole, nextTargetRole int8) bool {
+	if operatorRole != memberRoleOwner {
+		return false
+	}
+	if currentTargetRole != memberRoleMember && currentTargetRole != memberRoleAdmin {
+		return false
+	}
+	return nextTargetRole == memberRoleMember || nextTargetRole == memberRoleAdmin
+}
+
+// loadExistingMembersForUpdate 在事务内锁定目标成员集合。
+//
+// 这里使用 Unscoped 的原因是：
+//  1. 重新入群需要感知历史软删成员；
+//  2. 转让群主、角色变更、踢人等写操作都要和历史记录串行化；
+//  3. 可以避免并发场景下重复插入同一个成员关系。
 func (r *groupRepositoryImpl) loadExistingMembersForUpdate(ctx context.Context, tx *gorm.DB, groupUUID string, userUUIDs []string) (map[string]*model.GroupMember, error) {
 	result := make(map[string]*model.GroupMember, len(userUUIDs))
 	if len(userUUIDs) == 0 {
 		return result, nil
 	}
-
 	var members []*model.GroupMember
 	// Unscoped 是为了把软删历史也锁住，支持重新入群恢复，并避免并发插入同一成员。
 	if err := tx.WithContext(ctx).
@@ -555,12 +704,10 @@ func (r *groupRepositoryImpl) loadExistingMembersForUpdate(ctx context.Context, 
 	}
 	return result, nil
 }
-
 func (r *groupRepositoryImpl) rebuildGroupMembersCacheAsync(ctx context.Context, groupUUID string, members []*model.GroupMember) {
 	if r == nil || r.redisClient == nil || groupUUID == "" {
 		return
 	}
-
 	// 异步任务使用克隆数据，避免调用方后续复用 slice 时影响缓存写入内容。
 	cloned := cloneGroupMembers(members)
 	async.RunSafe(ctx, func(runCtx context.Context) {
@@ -581,7 +728,6 @@ func (r *groupRepositoryImpl) getGroupInfoFromCache(ctx context.Context, groupUU
 	if r == nil || r.redisClient == nil || groupUUID == "" {
 		return nil, false, nil
 	}
-
 	cacheKey := rediskey.GroupInfoKey(groupUUID)
 	raw, err := r.redisClient.Get(ctx, cacheKey).Result()
 	if err != nil {
@@ -597,7 +743,6 @@ func (r *groupRepositoryImpl) getGroupInfoFromCache(ctx context.Context, groupUU
 	if raw == groupInfoEmptyValue {
 		return nil, true, nil
 	}
-
 	entry, decodeErr := decodeGroupInfoCacheValue(raw)
 	if decodeErr != nil {
 		_ = r.redisClient.Del(ctx, cacheKey).Err()
@@ -675,7 +820,6 @@ func (r *groupRepositoryImpl) getUserGroupsFromCache(ctx context.Context, userUU
 	if r == nil || r.redisClient == nil || userUUID == "" {
 		return nil, false, nil
 	}
-
 	cacheKey := rediskey.UserGroupListKey(userUUID)
 	values, err := r.redisClient.ZRevRange(ctx, cacheKey, 0, -1).Result()
 	if err != nil {
@@ -691,7 +835,6 @@ func (r *groupRepositoryImpl) getUserGroupsFromCache(ctx context.Context, userUU
 	if len(values) == 1 && values[0] == userGroupsEmptyValue {
 		return []*model.GroupInfo{}, true, nil
 	}
-
 	groups := make([]*model.GroupInfo, 0, len(values))
 	missing := false
 	for _, groupUUID := range values {
@@ -771,12 +914,10 @@ func (r *groupRepositoryImpl) rebuildUserGroupsCache(ctx context.Context, userUU
 	}
 	return nil
 }
-
 func collectWriteMemberUUIDs(members []*model.GroupMember) []string {
 	if len(members) == 0 {
 		return []string{}
 	}
-
 	userUUIDs := make([]string, 0, len(members))
 	// 事务内只锁每个目标用户一次，减少 IN 条件大小和重复行锁竞争。
 	seen := make(map[string]struct{}, len(members))
@@ -803,7 +944,6 @@ func (r *groupRepositoryImpl) GetGroupInfo(ctx context.Context, groupUUID string
 	if r == nil || r.db == nil || groupUUID == "" {
 		return nil, ErrRecordNotFound
 	}
-
 	groupInfo, cacheHit, err := r.getGroupInfoFromCache(ctx, groupUUID)
 	if err != nil {
 		LogRedisError(ctx, err)
@@ -813,7 +953,6 @@ func (r *groupRepositoryImpl) GetGroupInfo(ctx context.Context, groupUUID string
 		}
 		return groupInfo, nil
 	}
-
 	groupInfo, err = r.loadGroupInfoFromDB(ctx, groupUUID)
 	if err != nil {
 		if errors.Is(err, ErrRecordNotFound) {
@@ -848,22 +987,18 @@ func (r *groupRepositoryImpl) GetGroupMembers(ctx context.Context, groupUUID str
 	if r == nil || r.db == nil || groupUUID == "" {
 		return []*model.GroupMember{}, nil
 	}
-
 	members, cacheHit, err := r.getGroupMembersFromCache(ctx, groupUUID)
 	if err != nil {
 		LogRedisError(ctx, err)
 	} else if cacheHit {
 		return members, nil
 	}
-
 	return r.fetchGroupMembersWithSingleflight(ctx, groupUUID)
 }
-
 func (r *groupRepositoryImpl) loadGroupMembersFromDB(ctx context.Context, groupUUID string) ([]*model.GroupMember, error) {
 	if _, err := r.GetGroupInfo(ctx, groupUUID); err != nil {
 		return nil, err
 	}
-
 	var members []*model.GroupMember
 	if err := r.db.WithContext(ctx).
 		Table("group_members AS gm").
@@ -877,7 +1012,6 @@ func (r *groupRepositoryImpl) loadGroupMembersFromDB(ctx context.Context, groupU
 	}
 	return members, nil
 }
-
 func (r *groupRepositoryImpl) fetchGroupMembersWithSingleflight(ctx context.Context, groupUUID string) ([]*model.GroupMember, error) {
 	value, err, _ := r.memberGroup.Do("group_members:"+groupUUID, func() (interface{}, error) {
 		members, loadErr := r.loadGroupMembersFromDB(ctx, groupUUID)
@@ -894,19 +1028,16 @@ func (r *groupRepositoryImpl) fetchGroupMembersWithSingleflight(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
-
 	members, ok := value.([]*model.GroupMember)
 	if !ok {
 		return nil, fmt.Errorf("群成员 singleflight 返回类型错误")
 	}
 	return cloneGroupMembers(members), nil
 }
-
 func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, groupUUID string) ([]*model.GroupMember, bool, error) {
 	if r == nil || r.redisClient == nil || groupUUID == "" {
 		return nil, false, nil
 	}
-
 	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	values, err := r.redisClient.HGetAll(ctx, cacheKey).Result()
 	if err != nil {
@@ -919,7 +1050,6 @@ func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, grou
 	if len(values) == 0 {
 		return nil, false, nil
 	}
-
 	members := make([]*model.GroupMember, 0, len(values))
 	for userUUID, raw := range values {
 		entry, decodeErr := decodeGroupMemberCacheValue(raw)
@@ -931,14 +1061,12 @@ func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, grou
 			members = append(members, member)
 		}
 	}
-
 	sortGroupMembers(members)
 	if getRandomBool(0.01) {
 		if expireErr := r.redisClient.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.GroupMembersTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
 			LogRedisError(ctx, expireErr)
 		}
 	}
-
 	return members, true, nil
 }
 
@@ -952,7 +1080,6 @@ func (r *groupRepositoryImpl) rebuildGroupMembersCache(ctx context.Context, grou
 	if r == nil || r.redisClient == nil || groupUUID == "" {
 		return nil
 	}
-
 	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	fields := make(map[string]string, len(members))
 	for _, member := range members {
@@ -964,7 +1091,6 @@ func (r *groupRepositoryImpl) rebuildGroupMembersCache(ctx context.Context, grou
 	if len(fields) == 0 {
 		return r.deleteGroupMembersCache(ctx, groupUUID)
 	}
-
 	pipe := r.redisClient.Pipeline()
 	pipe.Del(ctx, cacheKey)
 	pipe.HSet(ctx, cacheKey, fields)
@@ -989,11 +1115,9 @@ func (r *groupRepositoryImpl) insertGroupMemberCacheIfExists(ctx context.Context
 	if r == nil || r.redisClient == nil || groupUUID == "" || member == nil || member.UserUuid == "" {
 		return nil
 	}
-
 	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	luaScript := goredis.NewScript(luaInsertGroupMemberIfExists)
 	expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
-
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
 		member.UserUuid,
@@ -1017,11 +1141,9 @@ func (r *groupRepositoryImpl) upsertGroupMemberCacheIfExists(ctx context.Context
 	if r == nil || r.redisClient == nil || groupUUID == "" || member == nil || member.UserUuid == "" {
 		return nil
 	}
-
 	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	luaScript := goredis.NewScript(luaUpsertGroupMemberIfExists)
 	expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
-
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
 		member.UserUuid,
@@ -1045,11 +1167,9 @@ func (r *groupRepositoryImpl) removeGroupMemberCacheIfExists(ctx context.Context
 	if r == nil || r.redisClient == nil || groupUUID == "" || userUUID == "" {
 		return nil
 	}
-
 	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	luaScript := goredis.NewScript(luaRemoveGroupMemberIfExists)
 	expireSeconds := int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds())
-
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
 		userUUID,
@@ -1074,7 +1194,6 @@ func (r *groupRepositoryImpl) deleteGroupMembersCache(ctx context.Context, group
 	if r == nil || r.redisClient == nil || groupUUID == "" {
 		return nil
 	}
-
 	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	if err := r.redisClient.Del(ctx, cacheKey).Err(); err != nil && err != goredis.Nil {
 		return WrapRedisError(err)
@@ -1090,7 +1209,6 @@ func (r *groupRepositoryImpl) insertGroupMembersCacheAsync(ctx context.Context, 
 	if r == nil || r.redisClient == nil || groupUUID == "" || len(members) == 0 {
 		return
 	}
-
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		seen := make(map[string]struct{}, len(members))
 		for _, member := range members {
@@ -1115,7 +1233,6 @@ func (r *groupRepositoryImpl) upsertGroupMemberCacheAsync(ctx context.Context, g
 	if r == nil || r.redisClient == nil || groupUUID == "" || member == nil || member.UserUuid == "" {
 		return
 	}
-
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		if err := r.upsertGroupMemberCacheIfExists(runCtx, groupUUID, member); err != nil {
 			LogRedisError(runCtx, err)
@@ -1130,7 +1247,6 @@ func (r *groupRepositoryImpl) removeGroupMemberCacheAsync(ctx context.Context, g
 	if r == nil || r.redisClient == nil || groupUUID == "" || userUUID == "" {
 		return
 	}
-
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		if err := r.removeGroupMemberCacheIfExists(runCtx, groupUUID, userUUID); err != nil {
 			LogRedisError(runCtx, err)
@@ -1145,7 +1261,6 @@ func (r *groupRepositoryImpl) deleteGroupMembersCacheAsync(ctx context.Context, 
 	if r == nil || r.redisClient == nil || groupUUID == "" {
 		return
 	}
-
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		if err := r.deleteGroupMembersCache(runCtx, groupUUID); err != nil {
 			LogRedisError(runCtx, err)
@@ -1164,14 +1279,12 @@ func (r *groupRepositoryImpl) CheckGroupMember(ctx context.Context, groupUUID, u
 	if err := r.ensureGroupNormal(ctx, groupUUID); err != nil {
 		return false, -1, err
 	}
-
 	cacheHit, isMember, role, err := r.checkGroupMemberFromCache(ctx, groupUUID, userUUID)
 	if err != nil {
 		LogRedisError(ctx, err)
 	} else if cacheHit {
 		return isMember, role, nil
 	}
-
 	members, err := r.fetchGroupMembersWithSingleflight(ctx, groupUUID)
 	if err != nil {
 		return false, -1, err
@@ -1183,12 +1296,10 @@ func (r *groupRepositoryImpl) CheckGroupMember(ctx context.Context, groupUUID, u
 	}
 	return false, -1, nil
 }
-
 func (r *groupRepositoryImpl) checkGroupMemberFromCache(ctx context.Context, groupUUID, userUUID string) (bool, bool, int8, error) {
 	if r == nil || r.redisClient == nil || groupUUID == "" || userUUID == "" {
 		return false, false, -1, nil
 	}
-
 	cacheKey := rediskey.GroupMembersKey(groupUUID)
 	pipe := r.redisClient.Pipeline()
 	existsCmd := pipe.Exists(ctx, cacheKey)
@@ -1196,7 +1307,6 @@ func (r *groupRepositoryImpl) checkGroupMemberFromCache(ctx context.Context, gro
 	if getRandomBool(0.01) {
 		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.GroupMembersTTL))
 	}
-
 	_, err := pipe.Exec(ctx)
 	if err != nil && !errors.Is(err, goredis.Nil) {
 		if isRedisWrongType(err) {
@@ -1208,7 +1318,6 @@ func (r *groupRepositoryImpl) checkGroupMemberFromCache(ctx context.Context, gro
 	if existsCmd.Val() == 0 {
 		return false, false, -1, nil
 	}
-
 	if memberCmd.Err() == nil {
 		entry, decodeErr := decodeGroupMemberCacheValue(memberCmd.Val())
 		if decodeErr != nil {
@@ -1237,14 +1346,12 @@ func (r *groupRepositoryImpl) ListUserGroups(ctx context.Context, userUUID strin
 	if r == nil || r.db == nil || userUUID == "" {
 		return []*model.GroupInfo{}, nil
 	}
-
 	groups, cacheHit, err := r.getUserGroupsFromCache(ctx, userUUID)
 	if err != nil {
 		LogRedisError(ctx, err)
 	} else if cacheHit {
 		return groups, nil
 	}
-
 	groups, err = r.loadUserGroupsFromDB(ctx, userUUID)
 	if err != nil {
 		return nil, err
@@ -1284,7 +1391,6 @@ func (r *groupRepositoryImpl) GetUserProfiles(ctx context.Context, userUUIDs []s
 	if r == nil || r.db == nil || len(userUUIDs) == 0 {
 		return result, nil
 	}
-
 	var profiles []*model.UserProfile
 	if err := r.db.WithContext(ctx).
 		Where("user_uuid IN ?", userUUIDs).

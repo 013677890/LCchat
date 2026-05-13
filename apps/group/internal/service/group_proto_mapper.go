@@ -7,23 +7,20 @@ import (
 
 // buildGroupInfoProto 将群资料模型转换为 group proto。
 //
-// 当前 proto 的群资料字段较精简，因此这里只映射：
-//  1. 群 UUID；
-//  2. 群名称；
-//  3. 群头像；
-//  4. 群主 UUID；
-//  5. 当前成员数量。
+// 第二批资料接口已经把公告和加群方式纳入正式模型，
+// 因此这里直接输出完整读模型，避免 gateway 再拼装默认值或兼容旧字段。
 func buildGroupInfoProto(groupInfo *model.GroupInfo) *pb.GetGroupInfoResponse {
 	if groupInfo == nil || groupInfo.Uuid == "" {
 		return nil
 	}
-
 	return &pb.GetGroupInfoResponse{
 		GroupUuid:   groupInfo.Uuid,
 		Name:        groupInfo.Name,
 		Avatar:      groupInfo.Avatar,
 		OwnerUuid:   groupInfo.OwnerUuid,
 		MemberCount: int32(groupInfo.MemberCnt),
+		Notice:      groupInfo.Notice,
+		AddMode:     int32(groupInfo.AddMode),
 	}
 }
 
@@ -37,7 +34,6 @@ func buildGroupMemberItemProto(member *model.GroupMember, profile *model.UserPro
 	if member == nil || member.UserUuid == "" {
 		return nil
 	}
-
 	item := &pb.GroupMemberItem{
 		UserUuid: member.UserUuid,
 		Role:     int32(member.Role),

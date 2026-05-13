@@ -3,15 +3,14 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
-	"time"
-
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
+	"strings"
+	"time"
 )
 
 // groupServiceImpl 是 group-service 业务层实现。
@@ -36,7 +35,6 @@ func (s *groupServiceImpl) CreateGroup(ctx context.Context, req *pb.CreateGroupR
 	if req == nil {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	// service 层保留一次兜底校验，避免绕过 proto validate 的内部调用写入脏数据。
 	name := strings.TrimSpace(req.GetName())
 	if name == "" {
@@ -45,13 +43,11 @@ func (s *groupServiceImpl) CreateGroup(ctx context.Context, req *pb.CreateGroupR
 	if len([]rune(name)) > 64 {
 		return nil, apperr.New(consts.CodeGroupNameTooLong)
 	}
-
 	avatar := strings.TrimSpace(req.GetAvatar())
 	if avatar == "" {
 		// 默认头像在 service 层补齐，保证 repository 只处理完整业务实体。
 		avatar = defaultGroupAvatarURL
 	}
-
 	// 群 UUID 只生成一次，后续 group 与初始成员关系必须共享同一个事实 ID。
 	groupUUID := util.GenIDString()
 	// 初始成员使用同一时间戳，避免列表排序时因逐条生成时间出现无意义抖动。
@@ -62,16 +58,16 @@ func (s *groupServiceImpl) CreateGroup(ctx context.Context, req *pb.CreateGroupR
 		Uuid:      groupUUID,
 		Name:      name,
 		Avatar:    avatar,
+		Notice:    "",
 		OwnerUuid: currentUserUUID,
 		MemberCnt: len(members),
+		AddMode:   0,
 		Status:    0,
 	}
-
 	if err := s.groupRepo.CreateGroup(ctx, group, members); err != nil {
 		// 系统错误统一包中文上下文，具体日志留给边界拦截器输出。
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建群失败")
 	}
-
 	return &pb.CreateGroupResponse{GroupUuid: group.Uuid}, nil
 }
 
@@ -85,12 +81,10 @@ func (s *groupServiceImpl) DismissGroup(ctx context.Context, req *pb.DismissGrou
 	if req == nil {
 		return apperr.New(consts.CodeParamError)
 	}
-
 	groupUUID := strings.TrimSpace(req.GetGroupUuid())
 	if groupUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-
 	// 群主权限、重复解散幂等和缓存强失效都下沉到 repository 事务内处理。
 	return mapGroupWriteError(
 		s.groupRepo.DismissGroup(ctx, groupUUID, currentUserUUID),
@@ -103,12 +97,10 @@ func (s *groupServiceImpl) GetGroupInfo(ctx context.Context, req *pb.GetGroupInf
 	if req == nil {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	groupUUID := strings.TrimSpace(req.GetGroupUuid())
 	if groupUUID == "" {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	groupInfo, err := s.groupRepo.GetGroupInfo(ctx, groupUUID)
 	if err != nil {
 		if errors.Is(err, repository.ErrRecordNotFound) {
@@ -116,7 +108,6 @@ func (s *groupServiceImpl) GetGroupInfo(ctx context.Context, req *pb.GetGroupInf
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取群资料失败")
 	}
-
 	return buildGroupInfoProto(groupInfo), nil
 }
 
@@ -130,26 +121,69 @@ func (s *groupServiceImpl) UpdateGroupInfo(ctx context.Context, req *pb.UpdateGr
 	if req == nil {
 		return apperr.New(consts.CodeParamError)
 	}
-
 	groupUUID := strings.TrimSpace(req.GetGroupUuid())
 	if groupUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-
-	// proto 中 name/avatar 是普通 string，这里统一解析“空值不更新”和字段合法性。
-	name, avatar, err := buildUpdateGroupInfoFields(req)
+	// 第二批资料接口改成 optional 字段，这里直接保留“未传 / 显式更新”的边界语义。
+	updates, err := buildUpdateGroupInfoFields(req)
 	if err != nil {
 		return err
 	}
-	if name == nil && avatar == nil {
+	if updates.IsEmpty() {
 		// 无字段变更直接成功，避免开启无意义事务和刷新 updated_at。
 		return nil
 	}
-
 	// 管理员/群主权限与群状态在 repository 内再次校验，防止并发状态变化。
 	return mapGroupWriteError(
-		s.groupRepo.UpdateGroupInfo(ctx, groupUUID, currentUserUUID, name, avatar),
+		s.groupRepo.UpdateGroupInfo(ctx, groupUUID, currentUserUUID, updates),
 		"更新群资料失败",
+	)
+}
+
+// TransferGroupOwner 转让群主。
+func (s *groupServiceImpl) TransferGroupOwner(ctx context.Context, req *pb.TransferGroupOwnerRequest) error {
+	// 群主转让会直接改变权限拓扑，必须只信任认证上下文中的操作者身份。
+	currentUserUUID := util.GetUserUUIDFromContext(ctx)
+	if currentUserUUID == "" {
+		return apperr.New(consts.CodeUnauthorized)
+	}
+	if req == nil {
+		return apperr.New(consts.CodeParamError)
+	}
+	groupUUID := strings.TrimSpace(req.GetGroupUuid())
+	targetUserUUID := strings.TrimSpace(req.GetTargetUserUuid())
+	if groupUUID == "" || targetUserUUID == "" {
+		return apperr.New(consts.CodeParamError)
+	}
+	return mapGroupWriteError(
+		s.groupRepo.TransferGroupOwner(ctx, groupUUID, currentUserUUID, targetUserUUID),
+		"转让群主失败",
+	)
+}
+
+// UpdateMemberRole 更新群成员角色。
+func (s *groupServiceImpl) UpdateMemberRole(ctx context.Context, req *pb.UpdateMemberRoleRequest) error {
+	// 成员角色属于权限事实，只允许登录态下走正式写链路。
+	currentUserUUID := util.GetUserUUIDFromContext(ctx)
+	if currentUserUUID == "" {
+		return apperr.New(consts.CodeUnauthorized)
+	}
+	if req == nil {
+		return apperr.New(consts.CodeParamError)
+	}
+	groupUUID := strings.TrimSpace(req.GetGroupUuid())
+	targetUserUUID := strings.TrimSpace(req.GetUserUuid())
+	if groupUUID == "" || targetUserUUID == "" {
+		return apperr.New(consts.CodeParamError)
+	}
+	role, err := normalizeUpdatableMemberRole(req.GetRole())
+	if err != nil {
+		return err
+	}
+	return mapGroupWriteError(
+		s.groupRepo.UpdateMemberRole(ctx, groupUUID, currentUserUUID, targetUserUUID, role),
+		"更新群成员角色失败",
 	)
 }
 
@@ -162,18 +196,15 @@ func (s *groupServiceImpl) AddMember(ctx context.Context, req *pb.AddMemberReque
 	if req == nil || len(req.GetUserUuids()) == 0 {
 		return apperr.New(consts.CodeParamError)
 	}
-
 	groupUUID := strings.TrimSpace(req.GetGroupUuid())
 	if groupUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-
 	// service 只做去空去重，是否已在群由 repository 在锁内按幂等规则处理。
 	memberUUIDs := normalizeGroupMemberUUIDs(req.GetUserUuids())
 	if len(memberUUIDs) == 0 {
 		return nil
 	}
-
 	// 这里只构造最小成员意图，角色、邀请人和入群时间以 repository 事务结果为准。
 	members := buildAddGroupMembers(groupUUID, memberUUIDs)
 	return mapGroupWriteError(
@@ -192,13 +223,11 @@ func (s *groupServiceImpl) RemoveMember(ctx context.Context, req *pb.RemoveMembe
 	if req == nil {
 		return apperr.New(consts.CodeParamError)
 	}
-
 	groupUUID := strings.TrimSpace(req.GetGroupUuid())
 	targetUUID := strings.TrimSpace(req.GetUserUuid())
 	if groupUUID == "" || targetUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-
 	// 退群、踢人、不能踢群主等角色规则由 repository 在事务锁内统一裁决。
 	return mapGroupWriteError(
 		s.groupRepo.RemoveMember(ctx, groupUUID, currentUserUUID, targetUUID),
@@ -211,12 +240,10 @@ func (s *groupServiceImpl) GetMemberList(ctx context.Context, req *pb.GetMemberL
 	if req == nil {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	groupUUID := strings.TrimSpace(req.GetGroupUuid())
 	if groupUUID == "" {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	members, err := s.groupRepo.GetGroupMembers(ctx, groupUUID)
 	if err != nil {
 		if errors.Is(err, repository.ErrRecordNotFound) {
@@ -224,13 +251,11 @@ func (s *groupServiceImpl) GetMemberList(ctx context.Context, req *pb.GetMemberL
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取群成员列表失败")
 	}
-
 	// 成员关系与用户资料分属不同表，展示信息用批量查询补齐，避免 N+1 查询。
 	profiles, err := s.groupRepo.GetUserProfiles(ctx, collectMemberUUIDs(members))
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询群成员资料失败")
 	}
-
 	items := make([]*pb.GroupMemberItem, 0, len(members))
 	for _, member := range members {
 		if member == nil {
@@ -240,24 +265,20 @@ func (s *groupServiceImpl) GetMemberList(ctx context.Context, req *pb.GetMemberL
 			items = append(items, item)
 		}
 	}
-
 	return &pb.GetMemberListResponse{Members: items}, nil
 }
 
 // GetGroupList 获取当前用户的群列表。
 func (s *groupServiceImpl) GetGroupList(ctx context.Context, req *pb.GetGroupListRequest) (*pb.GetGroupListResponse, error) {
 	_ = req
-
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
 	if currentUserUUID == "" {
 		return nil, apperr.New(consts.CodeUnauthorized)
 	}
-
 	groups, err := s.groupRepo.ListUserGroups(ctx, currentUserUUID)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取群列表失败")
 	}
-
 	return buildGroupListResponse(groups), nil
 }
 
@@ -266,12 +287,10 @@ func (s *groupServiceImpl) GetGroupMemberIds(ctx context.Context, req *pb.GetGro
 	if req == nil {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	groupUUID := strings.TrimSpace(req.GetGroupUuid())
 	if groupUUID == "" {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	members, err := s.groupRepo.GetGroupMembers(ctx, groupUUID)
 	if err != nil {
 		if errors.Is(err, repository.ErrRecordNotFound) {
@@ -279,7 +298,6 @@ func (s *groupServiceImpl) GetGroupMemberIds(ctx context.Context, req *pb.GetGro
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取群成员 ID 列表失败")
 	}
-
 	return &pb.GetGroupMemberIdsResponse{UserUuids: collectMemberUUIDs(members)}, nil
 }
 
@@ -288,13 +306,11 @@ func (s *groupServiceImpl) CheckGroupMember(ctx context.Context, req *pb.CheckGr
 	if req == nil {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	groupUUID := strings.TrimSpace(req.GetGroupUuid())
 	userUUID := strings.TrimSpace(req.GetUserUuid())
 	if groupUUID == "" || userUUID == "" {
 		return nil, apperr.New(consts.CodeParamError)
 	}
-
 	// 高频权限链路交给 repository 使用缓存加速，并在读缓存前确认群未解散。
 	isMember, role, err := s.groupRepo.CheckGroupMember(ctx, groupUUID, userUUID)
 	if err != nil {
@@ -309,15 +325,12 @@ func (s *groupServiceImpl) CheckGroupMember(ctx context.Context, req *pb.CheckGr
 	if !isMember {
 		role = -1
 	}
-
 	return &pb.CheckGroupMemberResponse{IsMember: isMember, Role: int32(role)}, nil
 }
-
 func normalizeGroupMemberUUIDs(raw []string, exclusions ...string) []string {
 	if len(raw) == 0 {
 		return []string{}
 	}
-
 	// 先写入排除集合，可用于创建群时排除群主，避免重复插入 owner 成员关系。
 	seen := make(map[string]struct{}, len(raw)+len(exclusions))
 	for _, exclusion := range exclusions {
@@ -327,7 +340,6 @@ func normalizeGroupMemberUUIDs(raw []string, exclusions ...string) []string {
 		}
 		seen[userUUID] = struct{}{}
 	}
-
 	userUUIDs := make([]string, 0, len(raw))
 	for _, item := range raw {
 		userUUID := strings.TrimSpace(item)
@@ -341,36 +353,49 @@ func normalizeGroupMemberUUIDs(raw []string, exclusions ...string) []string {
 		seen[userUUID] = struct{}{}
 		userUUIDs = append(userUUIDs, userUUID)
 	}
-
 	return userUUIDs
 }
-
-func buildUpdateGroupInfoFields(req *pb.UpdateGroupInfoRequest) (*string, *string, error) {
-	var namePtr *string
-	if rawName := req.GetName(); rawName != "" {
-		// 传了 name 但 trim 后为空视为非法；完全不传则表示不更新 name。
-		name := strings.TrimSpace(rawName)
+func buildUpdateGroupInfoFields(req *pb.UpdateGroupInfoRequest) (repository.GroupInfoUpdates, error) {
+	updates := repository.GroupInfoUpdates{}
+	if req.Name != nil {
+		// 群名称不允许只传空白字符，避免把群名称清成不可读的脏值。
+		name := strings.TrimSpace(req.GetName())
 		if name == "" {
-			return nil, nil, apperr.New(consts.CodeParamError)
+			return updates, apperr.New(consts.CodeParamError)
 		}
 		if len([]rune(name)) > 64 {
-			return nil, nil, apperr.New(consts.CodeGroupNameTooLong)
+			return updates, apperr.New(consts.CodeGroupNameTooLong)
 		}
-		namePtr = &name
+		updates.Name = &name
 	}
-
-	var avatarPtr *string
-	if rawAvatar := req.GetAvatar(); rawAvatar != "" {
-		// avatar 目前只做 trim，不强校验 URL，避免 service 层过早绑定存储策略。
-		avatar := strings.TrimSpace(rawAvatar)
-		if avatar != "" {
-			avatarPtr = &avatar
+	if req.Avatar != nil {
+		// avatar 允许显式清空，因此只做 trim，不再沿用“空字符串等于不更新”的旧语义。
+		avatar := strings.TrimSpace(req.GetAvatar())
+		updates.Avatar = &avatar
+	}
+	if req.Notice != nil {
+		// notice 允许显式置空，用于清理历史公告；长度约束仍由 service 再兜底一次。
+		notice := strings.TrimSpace(req.GetNotice())
+		if len([]rune(notice)) > 500 {
+			return updates, apperr.New(consts.CodeGroupNoticeTooLong)
 		}
+		updates.Notice = &notice
 	}
-
-	return namePtr, avatarPtr, nil
+	if req.AddMode != nil {
+		addMode := int8(req.GetAddMode())
+		if addMode < 0 || addMode > 1 {
+			return updates, apperr.New(consts.CodeParamError)
+		}
+		updates.AddMode = &addMode
+	}
+	return updates, nil
 }
-
+func normalizeUpdatableMemberRole(role int32) (int8, error) {
+	if role < int32(0) || role > int32(1) {
+		return 0, apperr.New(consts.CodeParamError)
+	}
+	return int8(role), nil
+}
 func mapGroupWriteError(err error, fallbackMessage string) error {
 	if err == nil {
 		return nil
@@ -391,15 +416,16 @@ func mapGroupWriteError(err error, fallbackMessage string) error {
 	if errors.Is(err, repository.ErrCannotQuitAsOwner) {
 		return apperr.New(consts.CodeCannotQuitAsOwner)
 	}
+	if errors.Is(err, repository.ErrGroupMemberNotFound) {
+		return apperr.New(consts.CodeGroupMemberNotFound)
+	}
 	return apperr.Wrap(err, consts.CodeInternalError, fallbackMessage)
 }
-
 func buildCreateGroupMembers(groupUUID, ownerUUID string, memberUUIDs []string, now time.Time) []*model.GroupMember {
 	members := make([]*model.GroupMember, 0, len(memberUUIDs)+1)
 	if groupUUID == "" || ownerUUID == "" {
 		return members
 	}
-
 	// 群主必须作为第一条有效成员关系写入，保证 member_cnt 与权限判断都有基础事实。
 	members = append(members, &model.GroupMember{
 		GroupUuid: groupUUID,
@@ -408,7 +434,6 @@ func buildCreateGroupMembers(groupUUID, ownerUUID string, memberUUIDs []string, 
 		Status:    0,
 		JoinedAt:  now,
 	})
-
 	for _, userUUID := range memberUUIDs {
 		if userUUID == "" {
 			continue
@@ -423,15 +448,12 @@ func buildCreateGroupMembers(groupUUID, ownerUUID string, memberUUIDs []string, 
 			JoinedAt:  now,
 		})
 	}
-
 	return members
 }
-
 func buildAddGroupMembers(groupUUID string, memberUUIDs []string) []*model.GroupMember {
 	if groupUUID == "" || len(memberUUIDs) == 0 {
 		return []*model.GroupMember{}
 	}
-
 	members := make([]*model.GroupMember, 0, len(memberUUIDs))
 	for _, userUUID := range memberUUIDs {
 		if userUUID == "" {
@@ -442,15 +464,12 @@ func buildAddGroupMembers(groupUUID string, memberUUIDs []string) []*model.Group
 			UserUuid:  userUUID,
 		})
 	}
-
 	return members
 }
-
 func collectMemberUUIDs(members []*model.GroupMember) []string {
 	if len(members) == 0 {
 		return []string{}
 	}
-
 	userUUIDs := make([]string, 0, len(members))
 	seen := make(map[string]struct{}, len(members))
 	for _, member := range members {
@@ -463,6 +482,5 @@ func collectMemberUUIDs(members []*model.GroupMember) []string {
 		seen[member.UserUuid] = struct{}{}
 		userUUIDs = append(userUUIDs, member.UserUuid)
 	}
-
 	return userUUIDs
 }

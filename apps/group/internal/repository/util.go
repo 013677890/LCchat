@@ -2,13 +2,12 @@ package repository
 
 import (
 	"encoding/json"
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	"math/rand"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 )
 
 const (
@@ -39,8 +38,10 @@ type groupInfoCacheEntry struct {
 	GroupUUID   string `json:"group_uuid"`
 	Name        string `json:"name"`
 	Avatar      string `json:"avatar"`
+	Notice      string `json:"notice"`
 	OwnerUUID   string `json:"owner_uuid"`
 	MemberCount int    `json:"member_count"`
+	AddMode     int8   `json:"add_mode"`
 	Status      int8   `json:"status"`
 	UpdatedAt   int64  `json:"updated_at_unix"`
 }
@@ -64,8 +65,10 @@ func encodeGroupInfoCacheValue(group *model.GroupInfo) string {
 		entry.GroupUUID = group.Uuid
 		entry.Name = group.Name
 		entry.Avatar = group.Avatar
+		entry.Notice = group.Notice
 		entry.OwnerUUID = group.OwnerUuid
 		entry.MemberCount = group.MemberCnt
+		entry.AddMode = group.AddMode
 		entry.Status = group.Status
 		entry.UpdatedAt = group.UpdatedAt.Unix()
 	}
@@ -94,8 +97,10 @@ func buildGroupInfoFromCache(entry *groupInfoCacheEntry) *model.GroupInfo {
 		Uuid:      entry.GroupUUID,
 		Name:      entry.Name,
 		Avatar:    entry.Avatar,
+		Notice:    entry.Notice,
 		OwnerUuid: entry.OwnerUUID,
 		MemberCnt: entry.MemberCount,
+		AddMode:   entry.AddMode,
 		Status:    entry.Status,
 	}
 	if entry.UpdatedAt > 0 {
@@ -112,13 +117,14 @@ func buildGroupInfoFromSnapshot(snapshot *groupevent.GroupSnapshot) *model.Group
 	if snapshot == nil || snapshot.GroupUUID == "" {
 		return nil
 	}
-
 	group := &model.GroupInfo{
 		Uuid:      snapshot.GroupUUID,
 		Name:      snapshot.Name,
 		Avatar:    snapshot.Avatar,
+		Notice:    snapshot.Notice,
 		OwnerUuid: snapshot.OwnerUUID,
 		MemberCnt: int(snapshot.MemberCount),
+		AddMode:   int8(snapshot.AddMode),
 		Status:    int8(snapshot.Status),
 	}
 	if snapshot.UpdatedAtUnix > 0 {
@@ -167,7 +173,6 @@ func buildGroupMemberFromSnapshot(groupUUID string, snapshot groupevent.GroupMem
 	if groupUUID == "" || snapshot.UserUUID == "" {
 		return nil
 	}
-
 	member := &model.GroupMember{
 		GroupUuid: groupUUID,
 		UserUuid:  snapshot.UserUUID,
@@ -187,7 +192,6 @@ func buildGroupMembersFromSnapshots(groupUUID string, snapshots []groupevent.Gro
 	if groupUUID == "" || len(snapshots) == 0 {
 		return []*model.GroupMember{}
 	}
-
 	members := make([]*model.GroupMember, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		member := buildGroupMemberFromSnapshot(groupUUID, snapshot)

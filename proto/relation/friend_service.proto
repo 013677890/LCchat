@@ -16,51 +16,51 @@ service FriendService {
 	// SendFriendApply 发送好友申请
 	// 建议调用超时：500ms。
 	rpc SendFriendApply(SendFriendApplyRequest) returns (SendFriendApplyResponse);
-	
+
 	// GetFriendApplyList 获取好友申请列表
 	// 建议调用超时：300ms。
 	rpc GetFriendApplyList(GetFriendApplyListRequest) returns (GetFriendApplyListResponse);
-	
+
 	// GetSentApplyList 获取发出的申请列表
 	// 建议调用超时：300ms。
 	rpc GetSentApplyList(GetSentApplyListRequest) returns (GetSentApplyListResponse);
-	
+
 	// HandleFriendApply 处理好友申请
 	// 建议调用超时：500ms。
 	rpc HandleFriendApply(HandleFriendApplyRequest) returns (HandleFriendApplyResponse);
-	
+
 	// GetUnreadApplyCount 获取未读申请数量
 	// 建议调用超时：300ms。
 	rpc GetUnreadApplyCount(GetUnreadApplyCountRequest) returns (GetUnreadApplyCountResponse);
-	
+
 	// MarkApplyAsRead 标记申请已读
 	// 建议调用超时：300ms。
 	rpc MarkApplyAsRead(MarkApplyAsReadRequest) returns (MarkApplyAsReadResponse);
-	
+
 	// GetFriendList 获取好友列表
 	// 建议调用超时：300ms。
 	rpc GetFriendList(GetFriendListRequest) returns (GetFriendListResponse);
-	
+
 	// SyncFriendList 好友增量同步
 	// 建议调用超时：800ms。
 	rpc SyncFriendList(SyncFriendListRequest) returns (SyncFriendListResponse);
-	
+
 	// DeleteFriend 删除好友
 	// 建议调用超时：500ms。
 	rpc DeleteFriend(DeleteFriendRequest) returns (DeleteFriendResponse);
-	
+
 	// SetFriendRemark 设置好友备注
 	// 建议调用超时：500ms。
 	rpc SetFriendRemark(SetFriendRemarkRequest) returns (SetFriendRemarkResponse);
-	
+
 	// SetFriendTag 设置好友标签
 	// 建议调用超时：500ms。
 	rpc SetFriendTag(SetFriendTagRequest) returns (SetFriendTagResponse);
-	
+
 	// GetTagList 获取标签列表
 	// 建议调用超时：300ms。
 	rpc GetTagList(GetTagListRequest) returns (GetTagListResponse);
-	
+
 	// CheckIsFriend 判断是否好友
 	// 建议调用超时：300ms。
 	rpc CheckIsFriend(CheckIsFriendRequest) returns (CheckIsFriendResponse);
@@ -68,7 +68,7 @@ service FriendService {
 	// BatchCheckIsFriend 批量判断是否好友
 	// 建议调用超时：800ms。
 	rpc BatchCheckIsFriend(BatchCheckIsFriendRequest) returns (BatchCheckIsFriendResponse);
-	
+
 	// GetRelationStatus 获取关系状态
 	// 建议调用超时：300ms。
 	rpc GetRelationStatus(GetRelationStatusRequest) returns (GetRelationStatusResponse);

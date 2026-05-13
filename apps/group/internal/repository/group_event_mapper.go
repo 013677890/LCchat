@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
@@ -86,6 +85,38 @@ func (r *groupRepositoryImpl) insertGroupInfoUpdatedEvent(tx *gorm.DB, group *mo
 	})
 }
 
+// insertOwnerTransferredEvent 把“群主转让”事实写入 group.cache outbox。
+//
+// 这里同时带上最新群快照与受影响成员快照，原因是：
+//  1. group:info 需要同步新的 owner_uuid；
+//  2. group:members 需要同步老群主与新群主的 role；
+//  3. projector 可以直接按最终态覆盖，不必回源数据库二次查询。
+func (r *groupRepositoryImpl) insertOwnerTransferredEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
+	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		Action:       groupevent.ActionOwnerTransferred,
+		GroupUUID:    group.Uuid,
+		OperatorUUID: operatorUUID,
+		Group:        buildGroupSnapshot(group),
+		Members:      buildGroupMemberSnapshots(members),
+		UserUUIDs:    collectGroupMemberSnapshotUUIDs(members),
+	})
+}
+
+// insertMemberRoleUpdatedEvent 把“成员角色更新”事实写入 group.cache outbox。
+//
+// 事件里保留目标成员最终 role，便于 projector 直接 patch 成员 Hash，
+// 同时复用群快照刷新 group:info 的最新 updated_at。
+func (r *groupRepositoryImpl) insertMemberRoleUpdatedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
+	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		Action:       groupevent.ActionMemberRoleUpdated,
+		GroupUUID:    group.Uuid,
+		OperatorUUID: operatorUUID,
+		Group:        buildGroupSnapshot(group),
+		Members:      buildGroupMemberSnapshots(members),
+		UserUUIDs:    collectGroupMemberSnapshotUUIDs(members),
+	})
+}
+
 // insertGroupCacheEvent 统一封装 group.cache 事件的编码与落库。
 //
 // 关键约束：
@@ -99,7 +130,6 @@ func (r *groupRepositoryImpl) insertGroupCacheEvent(tx *gorm.DB, payload groupev
 	if payload.EventID == "" {
 		payload.EventID = idutil.GenIDString()
 	}
-
 	encoded, err := groupevent.Encode(payload)
 	if err != nil {
 		return fmt.Errorf("编码群缓存事件失败: %w", err)
@@ -122,8 +152,10 @@ func buildGroupSnapshot(group *model.GroupInfo) *groupevent.GroupSnapshot {
 		GroupUUID:     group.Uuid,
 		Name:          group.Name,
 		Avatar:        group.Avatar,
+		Notice:        group.Notice,
 		OwnerUUID:     group.OwnerUuid,
 		MemberCount:   int32(group.MemberCnt),
+		AddMode:       int32(group.AddMode),
 		Status:        int32(group.Status),
 		UpdatedAtUnix: group.UpdatedAt.Unix(),
 	}
@@ -139,7 +171,6 @@ func buildGroupMemberSnapshots(members []*model.GroupMember) []groupevent.GroupM
 	if len(members) == 0 {
 		return []groupevent.GroupMemberSnapshot{}
 	}
-
 	result := make([]groupevent.GroupMemberSnapshot, 0, len(members))
 	seen := make(map[string]struct{}, len(members))
 	for _, member := range members {
@@ -150,7 +181,6 @@ func buildGroupMemberSnapshots(members []*model.GroupMember) []groupevent.GroupM
 			continue
 		}
 		seen[member.UserUuid] = struct{}{}
-
 		result = append(result, groupevent.GroupMemberSnapshot{
 			UserUUID:       member.UserUuid,
 			Role:           int32(member.Role),
@@ -165,7 +195,6 @@ func collectGroupMemberSnapshotUUIDs(members []*model.GroupMember) []string {
 	if len(members) == 0 {
 		return []string{}
 	}
-
 	result := make([]string, 0, len(members))
 	seen := make(map[string]struct{}, len(members))
 	for _, member := range members {
@@ -191,7 +220,6 @@ func (r *groupRepositoryImpl) loadActiveMemberUUIDs(ctx context.Context, tx *gor
 	if tx == nil || groupUUID == "" {
 		return []string{}, nil
 	}
-
 	var members []*model.GroupMember
 	if err := tx.WithContext(ctx).
 		Select("user_uuid").
@@ -199,7 +227,6 @@ func (r *groupRepositoryImpl) loadActiveMemberUUIDs(ctx context.Context, tx *gor
 		Find(&members).Error; err != nil {
 		return nil, WrapDBError(err)
 	}
-
 	userUUIDs := make([]string, 0, len(members))
 	for _, member := range members {
 		if member == nil || member.UserUuid == "" {

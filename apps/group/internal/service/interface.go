@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-
 	pb "github.com/013677890/LCchat-Backend/apps/group/pb"
 )
 
@@ -16,31 +15,26 @@ import (
 type IGroupService interface {
 	// CreateGroup 创建群。
 	CreateGroup(ctx context.Context, req *pb.CreateGroupRequest) (*pb.CreateGroupResponse, error)
-
 	// DismissGroup 解散群。
 	DismissGroup(ctx context.Context, req *pb.DismissGroupRequest) error
-
 	// GetGroupInfo 获取群资料。
 	GetGroupInfo(ctx context.Context, req *pb.GetGroupInfoRequest) (*pb.GetGroupInfoResponse, error)
-
 	// UpdateGroupInfo 更新群资料。
 	UpdateGroupInfo(ctx context.Context, req *pb.UpdateGroupInfoRequest) error
-
+	// TransferGroupOwner 转让群主。
+	TransferGroupOwner(ctx context.Context, req *pb.TransferGroupOwnerRequest) error
+	// UpdateMemberRole 更新群成员角色。
+	UpdateMemberRole(ctx context.Context, req *pb.UpdateMemberRoleRequest) error
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *pb.AddMemberRequest) error
-
 	// RemoveMember 移除群成员。
 	RemoveMember(ctx context.Context, req *pb.RemoveMemberRequest) error
-
 	// GetMemberList 获取群成员列表。
 	GetMemberList(ctx context.Context, req *pb.GetMemberListRequest) (*pb.GetMemberListResponse, error)
-
 	// GetGroupList 获取当前用户的群列表。
 	GetGroupList(ctx context.Context, req *pb.GetGroupListRequest) (*pb.GetGroupListResponse, error)
-
 	// GetGroupMemberIds 获取群成员 UUID 列表。
 	GetGroupMemberIds(ctx context.Context, req *pb.GetGroupMemberIdsRequest) (*pb.GetGroupMemberIdsResponse, error)
-
 	// CheckGroupMember 检查指定用户是否为群成员并返回角色。
 	CheckGroupMember(ctx context.Context, req *pb.CheckGroupMemberRequest) (*pb.CheckGroupMemberResponse, error)
 }

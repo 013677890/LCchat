@@ -64,11 +64,11 @@ func (s *ConnectService) RemoveRoutesByConnectAddr(ctx context.Context, connectG
 	if s == nil || s.redisClient == nil || strings.TrimSpace(connectGRPCAddr) == "" {
 		return
 	}
-	
+
 	var cursor uint64
 	pattern := "user:routing:*"
 	cleanedCount := 0
-	
+
 	for {
 		keys, nextCursor, err := s.redisClient.Scan(ctx, cursor, pattern, 100).Result()
 		if err != nil {
@@ -79,7 +79,7 @@ func (s *ConnectService) RemoveRoutesByConnectAddr(ctx context.Context, connectG
 			)
 			return
 		}
-		
+
 		for _, key := range keys {
 			values, err := s.redisClient.HGetAll(ctx, key).Result()
 			if err != nil {
@@ -113,13 +113,13 @@ func (s *ConnectService) RemoveRoutesByConnectAddr(ctx context.Context, connectG
 				cleanedCount += len(fields)
 			}
 		}
-		
+
 		cursor = nextCursor
 		if cursor == 0 {
 			break
 		}
 	}
-	
+
 	if cleanedCount > 0 {
 		logger.Info(ctx, "按 connect 地址清理路由完成",
 			logger.String("connect_addr", connectGRPCAddr),

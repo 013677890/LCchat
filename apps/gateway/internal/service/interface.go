@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 )
 
@@ -27,32 +26,27 @@ type AuthService interface {
 	// req: 发送验证码请求
 	// 返回: 发送验证码响应
 	SendVerifyCode(ctx context.Context, req *dto.SendVerifyCodeRequest) (*dto.SendVerifyCodeResponse, error)
-
 	// LoginByCode 验证码登录
 	// ctx: 请求上下文
 	// req: 验证码登录请求
 	// deviceId: 设备唯一标识
 	// 返回: 完整的登录响应（包含Token和用户信息）
 	LoginByCode(ctx context.Context, req *dto.LoginByCodeRequest, deviceId string) (*dto.LoginByCodeResponse, error)
-
 	// Logout 用户登出
 	// ctx: 请求上下文
 	// req: 登出请求
 	// 返回: 登出响应
 	Logout(ctx context.Context, req *dto.LogoutRequest) (*dto.LogoutResponse, error)
-
 	// ResetPassword 重置密码
 	// ctx: 请求上下文
 	// req: 重置密码请求
 	// 返回: 重置密码响应
 	ResetPassword(ctx context.Context, req *dto.ResetPasswordRequest) (*dto.ResetPasswordResponse, error)
-
 	// RefreshToken 刷新Token
 	// ctx: 请求上下文
 	// req: 刷新Token请求
 	// 返回: 刷新Token响应
 	RefreshToken(ctx context.Context, req *dto.RefreshTokenRequest) (*dto.RefreshTokenResponse, error)
-
 	// VerifyCode 校验验证码
 	// ctx: 请求上下文
 	// req: 校验验证码请求
@@ -66,43 +60,30 @@ type AuthService interface {
 type FriendService interface {
 	// SendFriendApply 发送好友申请
 	SendFriendApply(ctx context.Context, req *dto.SendFriendApplyRequest) (*dto.SendFriendApplyResponse, error)
-
 	// GetFriendApplyList 获取好友申请列表
 	GetFriendApplyList(ctx context.Context, req *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error)
-
 	// GetSentApplyList 获取发出的申请列表
 	GetSentApplyList(ctx context.Context, req *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error)
-
 	// HandleFriendApply 处理好友申请
 	HandleFriendApply(ctx context.Context, req *dto.HandleFriendApplyRequest) (*dto.HandleFriendApplyResponse, error)
-
 	// GetUnreadApplyCount 获取未读申请数量
 	GetUnreadApplyCount(ctx context.Context, req *dto.GetUnreadApplyCountRequest) (*dto.GetUnreadApplyCountResponse, error)
-
 	// MarkApplyAsRead 标记申请已读
 	MarkApplyAsRead(ctx context.Context, req *dto.MarkApplyAsReadRequest) (*dto.MarkApplyAsReadResponse, error)
-
 	// GetFriendList 获取好友列表
 	GetFriendList(ctx context.Context, req *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error)
-
 	// SyncFriendList 好友增量同步
 	SyncFriendList(ctx context.Context, req *dto.SyncFriendListRequest) (*dto.SyncFriendListResponse, error)
-
 	// DeleteFriend 删除好友
 	DeleteFriend(ctx context.Context, req *dto.DeleteFriendRequest) (*dto.DeleteFriendResponse, error)
-
 	// SetFriendRemark 设置好友备注
 	SetFriendRemark(ctx context.Context, req *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error)
-
 	// SetFriendTag 设置好友标签
 	SetFriendTag(ctx context.Context, req *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error)
-
 	// GetTagList 获取标签列表
 	GetTagList(ctx context.Context, req *dto.GetTagListRequest) (*dto.GetTagListResponse, error)
-
 	// CheckIsFriend 判断是否好友
 	CheckIsFriend(ctx context.Context, req *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error)
-
 	// GetRelationStatus 获取关系状态
 	GetRelationStatus(ctx context.Context, req *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error)
 }
@@ -113,13 +94,10 @@ type FriendService interface {
 type BlacklistService interface {
 	// AddBlacklist 拉黑用户
 	AddBlacklist(ctx context.Context, req *dto.AddBlacklistRequest) (*dto.AddBlacklistResponse, error)
-
 	// RemoveBlacklist 取消拉黑
 	RemoveBlacklist(ctx context.Context, req *dto.RemoveBlacklistRequest) (*dto.RemoveBlacklistResponse, error)
-
 	// GetBlacklistList 获取黑名单列表
 	GetBlacklistList(ctx context.Context, req *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error)
-
 	// CheckIsBlacklist 判断是否拉黑
 	CheckIsBlacklist(ctx context.Context, req *dto.CheckIsBlacklistRequest) (*dto.CheckIsBlacklistResponse, error)
 }
@@ -130,13 +108,10 @@ type BlacklistService interface {
 type DeviceService interface {
 	// GetDeviceList 获取设备列表
 	GetDeviceList(ctx context.Context) (*dto.GetDeviceListResponse, error)
-
 	// KickDevice 踢出设备
 	KickDevice(ctx context.Context, req *dto.KickDeviceRequest) (*dto.KickDeviceResponse, error)
-
 	// GetOnlineStatus 获取用户在线状态
 	GetOnlineStatus(ctx context.Context, req *dto.GetOnlineStatusRequest) (*dto.GetOnlineStatusResponse, error)
-
 	// BatchGetOnlineStatus 批量获取在线状态
 	BatchGetOnlineStatus(ctx context.Context, req *dto.BatchGetOnlineStatusRequest) (*dto.BatchGetOnlineStatusResponse, error)
 }
@@ -173,25 +148,18 @@ type UserService interface {
 type MsgService interface {
 	// SendMessage 发送消息
 	SendMessage(ctx context.Context, req *dto.SendMessageRequest) (*dto.SendMessageResponse, error)
-
 	// PullMessages 拉取历史消息
 	PullMessages(ctx context.Context, req *dto.PullMessagesRequest) (*dto.PullMessagesResponse, error)
-
 	// GetMessagesByIds 批量获取指定消息
 	GetMessagesByIds(ctx context.Context, req *dto.GetMessagesByIdsRequest) (*dto.GetMessagesByIdsResponse, error)
-
 	// RecallMessage 撤回消息
 	RecallMessage(ctx context.Context, req *dto.RecallMessageRequest) error
-
 	// GetConversations 获取会话列表
 	GetConversations(ctx context.Context, req *dto.GetConversationsRequest) (*dto.GetConversationsResponse, error)
-
 	// MarkRead 标记会话已读
 	MarkRead(ctx context.Context, req *dto.MarkReadRequest) (*dto.MarkReadResponse, error)
-
 	// DeleteConversation 删除会话
 	DeleteConversation(ctx context.Context, req *dto.DeleteConversationRequest) error
-
 	// UpdateConversationSettings 更新会话设置
 	UpdateConversationSettings(ctx context.Context, req *dto.UpdateConvSettingsRequest) error
 }
@@ -201,28 +169,24 @@ type MsgService interface {
 type GroupService interface {
 	// CreateGroup 创建群。
 	CreateGroup(ctx context.Context, req *dto.CreateGroupRequest) (*dto.CreateGroupResponse, error)
-
 	// DismissGroup 解散群。
 	DismissGroup(ctx context.Context, req *dto.DismissGroupRequest) error
-
 	// GetGroupInfo 获取群资料。
 	GetGroupInfo(ctx context.Context, req *dto.GetGroupInfoRequest) (*dto.GroupInfoDTO, error)
-
 	// UpdateGroupInfo 更新群资料。
 	UpdateGroupInfo(ctx context.Context, req *dto.UpdateGroupInfoRequest) error
-
+	// TransferGroupOwner 转让群主。
+	TransferGroupOwner(ctx context.Context, req *dto.TransferGroupOwnerRequest) error
+	// UpdateMemberRole 更新群成员角色。
+	UpdateMemberRole(ctx context.Context, req *dto.UpdateGroupMemberRoleRequest) error
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *dto.AddGroupMemberRequest) error
-
 	// RemoveMember 移除群成员。
 	RemoveMember(ctx context.Context, req *dto.RemoveGroupMemberRequest) error
-
 	// GetMemberList 获取群成员列表。
 	GetMemberList(ctx context.Context, req *dto.GetGroupMemberListRequest) (*dto.GetGroupMemberListResponse, error)
-
 	// GetGroupList 获取当前用户的群列表。
 	GetGroupList(ctx context.Context) (*dto.GetGroupListResponse, error)
-
 	// GetGroupMemberIDs 获取群成员 UUID 列表。
 	GetGroupMemberIDs(ctx context.Context, req *dto.GetGroupMemberIDsRequest) (*dto.GetGroupMemberIDsResponse, error)
 }

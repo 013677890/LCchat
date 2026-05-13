@@ -2,9 +2,6 @@ package repository
 
 import (
 	"context"
-	"testing"
-	"time"
-
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
@@ -12,18 +9,18 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"testing"
+	"time"
 )
 
 // newProjectorTestRepository 创建带 miniredis 的 projector 仓储实例。
 func newProjectorTestRepository(t *testing.T) (*groupRepositoryImpl, *goredis.Client) {
 	t.Helper()
-
 	server := miniredis.RunT(t)
 	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
 	t.Cleanup(func() {
 		_ = client.Close()
 	})
-
 	return &groupRepositoryImpl{redisClient: client}, client
 }
 
@@ -74,8 +71,10 @@ func buildProjectorGroupSnapshot(groupUUID string, memberCount int32, status int
 		GroupUUID:     groupUUID,
 		Name:          "测试群",
 		Avatar:        "avatar.png",
+		Notice:        "默认公告",
 		OwnerUUID:     "owner-1",
 		MemberCount:   memberCount,
+		AddMode:       0,
 		Status:        status,
 		UpdatedAtUnix: updatedAt.Unix(),
 	}
@@ -96,10 +95,8 @@ func TestApplyGroupCacheEventGroupCreated(t *testing.T) {
 	ctx := context.Background()
 	updatedAt := time.Unix(1710000000, 0)
 	joinedAt := updatedAt.Add(-time.Minute)
-
 	seedUserGroupsCache(t, client, "owner-1")
 	seedUserGroupsCache(t, client, "member-1")
-
 	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
 		EventID:   "evt-created",
 		Action:    groupevent.ActionGroupCreated,
@@ -112,18 +109,17 @@ func TestApplyGroupCacheEventGroupCreated(t *testing.T) {
 		UserUUIDs: []string{"owner-1", "member-1"},
 	})
 	require.NoError(t, err)
-
 	info := mustReadGroupInfoEntry(t, client, "group-1")
 	assert.Equal(t, "group-1", info.GroupUUID)
 	assert.Equal(t, 2, info.MemberCount)
+	assert.Equal(t, "默认公告", info.Notice)
+	assert.Equal(t, int8(0), info.AddMode)
 	assert.Equal(t, groupStatusNormal, info.Status)
-
 	fields := mustReadGroupMemberFields(t, client, "group-1")
 	require.Len(t, fields, 2)
 	ownerEntry, err := decodeGroupMemberCacheValue(fields["owner-1"])
 	require.NoError(t, err)
 	assert.Equal(t, memberRoleOwner, ownerEntry.Role)
-
 	assert.Equal(t, []string{"group-1"}, mustReadUserGroups(t, client, "owner-1"))
 	assert.Equal(t, []string{"group-1"}, mustReadUserGroups(t, client, "member-1"))
 }
@@ -133,7 +129,6 @@ func TestApplyGroupCacheEventMemberAddedOnlyPatchesExistingKeys(t *testing.T) {
 	repo, client := newProjectorTestRepository(t)
 	ctx := context.Background()
 	updatedAt := time.Unix(1710001000, 0)
-
 	require.NoError(t, repo.setGroupInfoCache(ctx, &model.GroupInfo{
 		Uuid:      "group-1",
 		Name:      "旧群名",
@@ -150,7 +145,6 @@ func TestApplyGroupCacheEventMemberAddedOnlyPatchesExistingKeys(t *testing.T) {
 		JoinedAt:  updatedAt.Add(-2 * time.Minute),
 	})
 	seedUserGroupsCache(t, client, "member-1")
-
 	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
 		EventID:   "evt-member-added",
 		Action:    groupevent.ActionMemberAdded,
@@ -163,15 +157,12 @@ func TestApplyGroupCacheEventMemberAddedOnlyPatchesExistingKeys(t *testing.T) {
 		UserUUIDs: []string{"member-1", "member-2"},
 	})
 	require.NoError(t, err)
-
 	info := mustReadGroupInfoEntry(t, client, "group-1")
 	assert.Equal(t, 3, info.MemberCount)
-
 	fields := mustReadGroupMemberFields(t, client, "group-1")
 	assert.Contains(t, fields, "member-1")
 	assert.Contains(t, fields, "member-2")
 	assert.Equal(t, []string{"group-1"}, mustReadUserGroups(t, client, "member-1"))
-
 	exists, err := client.Exists(ctx, rediskey.UserGroupListKey("member-2")).Result()
 	require.NoError(t, err)
 	assert.Zero(t, exists)
@@ -182,7 +173,6 @@ func TestApplyGroupCacheEventMemberRemovedRemovesFieldAndReverseIndex(t *testing
 	repo, client := newProjectorTestRepository(t)
 	ctx := context.Background()
 	updatedAt := time.Unix(1710002000, 0)
-
 	require.NoError(t, repo.setGroupInfoCache(ctx, &model.GroupInfo{
 		Uuid:      "group-1",
 		Name:      "测试群",
@@ -203,7 +193,6 @@ func TestApplyGroupCacheEventMemberRemovedRemovesFieldAndReverseIndex(t *testing
 		Score:  float64(updatedAt.Unix()),
 		Member: "group-1",
 	}).Err())
-
 	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
 		EventID:   "evt-member-removed",
 		Action:    groupevent.ActionMemberRemoved,
@@ -212,10 +201,8 @@ func TestApplyGroupCacheEventMemberRemovedRemovesFieldAndReverseIndex(t *testing
 		Group:     buildProjectorGroupSnapshot("group-1", 0, int32(groupStatusNormal), updatedAt),
 	})
 	require.NoError(t, err)
-
 	info := mustReadGroupInfoEntry(t, client, "group-1")
 	assert.Equal(t, 0, info.MemberCount)
-
 	fields := mustReadGroupMemberFields(t, client, "group-1")
 	assert.Equal(t, map[string]string{groupMembersEmptyField: groupMembersEmptyValue}, fields)
 	assert.Equal(t, []string{userGroupsEmptyValue}, mustReadUserGroups(t, client, "member-1"))
@@ -226,7 +213,6 @@ func TestApplyGroupCacheEventGroupDismissedDeletesMembersAndMarksInfo(t *testing
 	repo, client := newProjectorTestRepository(t)
 	ctx := context.Background()
 	updatedAt := time.Unix(1710003000, 0)
-
 	require.NoError(t, repo.setGroupInfoCache(ctx, &model.GroupInfo{
 		Uuid:      "group-1",
 		Name:      "测试群",
@@ -244,7 +230,6 @@ func TestApplyGroupCacheEventGroupDismissedDeletesMembersAndMarksInfo(t *testing
 	seedUserGroupsCache(t, client, "member-1")
 	require.NoError(t, client.ZAdd(ctx, rediskey.UserGroupListKey("owner-1"), goredis.Z{Score: float64(updatedAt.Unix()), Member: "group-1"}).Err())
 	require.NoError(t, client.ZAdd(ctx, rediskey.UserGroupListKey("member-1"), goredis.Z{Score: float64(updatedAt.Unix()), Member: "group-1"}).Err())
-
 	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
 		EventID:   "evt-dismissed",
 		Action:    groupevent.ActionGroupDismissed,
@@ -253,10 +238,8 @@ func TestApplyGroupCacheEventGroupDismissedDeletesMembersAndMarksInfo(t *testing
 		UserUUIDs: []string{"owner-1", "member-1"},
 	})
 	require.NoError(t, err)
-
 	info := mustReadGroupInfoEntry(t, client, "group-1")
 	assert.Equal(t, groupStatusDismissed, info.Status)
-
 	exists, err := client.Exists(ctx, rediskey.GroupMembersKey("group-1")).Result()
 	require.NoError(t, err)
 	assert.Zero(t, exists)
@@ -269,13 +252,14 @@ func TestApplyGroupCacheEventGroupInfoUpdatedOnlyTouchesInfo(t *testing.T) {
 	repo, client := newProjectorTestRepository(t)
 	ctx := context.Background()
 	updatedAt := time.Unix(1710004000, 0)
-
 	require.NoError(t, repo.setGroupInfoCache(ctx, &model.GroupInfo{
 		Uuid:      "group-1",
 		Name:      "旧群名",
 		Avatar:    "old.png",
+		Notice:    "旧公告",
 		OwnerUuid: "owner-1",
 		MemberCnt: 2,
+		AddMode:   0,
 		Status:    groupStatusNormal,
 		UpdatedAt: updatedAt.Add(-time.Minute),
 	}))
@@ -283,7 +267,6 @@ func TestApplyGroupCacheEventGroupInfoUpdatedOnlyTouchesInfo(t *testing.T) {
 		&model.GroupMember{GroupUuid: "group-1", UserUuid: "owner-1", Role: memberRoleOwner, JoinedAt: updatedAt.Add(-2 * time.Minute)},
 		&model.GroupMember{GroupUuid: "group-1", UserUuid: "member-1", Role: memberRoleMember, JoinedAt: updatedAt.Add(-time.Minute)},
 	)
-
 	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
 		EventID:   "evt-info-updated",
 		Action:    groupevent.ActionGroupInfoUpdated,
@@ -292,22 +275,113 @@ func TestApplyGroupCacheEventGroupInfoUpdatedOnlyTouchesInfo(t *testing.T) {
 			GroupUUID:     "group-1",
 			Name:          "新群名",
 			Avatar:        "new.png",
+			Notice:        "新公告",
 			OwnerUUID:     "owner-1",
 			MemberCount:   2,
+			AddMode:       1,
 			Status:        int32(groupStatusNormal),
 			UpdatedAtUnix: updatedAt.Unix(),
 		},
 	})
 	require.NoError(t, err)
-
 	info := mustReadGroupInfoEntry(t, client, "group-1")
 	assert.Equal(t, "新群名", info.Name)
 	assert.Equal(t, "new.png", info.Avatar)
-
+	assert.Equal(t, "新公告", info.Notice)
+	assert.Equal(t, int8(1), info.AddMode)
 	fields := mustReadGroupMemberFields(t, client, "group-1")
 	assert.Len(t, fields, 2)
 	assert.Contains(t, fields, "owner-1")
 	assert.Contains(t, fields, "member-1")
+}
+
+// TestApplyGroupCacheEventOwnerTransferredUpdatesInfoAndRoles 验证群主转让会同步 owner 与成员角色。
+func TestApplyGroupCacheEventOwnerTransferredUpdatesInfoAndRoles(t *testing.T) {
+	repo, client := newProjectorTestRepository(t)
+	ctx := context.Background()
+	updatedAt := time.Unix(1710004500, 0)
+	require.NoError(t, repo.setGroupInfoCache(ctx, &model.GroupInfo{
+		Uuid:      "group-1",
+		Name:      "测试群",
+		Avatar:    "avatar.png",
+		Notice:    "默认公告",
+		OwnerUuid: "owner-1",
+		MemberCnt: 2,
+		AddMode:   0,
+		Status:    groupStatusNormal,
+		UpdatedAt: updatedAt.Add(-time.Minute),
+	}))
+	seedGroupMembersCache(t, repo, "group-1",
+		&model.GroupMember{GroupUuid: "group-1", UserUuid: "owner-1", Role: memberRoleOwner, JoinedAt: updatedAt.Add(-2 * time.Minute)},
+		&model.GroupMember{GroupUuid: "group-1", UserUuid: "member-1", Role: memberRoleMember, JoinedAt: updatedAt.Add(-time.Minute)},
+	)
+	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
+		EventID:   "evt-owner-transferred",
+		Action:    groupevent.ActionOwnerTransferred,
+		GroupUUID: "group-1",
+		Group: &groupevent.GroupSnapshot{
+			GroupUUID:     "group-1",
+			Name:          "测试群",
+			Avatar:        "avatar.png",
+			Notice:        "默认公告",
+			OwnerUUID:     "member-1",
+			MemberCount:   2,
+			AddMode:       0,
+			Status:        int32(groupStatusNormal),
+			UpdatedAtUnix: updatedAt.Unix(),
+		},
+		Members: []groupevent.GroupMemberSnapshot{
+			buildProjectorMemberSnapshot("owner-1", int32(memberRoleMember), updatedAt.Add(-2*time.Minute)),
+			buildProjectorMemberSnapshot("member-1", int32(memberRoleOwner), updatedAt.Add(-time.Minute)),
+		},
+	})
+	require.NoError(t, err)
+	info := mustReadGroupInfoEntry(t, client, "group-1")
+	assert.Equal(t, "member-1", info.OwnerUUID)
+	fields := mustReadGroupMemberFields(t, client, "group-1")
+	ownerEntry, err := decodeGroupMemberCacheValue(fields["owner-1"])
+	require.NoError(t, err)
+	memberEntry, err := decodeGroupMemberCacheValue(fields["member-1"])
+	require.NoError(t, err)
+	assert.Equal(t, memberRoleMember, ownerEntry.Role)
+	assert.Equal(t, memberRoleOwner, memberEntry.Role)
+}
+
+// TestApplyGroupCacheEventMemberRoleUpdatedOnlyTouchesRole 验证成员角色更新不会污染成员集合。
+func TestApplyGroupCacheEventMemberRoleUpdatedOnlyTouchesRole(t *testing.T) {
+	repo, client := newProjectorTestRepository(t)
+	ctx := context.Background()
+	updatedAt := time.Unix(1710004700, 0)
+	require.NoError(t, repo.setGroupInfoCache(ctx, &model.GroupInfo{
+		Uuid:      "group-1",
+		Name:      "测试群",
+		Avatar:    "avatar.png",
+		Notice:    "默认公告",
+		OwnerUuid: "owner-1",
+		MemberCnt: 2,
+		AddMode:   0,
+		Status:    groupStatusNormal,
+		UpdatedAt: updatedAt.Add(-time.Minute),
+	}))
+	seedGroupMembersCache(t, repo, "group-1",
+		&model.GroupMember{GroupUuid: "group-1", UserUuid: "owner-1", Role: memberRoleOwner, JoinedAt: updatedAt.Add(-2 * time.Minute)},
+		&model.GroupMember{GroupUuid: "group-1", UserUuid: "member-1", Role: memberRoleMember, JoinedAt: updatedAt.Add(-time.Minute)},
+	)
+	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
+		EventID:   "evt-member-role-updated",
+		Action:    groupevent.ActionMemberRoleUpdated,
+		GroupUUID: "group-1",
+		Group:     buildProjectorGroupSnapshot("group-1", 2, int32(groupStatusNormal), updatedAt),
+		Members: []groupevent.GroupMemberSnapshot{
+			buildProjectorMemberSnapshot("member-1", int32(memberRoleAdmin), updatedAt.Add(-time.Minute)),
+		},
+	})
+	require.NoError(t, err)
+	fields := mustReadGroupMemberFields(t, client, "group-1")
+	assert.Len(t, fields, 2)
+	entry, err := decodeGroupMemberCacheValue(fields["member-1"])
+	require.NoError(t, err)
+	assert.Equal(t, memberRoleAdmin, entry.Role)
 }
 
 // TestApplyGroupCacheEventWrongTypeDeletesDirtyKey 验证投影遇到脏 key 时会清理并降级成功。
@@ -315,7 +389,6 @@ func TestApplyGroupCacheEventWrongTypeDeletesDirtyKey(t *testing.T) {
 	repo, client := newProjectorTestRepository(t)
 	ctx := context.Background()
 	updatedAt := time.Unix(1710005000, 0)
-
 	require.NoError(t, repo.setGroupInfoCache(ctx, &model.GroupInfo{
 		Uuid:      "group-1",
 		Name:      "测试群",
@@ -326,7 +399,6 @@ func TestApplyGroupCacheEventWrongTypeDeletesDirtyKey(t *testing.T) {
 		UpdatedAt: updatedAt.Add(-time.Minute),
 	}))
 	require.NoError(t, client.RPush(ctx, rediskey.GroupMembersKey("group-1"), "bad-field").Err())
-
 	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
 		EventID:   "evt-member-removed-wrongtype",
 		Action:    groupevent.ActionMemberRemoved,
@@ -335,7 +407,6 @@ func TestApplyGroupCacheEventWrongTypeDeletesDirtyKey(t *testing.T) {
 		Group:     buildProjectorGroupSnapshot("group-1", 0, int32(groupStatusNormal), updatedAt),
 	})
 	require.NoError(t, err)
-
 	exists, err := client.Exists(ctx, rediskey.GroupMembersKey("group-1")).Result()
 	require.NoError(t, err)
 	assert.Zero(t, exists)

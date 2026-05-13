@@ -9,7 +9,6 @@ from pathlib import Path
 
 import requests
 
-
 ROOT = Path(__file__).resolve().parent.parent
 BASE_URL = "http://localhost:8080"
 REQUEST_TIMEOUT = 10
@@ -70,17 +69,14 @@ EXPECTED_ENDPOINTS = {
 
 COVERED_ENDPOINTS: set[tuple[str, str]] = set()
 
-
 class TestFailure(RuntimeError):
     pass
-
 
 @dataclass
 class ResultItem:
     name: str
     status: str
     detail: str
-
 
 class Recorder:
     def __init__(self) -> None:
@@ -104,10 +100,8 @@ class Recorder:
         failed = sum(1 for item in self.items if item.status == "FAIL")
         return passed, warned, failed
 
-
 def mark_endpoint(method: str, path: str) -> None:
     COVERED_ENDPOINTS.add((method.upper(), path))
-
 
 def run_cmd(args: list[str]) -> str:
     proc = subprocess.run(
@@ -122,7 +116,6 @@ def run_cmd(args: list[str]) -> str:
             f"command failed: {' '.join(args)}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
     return proc.stdout.strip()
-
 
 def redis_set(key: str, value: str, expire_seconds: int = 600) -> None:
     run_cmd(
@@ -140,7 +133,6 @@ def redis_set(key: str, value: str, expire_seconds: int = 600) -> None:
             str(expire_seconds),
         ]
     )
-
 
 def request_json(
     method: str,
@@ -178,14 +170,12 @@ def request_json(
 
     return response, body
 
-
 def ensure_success(name: str, response: requests.Response, body: dict) -> dict:
     if response.status_code != 200:
         raise TestFailure(f"{name} http status={response.status_code}, body={body}")
     if body.get("code") != 0:
         raise TestFailure(f"{name} business code={body.get('code')}, body={body}")
     return body.get("data") or {}
-
 
 def wait_until(name: str, fn, timeout: float = 20.0, interval: float = 1.0):
     deadline = time.time() + timeout
@@ -198,13 +188,11 @@ def wait_until(name: str, fn, timeout: float = 20.0, interval: float = 1.0):
             time.sleep(interval)
     raise TestFailure(f"{name} timeout: {last_error}")
 
-
 def expect_contains(items: list[dict], key: str, value: str, name: str) -> dict:
     for item in items:
         if item.get(key) == value:
             return item
     raise TestFailure(f"{name} missing item with {key}={value}: {items}")
-
 
 def main() -> int:
     recorder = Recorder()
@@ -943,7 +931,6 @@ def main() -> int:
     passed, warned, failed = recorder.summary()
     print(f"\nSummary: pass={passed}, warn={warned}, fail={failed}")
     return 1 if failed else 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

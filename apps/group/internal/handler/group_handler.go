@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-
 	"github.com/013677890/LCchat-Backend/apps/group/internal/service"
 	pb "github.com/013677890/LCchat-Backend/apps/group/pb"
 )
@@ -18,7 +17,6 @@ import (
 // gRPC 边界层都保持稳定，便于测试和维护。
 type GroupHandler struct {
 	pb.UnimplementedGroupServiceServer
-
 	groupService service.IGroupService
 }
 
@@ -48,6 +46,16 @@ func (h *GroupHandler) GetGroupInfo(ctx context.Context, req *pb.GetGroupInfoReq
 // UpdateGroupInfo 更新群资料。
 func (h *GroupHandler) UpdateGroupInfo(ctx context.Context, req *pb.UpdateGroupInfoRequest) (*pb.UpdateGroupInfoResponse, error) {
 	return &pb.UpdateGroupInfoResponse{}, h.groupService.UpdateGroupInfo(ctx, req)
+}
+
+// TransferGroupOwner 转让群主。
+func (h *GroupHandler) TransferGroupOwner(ctx context.Context, req *pb.TransferGroupOwnerRequest) (*pb.TransferGroupOwnerResponse, error) {
+	return &pb.TransferGroupOwnerResponse{}, h.groupService.TransferGroupOwner(ctx, req)
+}
+
+// UpdateMemberRole 更新群成员角色。
+func (h *GroupHandler) UpdateMemberRole(ctx context.Context, req *pb.UpdateMemberRoleRequest) (*pb.UpdateMemberRoleResponse, error) {
+	return &pb.UpdateMemberRoleResponse{}, h.groupService.UpdateMemberRole(ctx, req)
 }
 
 // AddMember 添加群成员。
