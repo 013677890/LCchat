@@ -8,14 +8,11 @@ import (
 
 // IGroupService 定义 group-service 对外暴露的业务接口。
 //
-// 当前 proto 已经把群组服务的公共方法面定义出来了，
-// 因此这里先完整镜像一份 service 接口，确保：
+// 当前 proto 已经稳定覆盖群组服务的核心读写方法面，
+// 因此这里保持与 proto 一一对应，确保：
 //  1. handler 只依赖抽象，不依赖具体实现；
 //  2. 后续补充业务逻辑时不需要再改 handler / wire 的依赖方向；
 //  3. 测试时可以方便地为每个方法注入 mock。
-//
-// 注意：当前阶段这些方法只是“骨架能力声明”，具体实现会统一返回“暂未实现”，
-// 目的是先把服务边界搭起来，而不是提前塞入未经确认的业务规则。
 type IGroupService interface {
 	// CreateGroup 创建群。
 	CreateGroup(ctx context.Context, req *pb.CreateGroupRequest) (*pb.CreateGroupResponse, error)

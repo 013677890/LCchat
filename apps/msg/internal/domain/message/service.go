@@ -32,7 +32,7 @@ func DefaultConfig() Config {
 
 // GroupRoleQuerier 查询用户在群内的角色。
 // 0=普通成员, 1=管理员, 2=群主, -1=非群成员。
-// 由 infra 层通过 user-service gRPC 实现，msg 领域仅依赖此接口。
+// 由 infra 层通过 group-service gRPC 实现，msg 领域仅依赖此接口。
 type GroupRoleQuerier interface {
 	QueryMemberRole(ctx context.Context, groupUUID, userUUID string) (int8, error)
 }

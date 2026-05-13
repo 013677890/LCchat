@@ -24,9 +24,9 @@ import (
 
 // GroupApp 统一管理 group-service 生命周期。
 //
-// 当前阶段 group-service 还只是“可启动骨架”，未接入真正的群管理业务；
-// 但这里依然提前把 gRPC、metrics、MySQL、Redis、异步池等进程级资源聚合到一个 App 中，
-// 这样后续补充群资料、成员、审批等逻辑时，就不需要再重构启动模型。
+// 当前 group-service 已承载群资料、成员写链路与缓存投影能力；
+// 这里继续把 gRPC、metrics、MySQL、Redis、异步池等进程级资源聚合到一个 App 中，
+// 便于统一管理对外服务入口与 group.cache projector 等后台组件的生命周期。
 type GroupApp struct {
 	logger              *zap.Logger
 	metricsServer       *http.Server

@@ -329,3 +329,77 @@ func TestCheckGroupMemberMapsDismissedAndNormalizesNonMemberRole(t *testing.T) {
 	_, err = svc.CheckGroupMember(context.Background(), &pb.CheckGroupMemberRequest{GroupUuid: "group-uuid", UserUuid: "user-uuid"})
 	requireGroupBizCode(t, err, consts.CodeGroupAlreadyDismiss)
 }
+
+func TestGetGroupListUsesContextUserAndMapsResponse(t *testing.T) {
+	var gotUserUUID string
+	repo := &fakeGroupRepoForService{
+		listUserGroupsFn: func(_ context.Context, userUUID string) ([]*model.GroupInfo, error) {
+			gotUserUUID = userUUID
+			return []*model.GroupInfo{{
+				Uuid:      "group-1",
+				Name:      "测试群",
+				Avatar:    "avatar.png",
+				OwnerUuid: "owner-1",
+				MemberCnt: 3,
+			}}, nil
+		},
+	}
+	svc := NewGroupService(repo)
+
+	resp, err := svc.GetGroupList(groupServiceTestContext("user-1"), &pb.GetGroupListRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "user-1", gotUserUUID)
+	require.Len(t, resp.GetGroups(), 1)
+	assert.Equal(t, "group-1", resp.GetGroups()[0].GetGroupUuid())
+	assert.Equal(t, "测试群", resp.GetGroups()[0].GetName())
+	assert.Equal(t, int32(3), resp.GetGroups()[0].GetMemberCount())
+
+	_, err = svc.GetGroupList(context.Background(), &pb.GetGroupListRequest{})
+	requireGroupBizCode(t, err, consts.CodeUnauthorized)
+}
+
+func TestGetGroupMemberIdsDeduplicatesMembers(t *testing.T) {
+	repo := &fakeGroupRepoForService{
+		getGroupMembersFn: func(context.Context, string) ([]*model.GroupMember, error) {
+			return []*model.GroupMember{
+				{UserUuid: "user-1"},
+				nil,
+				{UserUuid: "user-1"},
+				{UserUuid: "user-2"},
+			}, nil
+		},
+	}
+	svc := NewGroupService(repo)
+
+	resp, err := svc.GetGroupMemberIds(context.Background(), &pb.GetGroupMemberIdsRequest{GroupUuid: " group-1 "})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user-1", "user-2"}, resp.GetUserUuids())
+}
+
+func TestGetMemberListBuildsProfileAwareItems(t *testing.T) {
+	repo := &fakeGroupRepoForService{
+		getGroupMembersFn: func(context.Context, string) ([]*model.GroupMember, error) {
+			return []*model.GroupMember{
+				{UserUuid: "owner-1", Role: 2},
+				{UserUuid: "member-1", Role: 0},
+			}, nil
+		},
+		getUserProfilesFn: func(_ context.Context, userUUIDs []string) (map[string]*model.UserProfile, error) {
+			assert.Equal(t, []string{"owner-1", "member-1"}, userUUIDs)
+			return map[string]*model.UserProfile{
+				"owner-1":  {UserUuid: "owner-1", Nickname: "群主", Avatar: "owner.png"},
+				"member-1": {UserUuid: "member-1", Nickname: "成员", Avatar: "member.png"},
+			}, nil
+		},
+	}
+	svc := NewGroupService(repo)
+
+	resp, err := svc.GetMemberList(context.Background(), &pb.GetMemberListRequest{GroupUuid: "group-1"})
+	require.NoError(t, err)
+	require.Len(t, resp.GetMembers(), 2)
+	assert.Equal(t, "owner-1", resp.GetMembers()[0].GetUserUuid())
+	assert.Equal(t, "群主", resp.GetMembers()[0].GetNickname())
+	assert.Equal(t, "owner.png", resp.GetMembers()[0].GetAvatar())
+	assert.Equal(t, "member-1", resp.GetMembers()[1].GetUserUuid())
+	assert.Equal(t, "成员", resp.GetMembers()[1].GetNickname())
+}
