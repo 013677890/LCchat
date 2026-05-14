@@ -10,7 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GroupHandler 群组处理器。
+// GroupHandler 是 gateway 的群 HTTP 入站适配层。
+//
+// 这里专注做参数绑定、路径参数补齐和错误响应转换，
+// 真实群业务规则统一下沉到下游 group-service 维护。
 type GroupHandler struct {
 	groupService service.GroupService
 }
@@ -215,6 +218,8 @@ func (h *GroupHandler) GetGroupMemberIDs(c *gin.Context) {
 	}
 	result.Success(c, resp)
 }
+
+// handleGroupError 统一把下游 group-service 错误转换成 HTTP 响应。
 func handleGroupError(c *gin.Context, err error) {
 	code := utils.ExtractErrorCode(err)
 	if consts.IsNonServerError(code) {

@@ -515,6 +515,7 @@ func (r *groupRepositoryImpl) UpdateMemberRole(ctx context.Context, groupUUID, o
 }
 
 // buildGroupInfoUpdateMap 只提取真实变化字段，避免无意义更新打乱排序。
+// buildGroupInfoUpdateMap 只提取真实变化字段，避免无意义更新打乱排序。
 func buildGroupInfoUpdateMap(group *model.GroupInfo, updates GroupInfoUpdates) map[string]interface{} {
 	updateMap := make(map[string]interface{}, 4)
 	if group == nil {
@@ -536,6 +537,7 @@ func buildGroupInfoUpdateMap(group *model.GroupInfo, updates GroupInfoUpdates) m
 }
 
 // applyGroupInfoUpdates 把已经提交成功的变更同步回内存对象，供事件快照复用。
+// applyGroupInfoUpdates 把已经提交成功的变更同步回内存对象，供事件快照复用。
 func applyGroupInfoUpdates(group *model.GroupInfo, updates GroupInfoUpdates) {
 	if group == nil {
 		return
@@ -553,6 +555,10 @@ func applyGroupInfoUpdates(group *model.GroupInfo, updates GroupInfoUpdates) {
 		group.AddMode = *updates.AddMode
 	}
 }
+
+// loadGroupForUpdate 以行锁方式加载群记录。
+//
+// 该方法是所有群写操作的并发边界，保证同一群的多类写事实在事务内串行化裁决。
 func (r *groupRepositoryImpl) loadGroupForUpdate(ctx context.Context, tx *gorm.DB, groupUUID string) (*model.GroupInfo, error) {
 	var group model.GroupInfo
 	// 写路径统一通过行锁读取群记录，作为成员变更、解散和资料更新的并发边界。
@@ -565,6 +571,10 @@ func (r *groupRepositoryImpl) loadGroupForUpdate(ctx context.Context, tx *gorm.D
 	}
 	return &group, nil
 }
+
+// loadWritableGroupForUpdate 加载可写的正常群记录。
+//
+// 这里把“已解散”和“其他异常状态”拆成不同错误，便于 service 映射稳定业务码。
 func (r *groupRepositoryImpl) loadWritableGroupForUpdate(ctx context.Context, tx *gorm.DB, groupUUID string) (*model.GroupInfo, error) {
 	group, err := r.loadGroupForUpdate(ctx, tx, groupUUID)
 	if err != nil {
@@ -580,6 +590,10 @@ func (r *groupRepositoryImpl) loadWritableGroupForUpdate(ctx context.Context, tx
 	}
 	return group, nil
 }
+
+// ensureGroupNormal 确认群当前仍处于可读的正常状态。
+//
+// 高频读链路优先查缓存中的群状态，再按需回源数据库，避免每次权限校验都落到 MySQL。
 func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID string) error {
 	if r == nil || r.db == nil || groupUUID == "" {
 		return ErrRecordNotFound
@@ -616,6 +630,8 @@ func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID s
 	}
 	return nil
 }
+
+// loadActiveMemberForUpdate 以行锁方式加载单个有效成员关系。
 func (r *groupRepositoryImpl) loadActiveMemberForUpdate(ctx context.Context, tx *gorm.DB, groupUUID, userUUID string) (*model.GroupMember, error) {
 	var member model.GroupMember
 	// 成员角色是权限判断依据，必须加锁读取，防止并发角色变更造成越权。
@@ -628,6 +644,8 @@ func (r *groupRepositoryImpl) loadActiveMemberForUpdate(ctx context.Context, tx 
 	}
 	return &member, nil
 }
+
+// ensureOperatorRoleAtLeast 校验操作者是否达到指定最小角色等级。
 func (r *groupRepositoryImpl) ensureOperatorRoleAtLeast(ctx context.Context, tx *gorm.DB, groupUUID, operatorUUID string, minRole int8) (*model.GroupMember, error) {
 	member, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, operatorUUID)
 	if err != nil {
@@ -642,13 +660,19 @@ func (r *groupRepositoryImpl) ensureOperatorRoleAtLeast(ctx context.Context, tx 
 	}
 	return member, nil
 }
+
+// ensureOperatorCanAddMembers 校验操作者是否具备加人权限。
 func (r *groupRepositoryImpl) ensureOperatorCanAddMembers(ctx context.Context, tx *gorm.DB, groupUUID, operatorUUID string) error {
 	_, err := r.ensureOperatorRoleAtLeast(ctx, tx, groupUUID, operatorUUID, memberRoleAdmin)
 	return err
 }
+
+// isActiveGroupMember 判断成员关系是否仍为有效成员。
 func isActiveGroupMember(member *model.GroupMember) bool {
 	return member != nil && member.Status == memberStatusNormal && !member.DeletedAt.Valid
 }
+
+// canRemoveGroupMember 判断当前角色矩阵下是否允许移除目标成员。
 func canRemoveGroupMember(operatorRole, targetRole int8) bool {
 	switch operatorRole {
 	case memberRoleOwner:
@@ -666,6 +690,13 @@ func canRemoveGroupMember(operatorRole, targetRole int8) bool {
 //  1. 只有群主可以设置管理员；
 //  2. 目标必须是当前有效的普通成员或管理员；
 //  3. 不能通过该接口直接产生第二个群主。
+//
+// canUpdateGroupMemberRole 判断是否允许把目标成员调整为指定角色。
+//
+// 当前规则保持最小闭环：
+//  1. 只有群主可以设置管理员；
+//  2. 目标必须是当前有效的普通成员或管理员；
+//  3. 不能通过该接口直接产生第二个群主。
 func canUpdateGroupMemberRole(operatorRole, currentTargetRole, nextTargetRole int8) bool {
 	if operatorRole != memberRoleOwner {
 		return false
@@ -676,6 +707,13 @@ func canUpdateGroupMemberRole(operatorRole, currentTargetRole, nextTargetRole in
 	return nextTargetRole == memberRoleMember || nextTargetRole == memberRoleAdmin
 }
 
+// loadExistingMembersForUpdate 在事务内锁定目标成员集合。
+//
+// 这里使用 Unscoped 的原因是：
+//  1. 重新入群需要感知历史软删成员；
+//  2. 转让群主、角色变更、踢人等写操作都要和历史记录串行化；
+//  3. 可以避免并发场景下重复插入同一个成员关系。
+//
 // loadExistingMembersForUpdate 在事务内锁定目标成员集合。
 //
 // 这里使用 Unscoped 的原因是：

@@ -14,10 +14,16 @@ import (
 )
 
 // groupServiceImpl 是 group-service 业务层实现。
+//
+// 该层负责：
+//  1. 收口登录态、参数与领域前置校验；
+//  2. 组装最小业务实体并调用 repository 落库；
+//  3. 把仓储层语义错误映射为稳定业务错误码。
 type groupServiceImpl struct {
 	groupRepo repository.IGroupRepository
 }
 
+// defaultGroupAvatarURL 是未显式传头像时的默认群头像。
 const defaultGroupAvatarURL = "https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png"
 
 // NewGroupService 创建 group 服务实例。
@@ -327,6 +333,13 @@ func (s *groupServiceImpl) CheckGroupMember(ctx context.Context, req *pb.CheckGr
 	}
 	return &pb.CheckGroupMemberResponse{IsMember: isMember, Role: int32(role)}, nil
 }
+
+// normalizeGroupMemberUUIDs 统一做去空、去重和排除项过滤。
+//
+// 这里把创建群、加人等入口都收敛到同一套归一化逻辑，避免：
+//  1. 请求内重复 UUID 重复进入事务；
+//  2. 群主在创建群时被再次写入成员关系；
+//  3. 空字符串污染后续 repository 判断。
 func normalizeGroupMemberUUIDs(raw []string, exclusions ...string) []string {
 	if len(raw) == 0 {
 		return []string{}
@@ -355,6 +368,11 @@ func normalizeGroupMemberUUIDs(raw []string, exclusions ...string) []string {
 	}
 	return userUUIDs
 }
+
+// buildUpdateGroupInfoFields 解析群资料更新请求里的 optional 字段。
+//
+// 第二批资料接口已经改成“显式更新意图”模型，
+// 因此这里负责把 proto 请求转换成 repository 可直接消费的更新集合。
 func buildUpdateGroupInfoFields(req *pb.UpdateGroupInfoRequest) (repository.GroupInfoUpdates, error) {
 	updates := repository.GroupInfoUpdates{}
 	if req.Name != nil {
@@ -390,12 +408,20 @@ func buildUpdateGroupInfoFields(req *pb.UpdateGroupInfoRequest) (repository.Grou
 	}
 	return updates, nil
 }
+
+// normalizeUpdatableMemberRole 校验并收敛可写入的成员角色。
+//
+// 当前接口只允许设置普通成员和管理员，群主角色必须通过转让接口流转。
 func normalizeUpdatableMemberRole(role int32) (int8, error) {
 	if role < int32(0) || role > int32(1) {
 		return 0, apperr.New(consts.CodeParamError)
 	}
 	return int8(role), nil
 }
+
+// mapGroupWriteError 把 repository 语义错误映射为稳定业务码。
+//
+// 这样各写接口只需关心业务意图，错误码收口统一维护在一个位置。
 func mapGroupWriteError(err error, fallbackMessage string) error {
 	if err == nil {
 		return nil
@@ -421,6 +447,10 @@ func mapGroupWriteError(err error, fallbackMessage string) error {
 	}
 	return apperr.Wrap(err, consts.CodeInternalError, fallbackMessage)
 }
+
+// buildCreateGroupMembers 组装建群场景下的首批成员关系。
+//
+// 该方法保证群主始终是第一条有效成员记录，便于后续权限判断与缓存投影保持一致。
 func buildCreateGroupMembers(groupUUID, ownerUUID string, memberUUIDs []string, now time.Time) []*model.GroupMember {
 	members := make([]*model.GroupMember, 0, len(memberUUIDs)+1)
 	if groupUUID == "" || ownerUUID == "" {
@@ -450,6 +480,10 @@ func buildCreateGroupMembers(groupUUID, ownerUUID string, memberUUIDs []string, 
 	}
 	return members
 }
+
+// buildAddGroupMembers 组装“添加成员”写意图。
+//
+// service 层这里只保留最小必需字段，具体角色、邀请人和时间以下层事务结果为准。
 func buildAddGroupMembers(groupUUID string, memberUUIDs []string) []*model.GroupMember {
 	if groupUUID == "" || len(memberUUIDs) == 0 {
 		return []*model.GroupMember{}
@@ -466,6 +500,10 @@ func buildAddGroupMembers(groupUUID string, memberUUIDs []string) []*model.Group
 	}
 	return members
 }
+
+// collectMemberUUIDs 提取成员 UUID 列表并去重。
+//
+// 该结果主要用于批量查用户资料，避免 service 层因为重复成员再次放大查询成本。
 func collectMemberUUIDs(members []*model.GroupMember) []string {
 	if len(members) == 0 {
 		return []string{}

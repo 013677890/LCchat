@@ -15,6 +15,7 @@ type CreateGroupResponse struct {
 	GroupUUID string `json:"groupUuid"`
 }
 
+// ConvertToProtoCreateGroupRequest 把创建群 DTO 转成 group proto 请求。
 func ConvertToProtoCreateGroupRequest(dto *CreateGroupRequest) *grouppb.CreateGroupRequest {
 	if dto == nil {
 		return nil
@@ -25,6 +26,8 @@ func ConvertToProtoCreateGroupRequest(dto *CreateGroupRequest) *grouppb.CreateGr
 		MemberUuids: dto.MemberUUIDs,
 	}
 }
+
+// ConvertCreateGroupResponseFromProto 把创建群 proto 响应转成 HTTP DTO。
 func ConvertCreateGroupResponseFromProto(pb *grouppb.CreateGroupResponse) *CreateGroupResponse {
 	if pb == nil {
 		return nil
@@ -41,6 +44,9 @@ type UpdateGroupInfoRequest struct {
 	AddMode   *int32  `json:"addMode" binding:"omitempty,oneof=0 1"`
 }
 
+// ConvertToProtoUpdateGroupInfoRequest 把资料更新 DTO 转成 proto 请求。
+//
+// 这里保留 optional 字段的 nil 语义，避免 gateway 把“未传字段”错误转换成空字符串更新。
 func ConvertToProtoUpdateGroupInfoRequest(dto *UpdateGroupInfoRequest) *grouppb.UpdateGroupInfoRequest {
 	if dto == nil {
 		return nil
@@ -67,6 +73,7 @@ type TransferGroupOwnerRequest struct {
 	TargetUserUUID string `json:"targetUserUuid" binding:"required"`
 }
 
+// ConvertToProtoTransferGroupOwnerRequest 把群主转让 DTO 转成 proto 请求。
 func ConvertToProtoTransferGroupOwnerRequest(dto *TransferGroupOwnerRequest) *grouppb.TransferGroupOwnerRequest {
 	if dto == nil {
 		return nil
@@ -84,6 +91,7 @@ type UpdateGroupMemberRoleRequest struct {
 	Role      *int32 `json:"role" binding:"required,oneof=0 1"`
 }
 
+// ConvertToProtoUpdateGroupMemberRoleRequest 把成员角色更新 DTO 转成 proto 请求。
 func ConvertToProtoUpdateGroupMemberRoleRequest(dto *UpdateGroupMemberRoleRequest) *grouppb.UpdateMemberRoleRequest {
 	if dto == nil || dto.Role == nil {
 		return nil
@@ -101,6 +109,7 @@ type AddGroupMemberRequest struct {
 	UserUUIDs []string `json:"userUuids" binding:"required,min=1"`
 }
 
+// ConvertToProtoAddGroupMemberRequest 把添加成员 DTO 转成 proto 请求。
 func ConvertToProtoAddGroupMemberRequest(dto *AddGroupMemberRequest) *grouppb.AddMemberRequest {
 	if dto == nil {
 		return nil
@@ -117,6 +126,7 @@ type RemoveGroupMemberRequest struct {
 	UserUUID  string `json:"userUuid"`
 }
 
+// ConvertToProtoRemoveGroupMemberRequest 把移除成员 DTO 转成 proto 请求。
 func ConvertToProtoRemoveGroupMemberRequest(dto *RemoveGroupMemberRequest) *grouppb.RemoveMemberRequest {
 	if dto == nil {
 		return nil
@@ -132,6 +142,7 @@ type DismissGroupRequest struct {
 	GroupUUID string `json:"groupUuid"`
 }
 
+// ConvertToProtoDismissGroupRequest 把解散群 DTO 转成 proto 请求。
 func ConvertToProtoDismissGroupRequest(dto *DismissGroupRequest) *grouppb.DismissGroupRequest {
 	if dto == nil {
 		return nil
@@ -155,12 +166,15 @@ type GroupInfoDTO struct {
 	AddMode     int32  `json:"addMode"`
 }
 
+// ConvertToProtoGetGroupInfoRequest 把查群资料 DTO 转成 proto 请求。
 func ConvertToProtoGetGroupInfoRequest(dto *GetGroupInfoRequest) *grouppb.GetGroupInfoRequest {
 	if dto == nil {
 		return nil
 	}
 	return &grouppb.GetGroupInfoRequest{GroupUuid: dto.GroupUUID}
 }
+
+// ConvertGroupInfoFromProto 把群资料 proto 响应转成 HTTP DTO。
 func ConvertGroupInfoFromProto(pb *grouppb.GetGroupInfoResponse) *GroupInfoDTO {
 	if pb == nil {
 		return nil
@@ -181,6 +195,7 @@ type GetGroupListResponse struct {
 	Groups []*GroupInfoDTO `json:"groups"`
 }
 
+// ConvertGroupListResponseFromProto 把群列表 proto 响应转成 HTTP DTO。
 func ConvertGroupListResponseFromProto(pb *grouppb.GetGroupListResponse) *GetGroupListResponse {
 	if pb == nil {
 		return nil
@@ -210,12 +225,15 @@ type GetGroupMemberListResponse struct {
 	Members []*GroupMemberItemDTO `json:"members"`
 }
 
+// ConvertToProtoGetGroupMemberListRequest 把群成员列表 DTO 转成 proto 请求。
 func ConvertToProtoGetGroupMemberListRequest(dto *GetGroupMemberListRequest) *grouppb.GetMemberListRequest {
 	if dto == nil {
 		return nil
 	}
 	return &grouppb.GetMemberListRequest{GroupUuid: dto.GroupUUID}
 }
+
+// ConvertGroupMemberListResponseFromProto 把群成员列表 proto 响应转成 HTTP DTO。
 func ConvertGroupMemberListResponseFromProto(pb *grouppb.GetMemberListResponse) *GetGroupMemberListResponse {
 	if pb == nil {
 		return nil
@@ -245,12 +263,15 @@ type GetGroupMemberIDsResponse struct {
 	UserUUIDs []string `json:"userUuids"`
 }
 
+// ConvertToProtoGetGroupMemberIDsRequest 把群成员 ID 列表 DTO 转成 proto 请求。
 func ConvertToProtoGetGroupMemberIDsRequest(dto *GetGroupMemberIDsRequest) *grouppb.GetGroupMemberIdsRequest {
 	if dto == nil {
 		return nil
 	}
 	return &grouppb.GetGroupMemberIdsRequest{GroupUuid: dto.GroupUUID}
 }
+
+// ConvertGroupMemberIDsResponseFromProto 把群成员 ID proto 响应转成 HTTP DTO。
 func ConvertGroupMemberIDsResponseFromProto(pb *grouppb.GetGroupMemberIdsResponse) *GetGroupMemberIDsResponse {
 	if pb == nil {
 		return nil

@@ -7,7 +7,10 @@ import (
 	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
 )
 
-// GroupServiceImpl 群组服务实现。
+// GroupServiceImpl 是 gateway 到 group-service 的群能力适配层。
+//
+// 这里保持“DTO 转 proto、响应再转回 DTO”的单一职责，
+// 避免在 gateway 再复制一份群业务规则，保证真实规则只维护在 group-service。
 type GroupServiceImpl struct {
 	groupClient pb.GroupServiceClient
 }
@@ -81,6 +84,8 @@ func (s *GroupServiceImpl) GetMemberList(ctx context.Context, req *dto.GetGroupM
 }
 
 // GetGroupList 获取当前用户的群列表。
+//
+// 下游接口当前不需要业务参数，gateway 在这里统一屏蔽空 proto 请求的构造细节。
 func (s *GroupServiceImpl) GetGroupList(ctx context.Context) (*dto.GetGroupListResponse, error) {
 	resp, err := s.groupClient.GetGroupList(ctx, &grouppb.GetGroupListRequest{})
 	if err != nil {
