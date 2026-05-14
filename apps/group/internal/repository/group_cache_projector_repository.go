@@ -48,6 +48,10 @@ func (r *groupRepositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload 
 		return r.applyOwnerTransferredEvent(ctx, payload)
 	case groupevent.ActionMemberRoleUpdated:
 		return r.applyMemberRoleUpdatedEvent(ctx, payload)
+	case groupevent.ActionJoinRequestCreated:
+		return r.applyJoinRequestCreatedEvent(ctx, payload)
+	case groupevent.ActionJoinRequestReviewed:
+		return r.applyJoinRequestReviewedEvent(ctx, payload)
 	default:
 		return fmt.Errorf("%w: unsupported action %s", ErrInvalidProjectorPayload, payload.Action)
 	}
@@ -93,6 +97,10 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 		}
 		if len(payload.Members) == 0 {
 			return fmt.Errorf("%w: %s missing member snapshots", ErrInvalidProjectorPayload, payload.Action)
+		}
+	case groupevent.ActionJoinRequestCreated, groupevent.ActionJoinRequestReviewed:
+		if payload.JoinRequest == nil {
+			return fmt.Errorf("%w: %s missing join request snapshot", ErrInvalidProjectorPayload, payload.Action)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported action %s", ErrInvalidProjectorPayload, payload.Action)
@@ -213,6 +221,27 @@ func (r *groupRepositoryImpl) applyMemberRoleUpdatedEvent(ctx context.Context, p
 		}
 	}
 	return nil
+}
+
+// applyJoinRequestCreatedEvent 处理新增待审批入群申请后的缓存投影。
+//
+// 待审批申请列表缓存和成员缓存一样遵循 patch-if-exists：
+//  1. 缓存已存在时增量写入单条申请；
+//  2. 缓存不存在时直接跳过，继续由读路径负责全量重建；
+//  3. 申请展示资料仍由上层聚合 user_profile，不在这里冗余缓存。
+func (r *groupRepositoryImpl) applyJoinRequestCreatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+	return r.upsertGroupJoinRequestCacheIfExists(ctx, payload.GroupUUID, buildGroupJoinRequestFromSnapshot(payload.JoinRequest))
+}
+
+// applyJoinRequestReviewedEvent 处理待审批入群申请被通过或拒绝后的缓存投影。
+//
+// 审批完成后，这条申请不应继续停留在“待审批列表”缓存里，
+// 因此这里直接按 apply_id 删除对应 field；若缓存缺失则继续保持跳过语义。
+func (r *groupRepositoryImpl) applyJoinRequestReviewedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+	if payload.JoinRequest == nil {
+		return fmt.Errorf("%w: join_request_reviewed missing join request snapshot", ErrInvalidProjectorPayload)
+	}
+	return r.removeGroupJoinRequestCacheIfExists(ctx, payload.GroupUUID, payload.JoinRequest.ApplyID)
 }
 
 // setGroupInfoCacheIfExists 仅在 `group:info` 已存在时覆盖最新群快照并刷新 TTL。

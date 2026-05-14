@@ -33,7 +33,7 @@ func grpcCodeForBizCode(code int) codes.Code {
 		consts.CodeAlreadyFriend, consts.CodeFriendRequestSent,
 		consts.CodeAlreadyInBlacklist, consts.CodeDeviceAlreadyExist,
 		consts.CodeMessageRevoked, consts.CodeMessageDuplicate,
-		consts.CodeAlreadyGroupMember:
+		consts.CodeAlreadyGroupMember, consts.CodeGroupApplyAlreadyExists:
 		return codes.AlreadyExists
 	case consts.CodeTooManyRequests, consts.CodeSendTooFrequent:
 		return codes.ResourceExhausted

@@ -30,6 +30,14 @@ var (
 	ErrCannotQuitAsOwner = errors.New("cannot quit as owner")
 	// ErrGroupMemberNotFound 表示目标成员不存在或已不在群内。
 	ErrGroupMemberNotFound = errors.New("group member not found")
+	// ErrGroupApplyNotFound 表示入群申请不存在或已处理。
+	ErrGroupApplyNotFound = errors.New("group join request not found")
+	// ErrGroupApplyAlreadyExists 表示当前用户已存在待审批入群申请。
+	ErrGroupApplyAlreadyExists = errors.New("group join request already exists")
+	// ErrAlreadyGroupMember 表示目标用户已经是群内有效成员。
+	ErrAlreadyGroupMember = errors.New("already group member")
+	// ErrAdminLimitExceeded 表示管理员数量已达到上限。
+	ErrAdminLimitExceeded = errors.New("admin limit exceeded")
 	// ErrDatabase 表示通用数据库错误。
 	ErrDatabase = errors.New("database error")
 	// ErrRedisNil 表示 Redis key 不存在。

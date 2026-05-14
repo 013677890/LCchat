@@ -6,7 +6,6 @@ import (
 )
 
 // ==================== TTL 常量 ====================
-
 const (
 	// VerifyCodeMinuteTTL 验证码 1 分钟限流 TTL
 	VerifyCodeMinuteTTL = 1 * time.Minute
@@ -14,43 +13,40 @@ const (
 	VerifyCode24HTTL = 24 * time.Hour
 	// VerifyCodeIPTTL 验证码 IP 1 小时限流 TTL
 	VerifyCodeIPTTL = 1 * time.Hour
-
 	// DeviceInfoTTL 设备信息缓存 TTL
 	DeviceInfoTTL = 60 * 24 * time.Hour
 	// DeviceActiveTTL 设备活跃时间缓存 TTL
 	DeviceActiveTTL = 7 * 24 * time.Hour
-
 	// UserProfileTTL 用户资料缓存 TTL
 	UserProfileTTL = 1 * time.Hour
 	// UserProfileEmptyTTL 用户资料空值缓存 TTL
 	UserProfileEmptyTTL = 5 * time.Minute
-
 	// FriendRelationTTL 好友关系缓存 TTL
 	FriendRelationTTL = 24 * time.Hour
 	// FriendRelationEmptyTTL 好友关系空值缓存 TTL
 	FriendRelationEmptyTTL = 5 * time.Minute
-
 	// BlacklistTTL 黑名单缓存 TTL
 	BlacklistTTL = 24 * time.Hour
 	// BlacklistEmptyTTL 黑名单空值缓存 TTL
 	BlacklistEmptyTTL = 5 * time.Minute
-
 	// ApplyPendingTTL 好友申请待处理缓存 TTL
 	ApplyPendingTTL = 24 * time.Hour
 	// ApplyPendingEmptyTTL 好友申请空值缓存 TTL
 	ApplyPendingEmptyTTL = 5 * time.Minute
 	// ApplyUnreadNotifyTTL 好友申请未读计数 TTL
 	ApplyUnreadNotifyTTL = 7 * 24 * time.Hour
-
 	// QRCodeTTL 用户二维码缓存 TTL
 	QRCodeTTL = 48 * time.Hour
-
 	// GroupInfoTTL 群资料缓存 TTL
 	GroupInfoTTL = 1 * time.Hour
 	// GroupInfoEmptyTTL 群资料空值缓存 TTL
 	GroupInfoEmptyTTL = 5 * time.Minute
 	// GroupMembersTTL 群成员缓存 TTL
 	GroupMembersTTL = 24 * time.Hour
+	// GroupJoinRequestTTL 群待审批申请缓存 TTL
+	GroupJoinRequestTTL = 24 * time.Hour
+	// GroupJoinRequestEmptyTTL 群待审批申请空值缓存 TTL
+	GroupJoinRequestEmptyTTL = 5 * time.Minute
 	// UserGroupListTTL 用户群列表缓存 TTL
 	UserGroupListTTL = 24 * time.Hour
 	// UserGroupListEmptyTTL 用户群列表空值缓存 TTL
@@ -58,7 +54,6 @@ const (
 )
 
 // ==================== Key 构造函数 ====================
-
 // VerifyCodeKey 生成验证码 Key: user:verify_code:{email}:{type}
 func VerifyCodeKey(email string, codeType int32) string {
 	return fmt.Sprintf("user:verify_code:%s:%d", email, codeType)
@@ -144,6 +139,11 @@ func GroupMembersKey(groupUUID string) string {
 	return fmt.Sprintf("group:members:%s", groupUUID)
 }
 
+// GroupJoinRequestPendingKey 生成群待审批申请缓存 Key: group:join_requests:{group_uuid}
+func GroupJoinRequestPendingKey(groupUUID string) string {
+	return fmt.Sprintf("group:join_requests:%s", groupUUID)
+}
+
 // GroupInfoKey 生成群资料缓存 Key: group:info:{group_uuid}
 func GroupInfoKey(groupUUID string) string {
 	return fmt.Sprintf("group:info:%s", groupUUID)
@@ -155,7 +155,6 @@ func UserGroupListKey(userUUID string) string {
 }
 
 // ==================== Gateway Key 构造函数 ====================
-
 // GatewayIPBlacklistKey 网关 IP 黑名单 Key: gateway:blacklist:ips
 func GatewayIPBlacklistKey() string {
 	return "gateway:blacklist:ips"
@@ -172,7 +171,6 @@ func GatewayIPRateLimitKey(ip string) string {
 }
 
 // ==================== Msg-Service Key 构造函数 ====================
-
 const (
 	// MsgIdempotentTTL 消息幂等缓存 TTL（防止弱网重发）
 	MsgIdempotentTTL = 10 * time.Minute

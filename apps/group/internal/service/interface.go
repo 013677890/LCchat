@@ -21,10 +21,18 @@ type IGroupService interface {
 	GetGroupInfo(ctx context.Context, req *pb.GetGroupInfoRequest) (*pb.GetGroupInfoResponse, error)
 	// UpdateGroupInfo 更新群资料。
 	UpdateGroupInfo(ctx context.Context, req *pb.UpdateGroupInfoRequest) error
+	// UpdateGroupNotice 独立更新群公告。
+	UpdateGroupNotice(ctx context.Context, req *pb.UpdateGroupNoticeRequest) error
 	// TransferGroupOwner 转让群主。
 	TransferGroupOwner(ctx context.Context, req *pb.TransferGroupOwnerRequest) error
 	// UpdateMemberRole 更新群成员角色。
 	UpdateMemberRole(ctx context.Context, req *pb.UpdateMemberRoleRequest) error
+	// ApplyJoinGroup 申请加入群聊，必要时直接入群。
+	ApplyJoinGroup(ctx context.Context, req *pb.ApplyJoinGroupRequest) (*pb.ApplyJoinGroupResponse, error)
+	// ReviewJoinGroup 审批入群申请。
+	ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGroupRequest) error
+	// ListJoinRequests 获取群待审批申请列表。
+	ListJoinRequests(ctx context.Context, req *pb.ListJoinRequestsRequest) (*pb.ListJoinRequestsResponse, error)
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *pb.AddMemberRequest) error
 	// RemoveMember 移除群成员。

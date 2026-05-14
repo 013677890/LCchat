@@ -25,6 +25,10 @@ const (
 	groupMembersEmptyValue = "{}"
 	// userGroupsEmptyValue 是用户群列表 ZSet 的空集合占位 member。
 	userGroupsEmptyValue = "__EMPTY__"
+	// groupJoinRequestsEmptyField 是待审批申请 Hash 的空集合占位 field。
+	groupJoinRequestsEmptyField = "__EMPTY__"
+	// groupJoinRequestsEmptyValue 是待审批申请空集合占位值。
+	groupJoinRequestsEmptyValue = "{}"
 )
 
 // groupInfoCacheEntry 是 group:info:{group_uuid} 的缓存载体。
@@ -53,6 +57,19 @@ type groupInfoCacheEntry struct {
 type groupMemberCacheEntry struct {
 	Role         int8  `json:"role"`
 	JoinedAtUnix int64 `json:"joined_at_unix"`
+}
+
+// groupJoinRequestCacheEntry 是 group:join_requests:{group_uuid} Hash 中单条申请的缓存值结构。
+//
+// 这里缓存申请事实本身，而不是连同昵称头像一起缓存，原因是：
+//  1. 申请人的展示资料仍以 user_profile 为准；
+//  2. 申请列表缓存主要目标是减少 group_join_requests 热点回源；
+//  3. 资料更新频率和申请流转频率不同，拆开缓存更容易保持职责清晰。
+type groupJoinRequestCacheEntry struct {
+	ApplyID        int64  `json:"apply_id"`
+	ApplicantUUID  string `json:"applicant_uuid"`
+	Reason         string `json:"reason"`
+	CreatedAtUnixM int64  `json:"created_at_unix_ms"`
 }
 
 // encodeGroupInfoCacheValue 把群模型编码成 Redis String 值。
@@ -201,6 +218,84 @@ func buildGroupMembersFromSnapshots(groupUUID string, snapshots []groupevent.Gro
 		members = append(members, member)
 	}
 	return members
+}
+
+// encodeGroupJoinRequestCacheValue 把入群申请模型编码成 Hash field 值。
+func encodeGroupJoinRequestCacheValue(request *model.GroupJoinRequest) string {
+	entry := groupJoinRequestCacheEntry{}
+	if request != nil {
+		entry.ApplyID = request.Id
+		entry.ApplicantUUID = request.ApplicantUuid
+		entry.Reason = request.Reason
+		entry.CreatedAtUnixM = request.CreatedAt.UnixMilli()
+	}
+	data, err := json.Marshal(&entry)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+// decodeGroupJoinRequestCacheValue 解析入群申请缓存值。
+func decodeGroupJoinRequestCacheValue(raw string) (*groupJoinRequestCacheEntry, error) {
+	var entry groupJoinRequestCacheEntry
+	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+// buildGroupJoinRequestFromCache 把缓存 entry 还原为仓储层申请模型。
+func buildGroupJoinRequestFromCache(entry *groupJoinRequestCacheEntry) *model.GroupJoinRequest {
+	if entry == nil || entry.ApplyID <= 0 || entry.ApplicantUUID == "" {
+		return nil
+	}
+	request := &model.GroupJoinRequest{
+		Id:            entry.ApplyID,
+		ApplicantUuid: entry.ApplicantUUID,
+		Reason:        entry.Reason,
+		Status:        joinRequestStatusPending,
+	}
+	if entry.CreatedAtUnixM > 0 {
+		request.CreatedAt = time.UnixMilli(entry.CreatedAtUnixM)
+	}
+	return request
+}
+
+// buildGroupJoinRequestFromSnapshot 把事件快照还原成申请模型。
+func buildGroupJoinRequestFromSnapshot(snapshot *groupevent.GroupJoinRequestSnapshot) *model.GroupJoinRequest {
+	if snapshot == nil || snapshot.ApplyID <= 0 || snapshot.ApplicantUUID == "" {
+		return nil
+	}
+	request := &model.GroupJoinRequest{
+		Id:            snapshot.ApplyID,
+		ApplicantUuid: snapshot.ApplicantUUID,
+		Reason:        snapshot.Reason,
+		Status:        joinRequestStatusPending,
+	}
+	if snapshot.CreatedAtUnixMs > 0 {
+		request.CreatedAt = time.UnixMilli(snapshot.CreatedAtUnixMs)
+	}
+	return request
+}
+
+// sortGroupJoinRequests 统一待审批申请列表排序规则。
+//
+// 排序与 DB 查询保持一致：
+//  1. 创建时间新的在前；
+//  2. 创建时间相同时，ID 大的在前。
+func sortGroupJoinRequests(items []*model.GroupJoinRequest) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		if left == nil || right == nil {
+			return right == nil
+		}
+		if !left.CreatedAt.Equal(right.CreatedAt) {
+			return left.CreatedAt.After(right.CreatedAt)
+		}
+		return left.Id > right.Id
+	})
 }
 
 // cloneGroupMembers 深拷贝成员切片，防止异步任务读到后续被复用/篡改的数据。

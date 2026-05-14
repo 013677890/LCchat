@@ -109,6 +109,24 @@ CREATE TABLE IF NOT EXISTS `group_members` (
   KEY `idx_group_members_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群成员关系';
 
+CREATE TABLE IF NOT EXISTS `group_join_requests` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
+  `group_uuid` CHAR(20) NOT NULL COMMENT '群uuid',
+  `applicant_uuid` CHAR(20) NOT NULL COMMENT '申请人uuid',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待处理 1通过 2拒绝',
+  `reason` VARCHAR(255) DEFAULT NULL COMMENT '申请附言',
+  `reviewer_uuid` CHAR(20) DEFAULT NULL COMMENT '处理人uuid',
+  `review_remark` VARCHAR(255) DEFAULT NULL COMMENT '处理备注',
+  `reviewed_at` DATETIME(3) DEFAULT NULL COMMENT '处理时间',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  `deleted_at` DATETIME(3) DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_group_join_pending` (`group_uuid`, `status`, `deleted_at`, `created_at`, `id`),
+  KEY `idx_group_join_applicant` (`applicant_uuid`, `status`, `deleted_at`, `created_at`, `id`),
+  KEY `idx_group_join_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群入群申请';
+
 CREATE TABLE IF NOT EXISTS `user_relations` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `user_uuid` CHAR(20) NOT NULL COMMENT '用户uuid',

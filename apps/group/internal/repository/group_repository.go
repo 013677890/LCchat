@@ -29,14 +29,18 @@ type groupRepositoryImpl struct {
 }
 
 const (
-	groupStatusNormal    int8 = 0
-	groupStatusDismissed int8 = 2
-	memberRoleMember     int8 = 0
-	memberRoleAdmin      int8 = 1
-	memberRoleOwner      int8 = 2
-	memberStatusNormal   int8 = 0
-	memberStatusQuit     int8 = 1
-	memberStatusKicked   int8 = 2
+	groupStatusNormal         int8  = 0
+	groupStatusDismissed      int8  = 2
+	memberRoleMember          int8  = 0
+	memberRoleAdmin           int8  = 1
+	memberRoleOwner           int8  = 2
+	memberStatusNormal        int8  = 0
+	memberStatusQuit          int8  = 1
+	memberStatusKicked        int8  = 2
+	joinRequestStatusPending  int8  = 0
+	joinRequestStatusApproved int8  = 1
+	joinRequestStatusRejected int8  = 2
+	maxGroupAdminCount        int64 = 10
 )
 
 // NewGroupRepository 创建 group 仓储实例。
@@ -351,7 +355,11 @@ func (r *groupRepositoryImpl) UpdateGroupInfo(ctx context.Context, groupUUID, op
 		if err != nil {
 			return err
 		}
-		// 群资料可由管理员及群主维护，角色必须在事务内读取最新有效成员关系。
+		// name/avatar 允许管理员及以上更新；add_mode 只能由群主修改。
+		if updates.AddMode != nil && group.OwnerUuid != operatorUUID {
+			return ErrNoPermission
+		}
+		// 角色仍在事务内读取，避免并发退群/转让群主后继续写入资料。
 		if _, err := r.ensureOperatorRoleAtLeast(ctx, tx, groupUUID, operatorUUID, memberRoleAdmin); err != nil {
 			return err
 		}
@@ -368,6 +376,39 @@ func (r *groupRepositoryImpl) UpdateGroupInfo(ctx context.Context, groupUUID, op
 			return WrapDBError(err)
 		}
 		applyGroupInfoUpdates(group, updates)
+		group.UpdatedAt = updatedAt
+		return r.insertGroupInfoUpdatedEvent(tx, group, operatorUUID)
+	})
+}
+
+// UpdateGroupNotice 独立更新群公告。
+func (r *groupRepositoryImpl) UpdateGroupNotice(ctx context.Context, groupUUID, operatorUUID, notice string) error {
+	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 公告更新与群状态、解散、其他资料写入共用同一个群维度串行边界。
+		group, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID)
+		if err != nil {
+			return err
+		}
+		// 公告属于对全体成员可见的正式资料，仍要求管理员及以上角色维护。
+		if _, err := r.ensureOperatorRoleAtLeast(ctx, tx, groupUUID, operatorUUID, memberRoleAdmin); err != nil {
+			return err
+		}
+		if notice == group.Notice {
+			return nil
+		}
+		updatedAt := time.Now()
+		if err := tx.Model(&model.GroupInfo{}).
+			Where("id = ?", group.Id).
+			Updates(map[string]interface{}{
+				"notice":     notice,
+				"updated_at": updatedAt,
+			}).Error; err != nil {
+			return WrapDBError(err)
+		}
+		group.Notice = notice
 		group.UpdatedAt = updatedAt
 		return r.insertGroupInfoUpdatedEvent(tx, group, operatorUUID)
 	})
@@ -484,6 +525,15 @@ func (r *groupRepositoryImpl) UpdateMemberRole(ctx context.Context, groupUUID, o
 		if targetMember.Role == role {
 			return nil
 		}
+		if role == memberRoleAdmin && targetMember.Role != memberRoleAdmin {
+			adminCount, err := r.countGroupAdminsForUpdate(ctx, tx, groupUUID)
+			if err != nil {
+				return err
+			}
+			if adminCount >= maxGroupAdminCount {
+				return ErrAdminLimitExceeded
+			}
+		}
 		updatedAt := time.Now()
 		if err := tx.Model(&model.GroupMember{}).
 			Where("id = ?", targetMember.Id).
@@ -514,10 +564,288 @@ func (r *groupRepositoryImpl) UpdateMemberRole(ctx context.Context, groupUUID, o
 	return nil
 }
 
-// buildGroupInfoUpdateMap 只提取真实变化字段，避免无意义更新打乱排序。
+// ApplyJoinGroup 按 add_mode 执行直加入群或创建待审批申请。
+func (r *groupRepositoryImpl) ApplyJoinGroup(ctx context.Context, groupUUID, applicantUUID, reason string) (ApplyJoinGroupResult, error) {
+	result := ApplyJoinGroupResult{}
+	if r == nil || r.db == nil || groupUUID == "" || applicantUUID == "" {
+		return result, nil
+	}
+	var changedMember *model.GroupMember
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 申请入群要和资料变更、审批、直接加人共享同一群维度串行边界。
+		group, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID)
+		if err != nil {
+			return err
+		}
+		existingMap, err := r.loadExistingMembersForUpdate(ctx, tx, groupUUID, []string{applicantUUID})
+		if err != nil {
+			return err
+		}
+		if isActiveGroupMember(existingMap[applicantUUID]) {
+			return ErrAlreadyGroupMember
+		}
+		if group.AddMode == 0 {
+			now := time.Now()
+			existing := existingMap[applicantUUID]
+			if existing == nil {
+				member := &model.GroupMember{
+					GroupUuid: groupUUID,
+					UserUuid:  applicantUUID,
+					Role:      memberRoleMember,
+					Status:    memberStatusNormal,
+					Inviter:   applicantUUID,
+					JoinedAt:  now,
+				}
+				if err := tx.Create(member).Error; err != nil {
+					return WrapDBError(err)
+				}
+				changedMember = member
+			} else {
+				if err := tx.Unscoped().Model(&model.GroupMember{}).
+					Where("id = ?", existing.Id).
+					Updates(map[string]interface{}{
+						"status":       memberStatusNormal,
+						"role":         memberRoleMember,
+						"inviter_uuid": applicantUUID,
+						"joined_at":    now,
+						"updated_at":   now,
+						"deleted_at":   nil,
+					}).Error; err != nil {
+					return WrapDBError(err)
+				}
+				restored := *existing
+				restored.Status = memberStatusNormal
+				restored.Role = memberRoleMember
+				restored.Inviter = applicantUUID
+				restored.JoinedAt = now
+				restored.UpdatedAt = now
+				restored.DeletedAt = gorm.DeletedAt{}
+				changedMember = &restored
+			}
+			if err := tx.Model(&model.GroupInfo{}).
+				Where("id = ?", group.Id).
+				Updates(map[string]interface{}{
+					"member_cnt": gorm.Expr("member_cnt + 1"),
+					"updated_at": now,
+				}).Error; err != nil {
+				return WrapDBError(err)
+			}
+			group.MemberCnt++
+			group.UpdatedAt = now
+			result.JoinedDirectly = true
+			return r.insertMemberAddedEvent(tx, group, applicantUUID, []*model.GroupMember{changedMember})
+		}
+		pendingRequest, err := r.loadPendingJoinRequestByApplicantForUpdate(ctx, tx, groupUUID, applicantUUID)
+		if err != nil {
+			return err
+		}
+		if pendingRequest != nil {
+			return ErrGroupApplyAlreadyExists
+		}
+		joinRequest := &model.GroupJoinRequest{
+			GroupUuid:     groupUUID,
+			ApplicantUuid: applicantUUID,
+			Status:        joinRequestStatusPending,
+			Reason:        reason,
+		}
+		if err := tx.Create(joinRequest).Error; err != nil {
+			return WrapDBError(err)
+		}
+		result.ApplyID = joinRequest.Id
+		return r.insertJoinRequestCreatedEvent(tx, groupUUID, applicantUUID, joinRequest)
+	})
+	if err != nil {
+		return ApplyJoinGroupResult{}, err
+	}
+	if changedMember != nil {
+		// 直接入群后立刻 patch 成员缓存，缩短权限判断读到旧成员集的窗口。
+		r.upsertGroupMemberCacheAsync(ctx, groupUUID, changedMember)
+	}
+	return result, nil
+}
+
+// ReviewJoinGroup 审批入群申请。
+func (r *groupRepositoryImpl) ReviewJoinGroup(ctx context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error {
+	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" || applyID <= 0 {
+		return nil
+	}
+	var changedMember *model.GroupMember
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		group, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID)
+		if err != nil {
+			return err
+		}
+		// 入群审批属于管理动作，允许管理员及以上执行。
+		if _, err := r.ensureOperatorRoleAtLeast(ctx, tx, groupUUID, operatorUUID, memberRoleAdmin); err != nil {
+			return err
+		}
+		joinRequest, err := r.loadPendingJoinRequestForUpdate(ctx, tx, groupUUID, applyID)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		requestUpdates := map[string]interface{}{
+			"status":        actionToJoinRequestStatus(action),
+			"reviewer_uuid": operatorUUID,
+			"review_remark": remark,
+			"reviewed_at":   now,
+			"updated_at":    now,
+		}
+		if action == joinRequestStatusRejected {
+			if err := tx.Model(&model.GroupJoinRequest{}).
+				Where("id = ?", joinRequest.Id).
+				Updates(requestUpdates).Error; err != nil {
+				return WrapDBError(err)
+			}
+			return r.insertJoinRequestReviewedEvent(tx, groupUUID, operatorUUID, joinRequest)
+		}
+		existingMap, err := r.loadExistingMembersForUpdate(ctx, tx, groupUUID, []string{joinRequest.ApplicantUuid})
+		if err != nil {
+			return err
+		}
+		existing := existingMap[joinRequest.ApplicantUuid]
+		if !isActiveGroupMember(existing) {
+			if existing == nil {
+				member := &model.GroupMember{
+					GroupUuid: groupUUID,
+					UserUuid:  joinRequest.ApplicantUuid,
+					Role:      memberRoleMember,
+					Status:    memberStatusNormal,
+					Inviter:   operatorUUID,
+					JoinedAt:  now,
+				}
+				if err := tx.Create(member).Error; err != nil {
+					return WrapDBError(err)
+				}
+				changedMember = member
+			} else {
+				if err := tx.Unscoped().Model(&model.GroupMember{}).
+					Where("id = ?", existing.Id).
+					Updates(map[string]interface{}{
+						"status":       memberStatusNormal,
+						"role":         memberRoleMember,
+						"inviter_uuid": operatorUUID,
+						"joined_at":    now,
+						"updated_at":   now,
+						"deleted_at":   nil,
+					}).Error; err != nil {
+					return WrapDBError(err)
+				}
+				restored := *existing
+				restored.Status = memberStatusNormal
+				restored.Role = memberRoleMember
+				restored.Inviter = operatorUUID
+				restored.JoinedAt = now
+				restored.UpdatedAt = now
+				restored.DeletedAt = gorm.DeletedAt{}
+				changedMember = &restored
+			}
+			if err := tx.Model(&model.GroupInfo{}).
+				Where("id = ?", group.Id).
+				Updates(map[string]interface{}{
+					"member_cnt": gorm.Expr("member_cnt + 1"),
+					"updated_at": now,
+				}).Error; err != nil {
+				return WrapDBError(err)
+			}
+			group.MemberCnt++
+			group.UpdatedAt = now
+		}
+		if err := tx.Model(&model.GroupJoinRequest{}).
+			Where("id = ?", joinRequest.Id).
+			Updates(requestUpdates).Error; err != nil {
+			return WrapDBError(err)
+		}
+		if err := r.insertJoinRequestReviewedEvent(tx, groupUUID, operatorUUID, joinRequest); err != nil {
+			return err
+		}
+		if changedMember == nil {
+			return nil
+		}
+		return r.insertMemberAddedEvent(tx, group, operatorUUID, []*model.GroupMember{changedMember})
+	})
+	if err != nil {
+		return err
+	}
+	if changedMember != nil {
+		r.upsertGroupMemberCacheAsync(ctx, groupUUID, changedMember)
+	}
+	return nil
+}
+
+// ListJoinRequests 获取群待审批入群申请列表。
+func (r *groupRepositoryImpl) ListJoinRequests(ctx context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" {
+		return []*model.GroupJoinRequest{}, 0, nil
+	}
+	if err := r.ensureGroupNormal(ctx, groupUUID); err != nil {
+		return nil, 0, err
+	}
+	var operator model.GroupMember
+	if err := r.db.WithContext(ctx).
+		Select("role").
+		Where("group_uuid = ? AND user_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, operatorUUID, memberStatusNormal).
+		Take(&operator).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, 0, ErrNoPermission
+		}
+		return nil, 0, WrapDBError(err)
+	}
+	if operator.Role < memberRoleAdmin {
+		return nil, 0, ErrNoPermission
+	}
+	cachedItems, cacheHit, cacheErr := r.getGroupJoinRequestsFromCache(ctx, groupUUID)
+	if cacheErr != nil {
+		LogRedisError(ctx, cacheErr)
+	} else if cacheHit {
+		total := int64(len(cachedItems))
+		if total == 0 {
+			return []*model.GroupJoinRequest{}, 0, nil
+		}
+		start := (page - 1) * pageSize
+		if start >= len(cachedItems) {
+			return []*model.GroupJoinRequest{}, total, nil
+		}
+		end := start + pageSize
+		if end > len(cachedItems) {
+			end = len(cachedItems)
+		}
+		return cachedItems[start:end], total, nil
+	}
+	query := r.db.WithContext(ctx).
+		Model(&model.GroupJoinRequest{}).
+		Where("group_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, joinRequestStatusPending)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, WrapDBError(err)
+	}
+	if total == 0 {
+		if rebuildErr := r.rebuildGroupJoinRequestsCache(ctx, groupUUID, []*model.GroupJoinRequest{}); rebuildErr != nil {
+			LogRedisError(ctx, rebuildErr)
+		}
+		return []*model.GroupJoinRequest{}, 0, nil
+	}
+	items := make([]*model.GroupJoinRequest, 0, total)
+	if err := query.Order("created_at DESC, id DESC").Find(&items).Error; err != nil {
+		return nil, 0, WrapDBError(err)
+	}
+	if rebuildErr := r.rebuildGroupJoinRequestsCache(ctx, groupUUID, items); rebuildErr != nil {
+		LogRedisError(ctx, rebuildErr)
+	}
+	start := (page - 1) * pageSize
+	if start >= len(items) {
+		return []*model.GroupJoinRequest{}, total, nil
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end], total, nil
+}
+
 // buildGroupInfoUpdateMap 只提取真实变化字段，避免无意义更新打乱排序。
 func buildGroupInfoUpdateMap(group *model.GroupInfo, updates GroupInfoUpdates) map[string]interface{} {
-	updateMap := make(map[string]interface{}, 4)
+	updateMap := make(map[string]interface{}, 3)
 	if group == nil {
 		return updateMap
 	}
@@ -527,16 +855,12 @@ func buildGroupInfoUpdateMap(group *model.GroupInfo, updates GroupInfoUpdates) m
 	if updates.Avatar != nil && *updates.Avatar != group.Avatar {
 		updateMap["avatar"] = *updates.Avatar
 	}
-	if updates.Notice != nil && *updates.Notice != group.Notice {
-		updateMap["notice"] = *updates.Notice
-	}
 	if updates.AddMode != nil && *updates.AddMode != group.AddMode {
 		updateMap["add_mode"] = *updates.AddMode
 	}
 	return updateMap
 }
 
-// applyGroupInfoUpdates 把已经提交成功的变更同步回内存对象，供事件快照复用。
 // applyGroupInfoUpdates 把已经提交成功的变更同步回内存对象，供事件快照复用。
 func applyGroupInfoUpdates(group *model.GroupInfo, updates GroupInfoUpdates) {
 	if group == nil {
@@ -548,12 +872,198 @@ func applyGroupInfoUpdates(group *model.GroupInfo, updates GroupInfoUpdates) {
 	if updates.Avatar != nil {
 		group.Avatar = *updates.Avatar
 	}
-	if updates.Notice != nil {
-		group.Notice = *updates.Notice
-	}
 	if updates.AddMode != nil {
 		group.AddMode = *updates.AddMode
 	}
+}
+
+// countGroupAdminsForUpdate 在事务内统计当前群的有效管理员数量。
+//
+// 这里不把群主算进管理员上限，只约束 role=1 的管理员席位，
+// 避免群主转让、群主唯一性与管理员配额耦在一起。
+func (r *groupRepositoryImpl) countGroupAdminsForUpdate(ctx context.Context, tx *gorm.DB, groupUUID string) (int64, error) {
+	if tx == nil || groupUUID == "" {
+		return 0, nil
+	}
+	var count int64
+	err := tx.WithContext(ctx).
+		Model(&model.GroupMember{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("group_uuid = ? AND role = ? AND status = ? AND deleted_at IS NULL", groupUUID, memberRoleAdmin, memberStatusNormal).
+		Count(&count).Error
+	if err != nil {
+		return 0, WrapDBError(err)
+	}
+	return count, nil
+}
+
+// loadPendingJoinRequestForUpdate 以行锁方式加载单条待审批入群申请。
+func (r *groupRepositoryImpl) loadPendingJoinRequestForUpdate(ctx context.Context, tx *gorm.DB, groupUUID string, applyID int64) (*model.GroupJoinRequest, error) {
+	var joinRequest model.GroupJoinRequest
+	err := tx.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND group_uuid = ? AND status = ? AND deleted_at IS NULL", applyID, groupUUID, joinRequestStatusPending).
+		Take(&joinRequest).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrGroupApplyNotFound
+		}
+		return nil, WrapDBError(err)
+	}
+	return &joinRequest, nil
+}
+
+// loadPendingJoinRequestByApplicantForUpdate 以行锁方式检查申请人是否已有待处理申请。
+func (r *groupRepositoryImpl) loadPendingJoinRequestByApplicantForUpdate(ctx context.Context, tx *gorm.DB, groupUUID, applicantUUID string) (*model.GroupJoinRequest, error) {
+	if tx == nil || groupUUID == "" || applicantUUID == "" {
+		return nil, nil
+	}
+	var joinRequest model.GroupJoinRequest
+	err := tx.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("group_uuid = ? AND applicant_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, applicantUUID, joinRequestStatusPending).
+		Order("id DESC").
+		Take(&joinRequest).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, WrapDBError(err)
+	}
+	return &joinRequest, nil
+}
+
+// actionToJoinRequestStatus 把审批动作值映射成申请状态值。
+func actionToJoinRequestStatus(action int8) int8 {
+	if action == joinRequestStatusRejected {
+		return joinRequestStatusRejected
+	}
+	return joinRequestStatusApproved
+}
+
+// getGroupJoinRequestsFromCache 读取群待审批入群申请缓存。
+func (r *groupRepositoryImpl) getGroupJoinRequestsFromCache(ctx context.Context, groupUUID string) ([]*model.GroupJoinRequest, bool, error) {
+	if r == nil || r.redisClient == nil || groupUUID == "" {
+		return nil, false, nil
+	}
+	cacheKey := rediskey.GroupJoinRequestPendingKey(groupUUID)
+	values, err := r.redisClient.HGetAll(ctx, cacheKey).Result()
+	if err != nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil, false, nil
+		}
+		return nil, false, WrapRedisError(err)
+	}
+	if len(values) == 0 {
+		return nil, false, nil
+	}
+	if len(values) == 1 {
+		if raw, ok := values[groupJoinRequestsEmptyField]; ok && raw == groupJoinRequestsEmptyValue {
+			return []*model.GroupJoinRequest{}, true, nil
+		}
+	}
+	items := make([]*model.GroupJoinRequest, 0, len(values))
+	for field, raw := range values {
+		if field == groupJoinRequestsEmptyField {
+			continue
+		}
+		entry, decodeErr := decodeGroupJoinRequestCacheValue(raw)
+		if decodeErr != nil {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil, false, nil
+		}
+		if item := buildGroupJoinRequestFromCache(entry); item != nil {
+			items = append(items, item)
+		}
+	}
+	sortGroupJoinRequests(items)
+	if getRandomBool(0.01) {
+		if expireErr := r.redisClient.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.GroupJoinRequestTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
+			LogRedisError(ctx, expireErr)
+		}
+	}
+	return items, true, nil
+}
+
+// rebuildGroupJoinRequestsCache 全量重建群待审批入群申请缓存。
+func (r *groupRepositoryImpl) rebuildGroupJoinRequestsCache(ctx context.Context, groupUUID string, items []*model.GroupJoinRequest) error {
+	if r == nil || r.redisClient == nil || groupUUID == "" {
+		return nil
+	}
+	cacheKey := rediskey.GroupJoinRequestPendingKey(groupUUID)
+	fields := make(map[string]string, len(items))
+	for _, item := range items {
+		if item == nil || item.Id <= 0 {
+			continue
+		}
+		fields[fmt.Sprintf("%d", item.Id)] = encodeGroupJoinRequestCacheValue(item)
+	}
+	pipe := r.redisClient.Pipeline()
+	pipe.Del(ctx, cacheKey)
+	if len(fields) == 0 {
+		pipe.HSet(ctx, cacheKey, map[string]string{groupJoinRequestsEmptyField: groupJoinRequestsEmptyValue})
+		pipe.Expire(ctx, cacheKey, rediskey.GroupJoinRequestEmptyTTL)
+	} else {
+		pipe.HSet(ctx, cacheKey, fields)
+		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.GroupJoinRequestTTL))
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil
+		}
+		return WrapRedisError(err)
+	}
+	return nil
+}
+
+// upsertGroupJoinRequestCacheIfExists 在待审批申请缓存已存在时同步写入单条申请。
+func (r *groupRepositoryImpl) upsertGroupJoinRequestCacheIfExists(ctx context.Context, groupUUID string, request *model.GroupJoinRequest) error {
+	if r == nil || r.redisClient == nil || groupUUID == "" || request == nil || request.Id <= 0 {
+		return nil
+	}
+	cacheKey := rediskey.GroupJoinRequestPendingKey(groupUUID)
+	luaScript := goredis.NewScript(luaUpsertGroupMemberIfExists)
+	expireSeconds := int(getRandomExpireTime(rediskey.GroupJoinRequestTTL).Seconds())
+	_, err := luaScript.Run(ctx, r.redisClient,
+		[]string{cacheKey},
+		fmt.Sprintf("%d", request.Id),
+		encodeGroupJoinRequestCacheValue(request),
+		fmt.Sprintf("%d", expireSeconds),
+	).Result()
+	if err != nil && !errors.Is(err, goredis.Nil) {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil
+		}
+		return WrapRedisError(err)
+	}
+	return nil
+}
+
+// removeGroupJoinRequestCacheIfExists 在待审批申请缓存已存在时删除单条申请。
+func (r *groupRepositoryImpl) removeGroupJoinRequestCacheIfExists(ctx context.Context, groupUUID string, applyID int64) error {
+	if r == nil || r.redisClient == nil || groupUUID == "" || applyID <= 0 {
+		return nil
+	}
+	cacheKey := rediskey.GroupJoinRequestPendingKey(groupUUID)
+	luaScript := goredis.NewScript(luaRemoveGroupMemberIfExists)
+	expireSeconds := int(getRandomExpireTime(rediskey.GroupJoinRequestTTL).Seconds())
+	_, err := luaScript.Run(ctx, r.redisClient,
+		[]string{cacheKey},
+		fmt.Sprintf("%d", applyID),
+		groupJoinRequestsEmptyValue,
+		fmt.Sprintf("%d", expireSeconds),
+	).Result()
+	if err != nil && !errors.Is(err, goredis.Nil) {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return nil
+		}
+		return WrapRedisError(err)
+	}
+	return nil
 }
 
 // loadGroupForUpdate 以行锁方式加载群记录。

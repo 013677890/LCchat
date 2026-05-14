@@ -40,7 +40,6 @@ type UpdateGroupInfoRequest struct {
 	GroupUUID string  `json:"groupUuid"`
 	Name      *string `json:"name" binding:"omitempty,max=64"`
 	Avatar    *string `json:"avatar"`
-	Notice    *string `json:"notice" binding:"omitempty,max=500"`
 	AddMode   *int32  `json:"addMode" binding:"omitempty,oneof=0 1"`
 }
 
@@ -58,13 +57,146 @@ func ConvertToProtoUpdateGroupInfoRequest(dto *UpdateGroupInfoRequest) *grouppb.
 	if dto.Avatar != nil {
 		req.Avatar = dto.Avatar
 	}
-	if dto.Notice != nil {
-		req.Notice = dto.Notice
-	}
 	if dto.AddMode != nil {
 		req.AddMode = dto.AddMode
 	}
 	return req
+}
+
+// UpdateGroupNoticeRequest 独立更新群公告请求。
+type UpdateGroupNoticeRequest struct {
+	GroupUUID string `json:"groupUuid"`
+	Notice    string `json:"notice" binding:"max=500"`
+}
+
+// ConvertToProtoUpdateGroupNoticeRequest 把群公告更新 DTO 转成 proto 请求。
+func ConvertToProtoUpdateGroupNoticeRequest(dto *UpdateGroupNoticeRequest) *grouppb.UpdateGroupNoticeRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.UpdateGroupNoticeRequest{
+		GroupUuid: dto.GroupUUID,
+		Notice:    dto.Notice,
+	}
+}
+
+// ApplyJoinGroupRequest 申请加入群聊请求。
+type ApplyJoinGroupRequest struct {
+	GroupUUID string `json:"groupUuid"`
+	Reason    string `json:"reason" binding:"omitempty,max=255"`
+}
+
+// ApplyJoinGroupResponse 申请加入群聊响应。
+type ApplyJoinGroupResponse struct {
+	ApplyID        int64 `json:"applyId"`
+	JoinedDirectly bool  `json:"joinedDirectly"`
+}
+
+// ConvertToProtoApplyJoinGroupRequest 把入群申请 DTO 转成 proto 请求。
+func ConvertToProtoApplyJoinGroupRequest(dto *ApplyJoinGroupRequest) *grouppb.ApplyJoinGroupRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.ApplyJoinGroupRequest{
+		GroupUuid: dto.GroupUUID,
+		Reason:    dto.Reason,
+	}
+}
+
+// ConvertApplyJoinGroupResponseFromProto 把入群申请 proto 响应转成 HTTP DTO。
+func ConvertApplyJoinGroupResponseFromProto(pb *grouppb.ApplyJoinGroupResponse) *ApplyJoinGroupResponse {
+	if pb == nil {
+		return nil
+	}
+	return &ApplyJoinGroupResponse{
+		ApplyID:        pb.GetApplyId(),
+		JoinedDirectly: pb.GetJoinedDirectly(),
+	}
+}
+
+// ReviewJoinGroupRequest 审批入群申请请求。
+type ReviewJoinGroupRequest struct {
+	GroupUUID string `json:"groupUuid"`
+	ApplyID   int64  `json:"applyId"`
+	Action    int32  `json:"action" binding:"required,oneof=1 2"`
+	Remark    string `json:"remark" binding:"omitempty,max=255"`
+}
+
+// ConvertToProtoReviewJoinGroupRequest 把审批 DTO 转成 proto 请求。
+func ConvertToProtoReviewJoinGroupRequest(dto *ReviewJoinGroupRequest) *grouppb.ReviewJoinGroupRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.ReviewJoinGroupRequest{
+		GroupUuid: dto.GroupUUID,
+		ApplyId:   dto.ApplyID,
+		Action:    dto.Action,
+		Remark:    dto.Remark,
+	}
+}
+
+// GroupJoinRequestItemDTO 待审批入群申请项 DTO。
+type GroupJoinRequestItemDTO struct {
+	ApplyID        int64  `json:"applyId"`
+	ApplicantUUID  string `json:"applicantUuid"`
+	Nickname       string `json:"nickname"`
+	Avatar         string `json:"avatar"`
+	Reason         string `json:"reason"`
+	CreatedAtMilli int64  `json:"createdAt"`
+}
+
+// ListJoinRequestsRequest 获取待审批入群申请列表请求。
+type ListJoinRequestsRequest struct {
+	GroupUUID string `json:"groupUuid"`
+	Page      int32  `form:"page" json:"page" binding:"omitempty,min=1"`
+	PageSize  int32  `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"`
+}
+
+// ListJoinRequestsResponse 获取待审批入群申请列表响应。
+type ListJoinRequestsResponse struct {
+	Items    []*GroupJoinRequestItemDTO `json:"items"`
+	Total    int64                      `json:"total"`
+	Page     int32                      `json:"page"`
+	PageSize int32                      `json:"pageSize"`
+}
+
+// ConvertToProtoListJoinRequestsRequest 把申请列表 DTO 转成 proto 请求。
+func ConvertToProtoListJoinRequestsRequest(dto *ListJoinRequestsRequest) *grouppb.ListJoinRequestsRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.ListJoinRequestsRequest{
+		GroupUuid: dto.GroupUUID,
+		Page:      dto.Page,
+		PageSize:  dto.PageSize,
+	}
+}
+
+// ConvertListJoinRequestsResponseFromProto 把申请列表 proto 响应转成 HTTP DTO。
+func ConvertListJoinRequestsResponseFromProto(pb *grouppb.ListJoinRequestsResponse) *ListJoinRequestsResponse {
+	if pb == nil {
+		return nil
+	}
+	items := make([]*GroupJoinRequestItemDTO, 0, len(pb.GetItems()))
+	for _, item := range pb.GetItems() {
+		if item == nil {
+			continue
+		}
+		items = append(items, &GroupJoinRequestItemDTO{
+			ApplyID:        item.GetApplyId(),
+			ApplicantUUID:  item.GetApplicantUuid(),
+			Nickname:       item.GetNickname(),
+			Avatar:         item.GetAvatar(),
+			Reason:         item.GetReason(),
+			CreatedAtMilli: item.GetCreatedAt(),
+		})
+	}
+	return &ListJoinRequestsResponse{
+		Items:    items,
+		Total:    pb.GetTotal(),
+		Page:     pb.GetPage(),
+		PageSize: pb.GetPageSize(),
+	}
 }
 
 // TransferGroupOwnerRequest 转让群主请求。

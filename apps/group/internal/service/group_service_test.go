@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeGroupRepoForService struct {
@@ -21,8 +22,12 @@ type fakeGroupRepoForService struct {
 	removeMemberFn     func(context.Context, string, string, string) error
 	dismissGroupFn     func(context.Context, string, string) error
 	updateGroupInfoFn  func(context.Context, string, string, repository.GroupInfoUpdates) error
+	updateNoticeFn     func(context.Context, string, string, string) error
 	transferOwnerFn    func(context.Context, string, string, string) error
 	updateMemberRoleFn func(context.Context, string, string, string, int8) error
+	applyJoinGroupFn   func(context.Context, string, string, string) (repository.ApplyJoinGroupResult, error)
+	reviewJoinGroupFn  func(context.Context, string, string, int64, int8, string) error
+	listJoinReqsFn     func(context.Context, string, string, int, int) ([]*model.GroupJoinRequest, int64, error)
 	getGroupInfoFn     func(context.Context, string) (*model.GroupInfo, error)
 	getGroupMembersFn  func(context.Context, string) ([]*model.GroupMember, error)
 	checkMemberFn      func(context.Context, string, string) (bool, int8, error)
@@ -60,6 +65,12 @@ func (f *fakeGroupRepoForService) UpdateGroupInfo(ctx context.Context, groupUUID
 	}
 	return f.updateGroupInfoFn(ctx, groupUUID, operatorUUID, updates)
 }
+func (f *fakeGroupRepoForService) UpdateGroupNotice(ctx context.Context, groupUUID, operatorUUID, notice string) error {
+	if f.updateNoticeFn == nil {
+		return nil
+	}
+	return f.updateNoticeFn(ctx, groupUUID, operatorUUID, notice)
+}
 func (f *fakeGroupRepoForService) TransferGroupOwner(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string) error {
 	if f.transferOwnerFn == nil {
 		return nil
@@ -71,6 +82,24 @@ func (f *fakeGroupRepoForService) UpdateMemberRole(ctx context.Context, groupUUI
 		return nil
 	}
 	return f.updateMemberRoleFn(ctx, groupUUID, operatorUUID, targetUserUUID, role)
+}
+func (f *fakeGroupRepoForService) ApplyJoinGroup(ctx context.Context, groupUUID, applicantUUID, reason string) (repository.ApplyJoinGroupResult, error) {
+	if f.applyJoinGroupFn == nil {
+		return repository.ApplyJoinGroupResult{}, nil
+	}
+	return f.applyJoinGroupFn(ctx, groupUUID, applicantUUID, reason)
+}
+func (f *fakeGroupRepoForService) ReviewJoinGroup(ctx context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error {
+	if f.reviewJoinGroupFn == nil {
+		return nil
+	}
+	return f.reviewJoinGroupFn(ctx, groupUUID, operatorUUID, applyID, action, remark)
+}
+func (f *fakeGroupRepoForService) ListJoinRequests(ctx context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+	if f.listJoinReqsFn == nil {
+		return []*model.GroupJoinRequest{}, 0, nil
+	}
+	return f.listJoinReqsFn(ctx, groupUUID, operatorUUID, page, pageSize)
 }
 func (f *fakeGroupRepoForService) GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error) {
 	if f.getGroupInfoFn == nil {
@@ -229,28 +258,117 @@ func TestUpdateGroupInfoParsesFieldsAndSkipsNoop(t *testing.T) {
 	svc := NewGroupService(repo)
 	name := "  新群名  "
 	avatar := "  https://example.com/a.png  "
-	notice := "  新公告  "
 	addMode := int32(1)
 	err := svc.UpdateGroupInfo(groupServiceTestContext("admin-uuid"), &pb.UpdateGroupInfoRequest{
 		GroupUuid: " group-uuid ",
 		Name:      &name,
 		Avatar:    &avatar,
-		Notice:    &notice,
 		AddMode:   &addMode,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, gotUpdates.Name)
 	require.NotNil(t, gotUpdates.Avatar)
-	require.NotNil(t, gotUpdates.Notice)
 	require.NotNil(t, gotUpdates.AddMode)
 	assert.Equal(t, 1, called)
 	assert.Equal(t, "新群名", *gotUpdates.Name)
 	assert.Equal(t, "https://example.com/a.png", *gotUpdates.Avatar)
-	assert.Equal(t, "新公告", *gotUpdates.Notice)
 	assert.Equal(t, int8(1), *gotUpdates.AddMode)
 	err = svc.UpdateGroupInfo(groupServiceTestContext("admin-uuid"), &pb.UpdateGroupInfoRequest{GroupUuid: "group-uuid"})
 	require.NoError(t, err)
 	assert.Equal(t, 1, called)
+}
+func TestUpdateGroupNoticePassesOperatorAndNotice(t *testing.T) {
+	var gotArgs []string
+	repo := &fakeGroupRepoForService{
+		updateNoticeFn: func(_ context.Context, groupUUID, operatorUUID, notice string) error {
+			gotArgs = []string{groupUUID, operatorUUID, notice}
+			return nil
+		},
+	}
+	svc := NewGroupService(repo)
+	err := svc.UpdateGroupNotice(groupServiceTestContext("admin-uuid"), &pb.UpdateGroupNoticeRequest{
+		GroupUuid: " group-uuid ",
+		Notice:    "  新公告  ",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"group-uuid", "admin-uuid", "新公告"}, gotArgs)
+}
+func TestApplyJoinGroupReturnsRepositoryResult(t *testing.T) {
+	repo := &fakeGroupRepoForService{
+		applyJoinGroupFn: func(_ context.Context, groupUUID, applicantUUID, reason string) (repository.ApplyJoinGroupResult, error) {
+			assert.Equal(t, "group-uuid", groupUUID)
+			assert.Equal(t, "user-uuid", applicantUUID)
+			assert.Equal(t, "申请理由", reason)
+			return repository.ApplyJoinGroupResult{ApplyID: 123, JoinedDirectly: false}, nil
+		},
+	}
+	svc := NewGroupService(repo)
+	resp, err := svc.ApplyJoinGroup(groupServiceTestContext("user-uuid"), &pb.ApplyJoinGroupRequest{
+		GroupUuid: " group-uuid ",
+		Reason:    "  申请理由  ",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, int64(123), resp.GetApplyId())
+	assert.False(t, resp.GetJoinedDirectly())
+}
+func TestReviewJoinGroupPassesNormalizedArgs(t *testing.T) {
+	var gotApplyID int64
+	var gotAction int8
+	var gotRemark string
+	repo := &fakeGroupRepoForService{
+		reviewJoinGroupFn: func(_ context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error {
+			assert.Equal(t, "group-uuid", groupUUID)
+			assert.Equal(t, "admin-uuid", operatorUUID)
+			gotApplyID = applyID
+			gotAction = action
+			gotRemark = remark
+			return nil
+		},
+	}
+	svc := NewGroupService(repo)
+	err := svc.ReviewJoinGroup(groupServiceTestContext("admin-uuid"), &pb.ReviewJoinGroupRequest{
+		GroupUuid: " group-uuid ",
+		ApplyId:   99,
+		Action:    1,
+		Remark:    "  同意  ",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(99), gotApplyID)
+	assert.Equal(t, int8(1), gotAction)
+	assert.Equal(t, "同意", gotRemark)
+}
+func TestListJoinRequestsBuildsApplicantProfiles(t *testing.T) {
+	repo := &fakeGroupRepoForService{
+		listJoinReqsFn: func(_ context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+			assert.Equal(t, "group-uuid", groupUUID)
+			assert.Equal(t, "admin-uuid", operatorUUID)
+			assert.Equal(t, 1, page)
+			assert.Equal(t, 20, pageSize)
+			return []*model.GroupJoinRequest{{
+				Id:            7,
+				ApplicantUuid: "user-a",
+				Reason:        "申请入群",
+				CreatedAt:     time.Unix(1710000000, 0),
+			}}, 1, nil
+		},
+		getUserProfilesFn: func(_ context.Context, userUUIDs []string) (map[string]*model.UserProfile, error) {
+			assert.Equal(t, []string{"user-a"}, userUUIDs)
+			return map[string]*model.UserProfile{
+				"user-a": {Nickname: "张三", Avatar: "https://example.com/a.png"},
+			}, nil
+		},
+	}
+	svc := NewGroupService(repo)
+	resp, err := svc.ListJoinRequests(groupServiceTestContext("admin-uuid"), &pb.ListJoinRequestsRequest{GroupUuid: "group-uuid"})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.GetItems(), 1)
+	assert.Equal(t, int64(1), resp.GetTotal())
+	assert.Equal(t, "user-a", resp.GetItems()[0].GetApplicantUuid())
+	assert.Equal(t, "张三", resp.GetItems()[0].GetNickname())
+	assert.Equal(t, "https://example.com/a.png", resp.GetItems()[0].GetAvatar())
+	assert.Equal(t, "申请入群", resp.GetItems()[0].GetReason())
 }
 func TestUpdateGroupInfoRejectsBlankName(t *testing.T) {
 	svc := NewGroupService(&fakeGroupRepoForService{})

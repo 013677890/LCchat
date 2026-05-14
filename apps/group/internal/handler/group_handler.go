@@ -48,6 +48,11 @@ func (h *GroupHandler) UpdateGroupInfo(ctx context.Context, req *pb.UpdateGroupI
 	return &pb.UpdateGroupInfoResponse{}, h.groupService.UpdateGroupInfo(ctx, req)
 }
 
+// UpdateGroupNotice 独立更新群公告。
+func (h *GroupHandler) UpdateGroupNotice(ctx context.Context, req *pb.UpdateGroupNoticeRequest) (*pb.UpdateGroupNoticeResponse, error) {
+	return &pb.UpdateGroupNoticeResponse{}, h.groupService.UpdateGroupNotice(ctx, req)
+}
+
 // TransferGroupOwner 转让群主。
 func (h *GroupHandler) TransferGroupOwner(ctx context.Context, req *pb.TransferGroupOwnerRequest) (*pb.TransferGroupOwnerResponse, error) {
 	return &pb.TransferGroupOwnerResponse{}, h.groupService.TransferGroupOwner(ctx, req)
@@ -56,6 +61,21 @@ func (h *GroupHandler) TransferGroupOwner(ctx context.Context, req *pb.TransferG
 // UpdateMemberRole 更新群成员角色。
 func (h *GroupHandler) UpdateMemberRole(ctx context.Context, req *pb.UpdateMemberRoleRequest) (*pb.UpdateMemberRoleResponse, error) {
 	return &pb.UpdateMemberRoleResponse{}, h.groupService.UpdateMemberRole(ctx, req)
+}
+
+// ApplyJoinGroup 申请加入群聊。
+func (h *GroupHandler) ApplyJoinGroup(ctx context.Context, req *pb.ApplyJoinGroupRequest) (*pb.ApplyJoinGroupResponse, error) {
+	return h.groupService.ApplyJoinGroup(ctx, req)
+}
+
+// ReviewJoinGroup 审批入群申请。
+func (h *GroupHandler) ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGroupRequest) (*pb.ReviewJoinGroupResponse, error) {
+	return &pb.ReviewJoinGroupResponse{}, h.groupService.ReviewJoinGroup(ctx, req)
+}
+
+// ListJoinRequests 获取群待审批申请列表。
+func (h *GroupHandler) ListJoinRequests(ctx context.Context, req *pb.ListJoinRequestsRequest) (*pb.ListJoinRequestsResponse, error) {
+	return h.groupService.ListJoinRequests(ctx, req)
 }
 
 // AddMember 添加群成员。

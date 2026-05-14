@@ -70,3 +70,22 @@ RENAME TABLE `apply_request` TO `apply_requests`;
 RENAME TABLE `device_session` TO `device_sessions`;
 RENAME TABLE `group_info` TO `groups`;
 RENAME TABLE `group_member` TO `group_members`;
+
+-- ==================== 6. group_join_requests 表（group-service 独占）====================
+CREATE TABLE IF NOT EXISTS `group_join_requests` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT,
+    `group_uuid`     CHAR(20)     NOT NULL COMMENT '群 uuid',
+    `applicant_uuid` CHAR(20)     NOT NULL COMMENT '申请人 uuid',
+    `status`         TINYINT      NOT NULL DEFAULT 0 COMMENT '状态: 0=待处理 1=通过 2=拒绝',
+    `reason`         VARCHAR(255) NULL     DEFAULT NULL COMMENT '申请附言',
+    `reviewer_uuid`  CHAR(20)     NULL     DEFAULT NULL COMMENT '处理人 uuid',
+    `review_remark`  VARCHAR(255) NULL     DEFAULT NULL COMMENT '处理备注',
+    `reviewed_at`    DATETIME(3)  NULL     DEFAULT NULL COMMENT '处理时间',
+    `created_at`     DATETIME(3)  NOT NULL COMMENT '创建时间',
+    `updated_at`     DATETIME(3)  NOT NULL COMMENT '更新时间',
+    `deleted_at`     DATETIME(3)  NULL     DEFAULT NULL COMMENT '删除时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_group_join_pending` (`group_uuid`, `status`, `deleted_at`, `created_at`, `id`),
+    KEY `idx_group_join_applicant` (`applicant_uuid`, `status`, `deleted_at`, `created_at`, `id`),
+    KEY `idx_group_join_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='群入群申请表（group-service 归属）';

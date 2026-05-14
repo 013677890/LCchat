@@ -50,6 +50,12 @@ func (s *GroupServiceImpl) UpdateGroupInfo(ctx context.Context, req *dto.UpdateG
 	return err
 }
 
+// UpdateGroupNotice 独立更新群公告。
+func (s *GroupServiceImpl) UpdateGroupNotice(ctx context.Context, req *dto.UpdateGroupNoticeRequest) error {
+	_, err := s.groupClient.UpdateGroupNotice(ctx, dto.ConvertToProtoUpdateGroupNoticeRequest(req))
+	return err
+}
+
 // TransferGroupOwner 转让群主。
 func (s *GroupServiceImpl) TransferGroupOwner(ctx context.Context, req *dto.TransferGroupOwnerRequest) error {
 	_, err := s.groupClient.TransferGroupOwner(ctx, dto.ConvertToProtoTransferGroupOwnerRequest(req))
@@ -60,6 +66,30 @@ func (s *GroupServiceImpl) TransferGroupOwner(ctx context.Context, req *dto.Tran
 func (s *GroupServiceImpl) UpdateMemberRole(ctx context.Context, req *dto.UpdateGroupMemberRoleRequest) error {
 	_, err := s.groupClient.UpdateMemberRole(ctx, dto.ConvertToProtoUpdateGroupMemberRoleRequest(req))
 	return err
+}
+
+// ApplyJoinGroup 申请加入群聊。
+func (s *GroupServiceImpl) ApplyJoinGroup(ctx context.Context, req *dto.ApplyJoinGroupRequest) (*dto.ApplyJoinGroupResponse, error) {
+	resp, err := s.groupClient.ApplyJoinGroup(ctx, dto.ConvertToProtoApplyJoinGroupRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return dto.ConvertApplyJoinGroupResponseFromProto(resp), nil
+}
+
+// ReviewJoinGroup 审批入群申请。
+func (s *GroupServiceImpl) ReviewJoinGroup(ctx context.Context, req *dto.ReviewJoinGroupRequest) error {
+	_, err := s.groupClient.ReviewJoinGroup(ctx, dto.ConvertToProtoReviewJoinGroupRequest(req))
+	return err
+}
+
+// ListJoinRequests 获取待审批入群申请列表。
+func (s *GroupServiceImpl) ListJoinRequests(ctx context.Context, req *dto.ListJoinRequestsRequest) (*dto.ListJoinRequestsResponse, error) {
+	resp, err := s.groupClient.ListJoinRequests(ctx, dto.ConvertToProtoListJoinRequestsRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return dto.ConvertListJoinRequestsResponseFromProto(resp), nil
 }
 
 // AddMember 添加群成员。

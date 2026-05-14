@@ -23,6 +23,10 @@ const (
 	ActionOwnerTransferred = "owner_transferred"
 	// ActionMemberRoleUpdated 表示普通成员与管理员之间的角色切换。
 	ActionMemberRoleUpdated = "member_role_updated"
+	// ActionJoinRequestCreated 表示新增了一条待审批入群申请。
+	ActionJoinRequestCreated = "join_request_created"
+	// ActionJoinRequestReviewed 表示一条待审批入群申请已被处理，应从待审批缓存移除。
+	ActionJoinRequestReviewed = "join_request_reviewed"
 )
 
 // GroupSnapshot 描述单条群聚合快照。
@@ -45,20 +49,29 @@ type GroupMemberSnapshot struct {
 	JoinedAtUnixMs int64  `json:"joined_at_unix_ms"`
 }
 
+// GroupJoinRequestSnapshot 描述单条待审批入群申请快照。
+type GroupJoinRequestSnapshot struct {
+	ApplyID         int64  `json:"apply_id"`
+	ApplicantUUID   string `json:"applicant_uuid"`
+	Reason          string `json:"reason"`
+	CreatedAtUnixMs int64  `json:"created_at_unix_ms"`
+}
+
 // GroupCacheEventPayload 是 group.cache 主题的统一事件载体。
 //
 // 所有群写事实都收敛到同一 topic，再由 action 决定投影器如何 patch Redis，
 // 这样可以复用 Kafka 同 key 有序语义，避免同一群事件散落到多个 topic 后失序。
 type GroupCacheEventPayload struct {
-	EventID        string                `json:"event_id"`
-	Action         string                `json:"action"`
-	GroupUUID      string                `json:"group_uuid"`
-	OperatorUUID   string                `json:"operator_uuid,omitempty"`
-	Group          *GroupSnapshot        `json:"group,omitempty"`
-	Members        []GroupMemberSnapshot `json:"members,omitempty"`
-	UserUUID       string                `json:"user_uuid,omitempty"`
-	UserUUIDs      []string              `json:"user_uuids,omitempty"`
-	JoinedAtUnixMs int64                 `json:"joined_at_unix_ms,omitempty"`
+	EventID        string                    `json:"event_id"`
+	Action         string                    `json:"action"`
+	GroupUUID      string                    `json:"group_uuid"`
+	OperatorUUID   string                    `json:"operator_uuid,omitempty"`
+	Group          *GroupSnapshot            `json:"group,omitempty"`
+	Members        []GroupMemberSnapshot     `json:"members,omitempty"`
+	JoinRequest    *GroupJoinRequestSnapshot `json:"join_request,omitempty"`
+	UserUUID       string                    `json:"user_uuid,omitempty"`
+	UserUUIDs      []string                  `json:"user_uuids,omitempty"`
+	JoinedAtUnixMs int64                     `json:"joined_at_unix_ms,omitempty"`
 }
 
 // Encode 把群缓存事件编码成 JSON 字符串。

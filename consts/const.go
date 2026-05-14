@@ -8,7 +8,6 @@ const (
 
 // 客户端错误 (1xxxx)
 const (
-
 	// 参数验证失败
 	CodeParamError = 10001 // 参数验证失败
 	// 请求体格式错误
@@ -172,14 +171,16 @@ const (
 	CodeCannotKickAdmin = 14010 // 不能踢出管理员
 	// 已经是群成员
 	CodeAlreadyGroupMember = 14011 // 已经是群成员
-	// 入群申请不存在
-	CodeGroupApplyNotFound = 14012 // 入群申请不存在
+	// 入群申请不存在或已处理
+	CodeGroupApplyNotFound = 14012 // 入群申请不存在或已处理
 	// 邀请人数超限
 	CodeGroupInviteLimit = 14013 // 邀请人数超限
 	// 群主不能退群
 	CodeCannotQuitAsOwner = 14014 // 群主不能退群
 	// 管理员数量已达上限
 	CodeAdminLimitExceeded = 14015 // 管理员数量已达上限
+	// 已存在待处理入群申请
+	CodeGroupApplyAlreadyExists = 14016 // 已存在待处理入群申请
 )
 
 // 设备会话错误 (15xxx)
@@ -243,7 +244,6 @@ const (
 // 错误消息映射
 var CodeMessage = map[int]string{
 	CodeSuccess: "success",
-
 	// 客户端错误
 	CodeParamError:       "参数验证失败",
 	CodeBodyError:        "请求体格式错误",
@@ -251,13 +251,11 @@ var CodeMessage = map[int]string{
 	CodeMethodNotAllowed: "请求方法不允许",
 	CodeTooManyRequests:  "请求过于频繁",
 	CodeBodyTooLarge:     "请求体过大",
-
 	// 认证错误
 	CodeUnauthorized:   "未认证",
 	CodeInvalidToken:   "Token 无效",
 	CodeTokenExpired:   "Token 已过期",
 	CodePermissionDeny: "权限不足",
-
 	// 用户模块
 	CodeUserNotFound:          "用户不存在",
 	CodeUserAlreadyExist:      "用户已存在",
@@ -288,7 +286,6 @@ var CodeMessage = map[int]string{
 	CodeReasonTooLong:         "理由过长",
 	CodeEmailNotFound:         "邮箱不存在",
 	CodeAccountDeleted:        "账号已注销",
-
 	// 好友模块
 	CodeAlreadyFriend:         "已经是好友",
 	CodeFriendRequestSent:     "好友申请已发送",
@@ -301,7 +298,6 @@ var CodeMessage = map[int]string{
 	CodeApplyExpired:          "申请已过期",
 	CodeTagNameInvalid:        "标签名称无效",
 	CodeSourceInvalid:         "来源参数无效",
-
 	// 消息模块
 	CodeMessageNotFound:       "消息不存在",
 	CodeMessageSendFail:       "消息发送失败",
@@ -314,24 +310,23 @@ var CodeMessage = map[int]string{
 	CodeRecallTimeout:         "撤回超时",
 	CodeRecallNoPermission:    "撤回无权限",
 	CodeMessageDuplicate:      "消息重复",
-
 	// 群组模块
-	CodeGroupNotFound:       "群组不存在",
-	CodeNotGroupMember:      "不是群成员",
-	CodeNoPermission:        "没有权限",
-	CodeGroupFull:           "群成员已满",
-	CodeGroupNameTooLong:    "群名称过长",
-	CodeGroupNoticeTooLong:  "群公告过长",
-	CodeGroupAlreadyDismiss: "群组已解散",
-	CodeGroupMemberNotFound: "群成员不存在",
-	CodeCannotKickOwner:     "不能踢出群主",
-	CodeCannotKickAdmin:     "不能踢出管理员",
-	CodeAlreadyGroupMember:  "已经是群成员",
-	CodeGroupApplyNotFound:  "入群申请不存在",
-	CodeGroupInviteLimit:    "邀请人数超限",
-	CodeCannotQuitAsOwner:   "群主不能退群",
-	CodeAdminLimitExceeded:  "管理员数量已达上限",
-
+	CodeGroupNotFound:           "群组不存在",
+	CodeNotGroupMember:          "不是群成员",
+	CodeNoPermission:            "没有权限",
+	CodeGroupFull:               "群成员已满",
+	CodeGroupNameTooLong:        "群名称过长",
+	CodeGroupNoticeTooLong:      "群公告过长",
+	CodeGroupAlreadyDismiss:     "群组已解散",
+	CodeGroupMemberNotFound:     "群成员不存在",
+	CodeCannotKickOwner:         "不能踢出群主",
+	CodeCannotKickAdmin:         "不能踢出管理员",
+	CodeAlreadyGroupMember:      "已经是群成员",
+	CodeGroupApplyNotFound:      "入群申请不存在或已处理",
+	CodeGroupInviteLimit:        "邀请人数超限",
+	CodeCannotQuitAsOwner:       "群主不能退群",
+	CodeAdminLimitExceeded:      "管理员数量已达上限",
+	CodeGroupApplyAlreadyExists: "已存在待处理入群申请",
 	// 设备会话
 	CodeDeviceCreateFail:    "设备会话创建失败",
 	CodeDeviceAlreadyExist:  "设备会话已存在",
@@ -342,20 +337,17 @@ var CodeMessage = map[int]string{
 	CodeDeviceOffline:       "设备已离线",
 	CodeDeviceInfoInvalid:   "设备信息无效",
 	CodePlatformNotSupport:  "平台不支持",
-
 	// 黑名单
 	CodePeerBlacklistYou:    "对方已将你拉黑",
 	CodeYouBlacklistPeer:    "你已将对方拉黑",
 	CodeAlreadyInBlacklist:  "已在黑名单中",
 	CodeNotInBlacklist:      "不在黑名单中",
 	CodeCannotBlacklistSelf: "不能拉黑自己",
-
 	// Connect 模块
 	CodeConnectTokenRequired:         "缺少 token",
 	CodeConnectDeviceIDRequired:      "缺少 device_id",
 	CodeConnectMessageFormatError:    "消息格式错误",
 	CodeConnectMessageTypeNotSupport: "消息类型不支持",
-
 	// 服务端错误
 	CodeInternalError:      "服务器内部错误",
 	CodeServiceUnavailable: "服务暂不可用",

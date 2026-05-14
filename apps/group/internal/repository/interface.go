@@ -8,20 +8,28 @@ import (
 
 // GroupInfoUpdates 描述群资料更新意图。
 //
-// 使用显式字段集合而不是继续堆叠方法参数，原因是：
-//  1. 第二批资料字段已经扩展到 name/avatar/notice/add_mode；
-//  2. optional 字段需要保留“未传”和“显式更新为空值”的区别；
-//  3. service 与 repository 共享同一份更新语义，能避免分层间再次发明协议。
+// 这里仅承载仍由 UpdateGroupInfo 负责的正式资料字段：
+//  1. name / avatar 允许管理员及以上更新；
+//  2. add_mode 仅允许群主更新；
+//  3. notice 已拆到独立接口，避免不同权限矩阵继续混在同一写入口。
 type GroupInfoUpdates struct {
 	Name    *string
 	Avatar  *string
-	Notice  *string
 	AddMode *int8
+}
+
+// ApplyJoinGroupResult 描述用户申请入群后的最终结果。
+//
+// 当 joined_directly=true 时表示 add_mode=0 已直接入群；
+// 当 joined_directly=false 且 apply_id>0 时表示已创建待审批申请记录。
+type ApplyJoinGroupResult struct {
+	ApplyID        int64
+	JoinedDirectly bool
 }
 
 // IsEmpty 判断当前更新意图是否为空。
 func (u GroupInfoUpdates) IsEmpty() bool {
-	return u.Name == nil && u.Avatar == nil && u.Notice == nil && u.AddMode == nil
+	return u.Name == nil && u.Avatar == nil && u.AddMode == nil
 }
 
 // IGroupRepository 定义 group-service 当前阶段需要的仓储抽象。
@@ -36,10 +44,18 @@ type IGroupRepository interface {
 	DismissGroup(ctx context.Context, groupUUID, operatorUUID string) error
 	// UpdateGroupInfo 更新群资料。
 	UpdateGroupInfo(ctx context.Context, groupUUID, operatorUUID string, updates GroupInfoUpdates) error
+	// UpdateGroupNotice 独立更新群公告。
+	UpdateGroupNotice(ctx context.Context, groupUUID, operatorUUID, notice string) error
 	// TransferGroupOwner 转让群主。
 	TransferGroupOwner(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string) error
 	// UpdateMemberRole 更新群成员角色。
 	UpdateMemberRole(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string, role int8) error
+	// ApplyJoinGroup 按当前群 add_mode 执行直加入群或创建待审批申请。
+	ApplyJoinGroup(ctx context.Context, groupUUID, applicantUUID, reason string) (ApplyJoinGroupResult, error)
+	// ReviewJoinGroup 审批入群申请。
+	ReviewJoinGroup(ctx context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error
+	// ListJoinRequests 获取群待审批入群申请列表。
+	ListJoinRequests(ctx context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error)
 	// GetGroupInfo 按群 UUID 获取有效群资料。
 	GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error)
 	// GetGroupMembers 获取群内有效成员列表。
@@ -53,9 +69,6 @@ type IGroupRepository interface {
 }
 
 // GroupRepository 是 IGroupRepository 的语义化别名。
-//
-// 保留这个别名是为了和其他服务的命名风格保持一致，
-// 后续如果需要在构造函数、测试桩、注入点中表达“这是 group 仓储依赖”，可直接使用该别名。
 type GroupRepository = IGroupRepository
 
 // IGroupCacheProjectorRepository 定义 group.cache 投影链路需要的最小仓储能力。

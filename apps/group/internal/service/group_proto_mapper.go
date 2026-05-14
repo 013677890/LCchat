@@ -57,3 +57,24 @@ func buildGroupListResponse(groups []*model.GroupInfo) *pb.GetGroupListResponse 
 	}
 	return &pb.GetGroupListResponse{Groups: items}
 }
+
+// buildGroupJoinRequestItemProto 将入群申请与申请人资料组装成 proto 响应项。
+//
+// 申请列表对审批人来说本质上是“申请事实 + 申请人展示信息”的聚合视图，
+// 因此这里继续保持 service 层聚合、proto 层只承载最终读模型的风格。
+func buildGroupJoinRequestItemProto(request *model.GroupJoinRequest, profile *model.UserProfile) *pb.GroupJoinRequestItem {
+	if request == nil || request.ApplicantUuid == "" {
+		return nil
+	}
+	item := &pb.GroupJoinRequestItem{
+		ApplyId:       request.Id,
+		ApplicantUuid: request.ApplicantUuid,
+		Reason:        request.Reason,
+		CreatedAt:     request.CreatedAt.UnixMilli(),
+	}
+	if profile != nil {
+		item.Nickname = profile.Nickname
+		item.Avatar = profile.Avatar
+	}
+	return item
+}

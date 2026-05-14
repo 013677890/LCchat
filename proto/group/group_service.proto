@@ -10,8 +10,12 @@ service GroupService {
 	rpc DismissGroup(DismissGroupRequest) returns (DismissGroupResponse);
 	rpc GetGroupInfo(GetGroupInfoRequest) returns (GetGroupInfoResponse);
 	rpc UpdateGroupInfo(UpdateGroupInfoRequest) returns (UpdateGroupInfoResponse);
+	rpc UpdateGroupNotice(UpdateGroupNoticeRequest) returns (UpdateGroupNoticeResponse);
 	rpc TransferGroupOwner(TransferGroupOwnerRequest) returns (TransferGroupOwnerResponse);
 	rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse);
+	rpc ApplyJoinGroup(ApplyJoinGroupRequest) returns (ApplyJoinGroupResponse);
+	rpc ReviewJoinGroup(ReviewJoinGroupRequest) returns (ReviewJoinGroupResponse);
+	rpc ListJoinRequests(ListJoinRequestsRequest) returns (ListJoinRequestsResponse);
 	rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
 	rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
 	rpc GetMemberList(GetMemberListRequest) returns (GetMemberListResponse);
@@ -41,10 +45,14 @@ message UpdateGroupInfoRequest {
 	string group_uuid = 1 [(validate.rules).string.min_len = 1];
 	optional string name = 2 [(validate.rules).string.max_len = 64];
 	optional string avatar = 3;
-	optional string notice = 4 [(validate.rules).string.max_len = 500];
-	optional int32 add_mode = 5 [(validate.rules).int32 = {gte: 0, lte: 1}];
+	optional int32 add_mode = 4 [(validate.rules).int32 = {gte: 0, lte: 1}];
 }
 message UpdateGroupInfoResponse {}
+message UpdateGroupNoticeRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string notice = 2 [(validate.rules).string.max_len = 500];
+}
+message UpdateGroupNoticeResponse {}
 message TransferGroupOwnerRequest {
 	string group_uuid = 1 [(validate.rules).string.min_len = 1];
 	string target_user_uuid = 2 [(validate.rules).string.min_len = 1];
@@ -56,6 +64,40 @@ message UpdateMemberRoleRequest {
 	int32 role = 3 [(validate.rules).int32 = {gte: 0, lte: 1}];
 }
 message UpdateMemberRoleResponse {}
+message ApplyJoinGroupRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string reason = 2 [(validate.rules).string.max_len = 255];
+}
+message ApplyJoinGroupResponse {
+	int64 apply_id = 1;
+	bool joined_directly = 2;
+}
+message ReviewJoinGroupRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	int64 apply_id = 2 [(validate.rules).int64 = {gt: 0}];
+	int32 action = 3 [(validate.rules).int32 = {gte: 1, lte: 2}];
+	string remark = 4 [(validate.rules).string.max_len = 255];
+}
+message ReviewJoinGroupResponse {}
+message GroupJoinRequestItem {
+	int64 apply_id = 1;
+	string applicant_uuid = 2;
+	string nickname = 3;
+	string avatar = 4;
+	string reason = 5;
+	int64 created_at = 6;
+}
+message ListJoinRequestsRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
+	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
+}
+message ListJoinRequestsResponse {
+	repeated GroupJoinRequestItem items = 1;
+	int64 total = 2;
+	int32 page = 3;
+	int32 page_size = 4;
+}
 message AddMemberRequest {
 	string group_uuid = 1 [(validate.rules).string.min_len = 1];
 	repeated string user_uuids = 2;

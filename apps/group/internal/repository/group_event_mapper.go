@@ -117,6 +117,32 @@ func (r *groupRepositoryImpl) insertMemberRoleUpdatedEvent(tx *gorm.DB, group *m
 	})
 }
 
+// insertJoinRequestCreatedEvent 把“新增待审批入群申请”事实写入 group.cache outbox。
+//
+// 申请列表缓存本质上也是群维度投影，因此继续复用同一个 group.cache topic，
+// 让申请创建、审批处理与成员正式入群在同一 group_uuid 分区内保持顺序。
+func (r *groupRepositoryImpl) insertJoinRequestCreatedEvent(tx *gorm.DB, groupUUID, operatorUUID string, request *model.GroupJoinRequest) error {
+	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		Action:       groupevent.ActionJoinRequestCreated,
+		GroupUUID:    groupUUID,
+		OperatorUUID: operatorUUID,
+		JoinRequest:  buildGroupJoinRequestSnapshot(request),
+	})
+}
+
+// insertJoinRequestReviewedEvent 把“待审批入群申请已处理”事实写入 group.cache outbox。
+//
+// projector 只需要知道哪条待审批申请应被移除，因此这里传递申请快照即可，
+// 避免消费侧为了删缓存再次回源 MySQL 查询申请记录。
+func (r *groupRepositoryImpl) insertJoinRequestReviewedEvent(tx *gorm.DB, groupUUID, operatorUUID string, request *model.GroupJoinRequest) error {
+	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		Action:       groupevent.ActionJoinRequestReviewed,
+		GroupUUID:    groupUUID,
+		OperatorUUID: operatorUUID,
+		JoinRequest:  buildGroupJoinRequestSnapshot(request),
+	})
+}
+
 // insertGroupCacheEvent 统一封装 group.cache 事件的编码与落库。
 //
 // 关键约束：
@@ -188,6 +214,19 @@ func buildGroupMemberSnapshots(members []*model.GroupMember) []groupevent.GroupM
 		})
 	}
 	return result
+}
+
+// buildGroupJoinRequestSnapshot 把入群申请模型转换为事件快照。
+func buildGroupJoinRequestSnapshot(request *model.GroupJoinRequest) *groupevent.GroupJoinRequestSnapshot {
+	if request == nil || request.Id <= 0 || request.ApplicantUuid == "" {
+		return nil
+	}
+	return &groupevent.GroupJoinRequestSnapshot{
+		ApplyID:         request.Id,
+		ApplicantUUID:   request.ApplicantUuid,
+		Reason:          request.Reason,
+		CreatedAtUnixMs: request.CreatedAt.UnixMilli(),
+	}
 }
 
 // collectGroupMemberSnapshotUUIDs 提取成员 UUID 列表，供 user_groups 反向索引 patch 使用。

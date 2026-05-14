@@ -8,6 +8,7 @@ import (
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/gin-gonic/gin"
+	"strconv"
 )
 
 // GroupHandler 是 gateway 的群 HTTP 入站适配层。
@@ -87,6 +88,27 @@ func (h *GroupHandler) UpdateGroupInfo(c *gin.Context) {
 	result.Success(c, nil)
 }
 
+// UpdateGroupNotice 独立更新群公告。
+func (h *GroupHandler) UpdateGroupNotice(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+	groupUUID := c.Param("groupUuid")
+	if groupUUID == "" {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	var req dto.UpdateGroupNoticeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	req.GroupUUID = groupUUID
+	if err := h.groupService.UpdateGroupNotice(ctx, &req); err != nil {
+		handleGroupError(c, err)
+		return
+	}
+	result.Success(c, nil)
+}
+
 // TransferGroupOwner 转让群主。
 func (h *GroupHandler) TransferGroupOwner(c *gin.Context) {
 	ctx := middleware.NewContextWithGin(c)
@@ -125,6 +147,51 @@ func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	req.UserUUID = userUUID
 	if err := h.groupService.UpdateMemberRole(ctx, &req); err != nil {
+		handleGroupError(c, err)
+		return
+	}
+	result.Success(c, nil)
+}
+
+// ApplyJoinGroup 申请加入群聊。
+func (h *GroupHandler) ApplyJoinGroup(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+	groupUUID := c.Param("groupUuid")
+	if groupUUID == "" {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	var req dto.ApplyJoinGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	req.GroupUUID = groupUUID
+	resp, err := h.groupService.ApplyJoinGroup(ctx, &req)
+	if err != nil {
+		handleGroupError(c, err)
+		return
+	}
+	result.Success(c, resp)
+}
+
+// ReviewJoinGroup 审批入群申请。
+func (h *GroupHandler) ReviewJoinGroup(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+	groupUUID := c.Param("groupUuid")
+	applyID, err := strconv.ParseInt(c.Param("applyId"), 10, 64)
+	if groupUUID == "" || err != nil || applyID <= 0 {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	var req dto.ReviewJoinGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	req.GroupUUID = groupUUID
+	req.ApplyID = applyID
+	if err := h.groupService.ReviewJoinGroup(ctx, &req); err != nil {
 		handleGroupError(c, err)
 		return
 	}
@@ -196,6 +263,28 @@ func (h *GroupHandler) GetMemberList(c *gin.Context) {
 		return
 	}
 	resp, err := h.groupService.GetMemberList(ctx, &dto.GetGroupMemberListRequest{GroupUUID: groupUUID})
+	if err != nil {
+		handleGroupError(c, err)
+		return
+	}
+	result.Success(c, resp)
+}
+
+// ListJoinRequests 获取待审批入群申请列表。
+func (h *GroupHandler) ListJoinRequests(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+	groupUUID := c.Param("groupUuid")
+	if groupUUID == "" {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	var req dto.ListJoinRequestsRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	req.GroupUUID = groupUUID
+	resp, err := h.groupService.ListJoinRequests(ctx, &req)
 	if err != nil {
 		handleGroupError(c, err)
 		return

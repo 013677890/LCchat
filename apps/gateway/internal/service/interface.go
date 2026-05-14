@@ -175,10 +175,18 @@ type GroupService interface {
 	GetGroupInfo(ctx context.Context, req *dto.GetGroupInfoRequest) (*dto.GroupInfoDTO, error)
 	// UpdateGroupInfo 更新群资料。
 	UpdateGroupInfo(ctx context.Context, req *dto.UpdateGroupInfoRequest) error
+	// UpdateGroupNotice 独立更新群公告。
+	UpdateGroupNotice(ctx context.Context, req *dto.UpdateGroupNoticeRequest) error
 	// TransferGroupOwner 转让群主。
 	TransferGroupOwner(ctx context.Context, req *dto.TransferGroupOwnerRequest) error
 	// UpdateMemberRole 更新群成员角色。
 	UpdateMemberRole(ctx context.Context, req *dto.UpdateGroupMemberRoleRequest) error
+	// ApplyJoinGroup 申请加入群聊。
+	ApplyJoinGroup(ctx context.Context, req *dto.ApplyJoinGroupRequest) (*dto.ApplyJoinGroupResponse, error)
+	// ReviewJoinGroup 审批入群申请。
+	ReviewJoinGroup(ctx context.Context, req *dto.ReviewJoinGroupRequest) error
+	// ListJoinRequests 获取待审批入群申请列表。
+	ListJoinRequests(ctx context.Context, req *dto.ListJoinRequestsRequest) (*dto.ListJoinRequestsResponse, error)
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *dto.AddGroupMemberRequest) error
 	// RemoveMember 移除群成员。

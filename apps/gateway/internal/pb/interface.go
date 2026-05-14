@@ -45,10 +45,18 @@ type GroupServiceClient interface {
 	GetGroupInfo(ctx context.Context, req *grouppb.GetGroupInfoRequest) (*grouppb.GetGroupInfoResponse, error)
 	// UpdateGroupInfo 更新群资料。
 	UpdateGroupInfo(ctx context.Context, req *grouppb.UpdateGroupInfoRequest) (*grouppb.UpdateGroupInfoResponse, error)
+	// UpdateGroupNotice 独立更新群公告。
+	UpdateGroupNotice(ctx context.Context, req *grouppb.UpdateGroupNoticeRequest) (*grouppb.UpdateGroupNoticeResponse, error)
 	// TransferGroupOwner 转让群主。
 	TransferGroupOwner(ctx context.Context, req *grouppb.TransferGroupOwnerRequest) (*grouppb.TransferGroupOwnerResponse, error)
 	// UpdateMemberRole 更新群成员角色。
 	UpdateMemberRole(ctx context.Context, req *grouppb.UpdateMemberRoleRequest) (*grouppb.UpdateMemberRoleResponse, error)
+	// ApplyJoinGroup 申请加入群聊。
+	ApplyJoinGroup(ctx context.Context, req *grouppb.ApplyJoinGroupRequest) (*grouppb.ApplyJoinGroupResponse, error)
+	// ReviewJoinGroup 审批入群申请。
+	ReviewJoinGroup(ctx context.Context, req *grouppb.ReviewJoinGroupRequest) (*grouppb.ReviewJoinGroupResponse, error)
+	// ListJoinRequests 获取待审批入群申请列表。
+	ListJoinRequests(ctx context.Context, req *grouppb.ListJoinRequestsRequest) (*grouppb.ListJoinRequestsResponse, error)
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *grouppb.AddMemberRequest) (*grouppb.AddMemberResponse, error)
 	// RemoveMember 移除群成员。

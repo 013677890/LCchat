@@ -391,14 +391,6 @@ func buildUpdateGroupInfoFields(req *pb.UpdateGroupInfoRequest) (repository.Grou
 		avatar := strings.TrimSpace(req.GetAvatar())
 		updates.Avatar = &avatar
 	}
-	if req.Notice != nil {
-		// notice 允许显式置空，用于清理历史公告；长度约束仍由 service 再兜底一次。
-		notice := strings.TrimSpace(req.GetNotice())
-		if len([]rune(notice)) > 500 {
-			return updates, apperr.New(consts.CodeGroupNoticeTooLong)
-		}
-		updates.Notice = &notice
-	}
 	if req.AddMode != nil {
 		addMode := int8(req.GetAddMode())
 		if addMode < 0 || addMode > 1 {
@@ -444,6 +436,18 @@ func mapGroupWriteError(err error, fallbackMessage string) error {
 	}
 	if errors.Is(err, repository.ErrGroupMemberNotFound) {
 		return apperr.New(consts.CodeGroupMemberNotFound)
+	}
+	if errors.Is(err, repository.ErrGroupApplyNotFound) {
+		return apperr.New(consts.CodeGroupApplyNotFound)
+	}
+	if errors.Is(err, repository.ErrGroupApplyAlreadyExists) {
+		return apperr.New(consts.CodeGroupApplyAlreadyExists)
+	}
+	if errors.Is(err, repository.ErrAlreadyGroupMember) {
+		return apperr.New(consts.CodeAlreadyGroupMember)
+	}
+	if errors.Is(err, repository.ErrAdminLimitExceeded) {
+		return apperr.New(consts.CodeAdminLimitExceeded)
 	}
 	return apperr.Wrap(err, consts.CodeInternalError, fallbackMessage)
 }

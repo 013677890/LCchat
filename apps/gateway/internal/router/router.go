@@ -76,13 +76,17 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/conversations/:convId":   2 * time.Second,
 	"/api/v1/auth/conversations/settings":  2 * time.Second,
 	// auth groups
-	"/api/v1/auth/groups":                                   2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid":                        2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid/transfer-owner":         2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid/members":                2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid/members/:userUuid":      2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid/members/:userUuid/role": 2 * time.Second,
-	"/api/v1/auth/groups/:groupUuid/member-ids":             1 * time.Second,
+	"/api/v1/auth/groups":                                          2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid":                               2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/notice":                        2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/apply":                         2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/join-requests":                 2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/join-requests/:applyId/review": 2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/transfer-owner":                2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members":                       2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members/:userUuid":             2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members/:userUuid/role":        2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/member-ids":                    1 * time.Second,
 }
 
 func gatewayTimeoutMiddleware() gin.HandlerFunc {
@@ -236,6 +240,10 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 					groups.GET("", groupHandler.GetGroupList)
 					groups.GET("/:groupUuid", groupHandler.GetGroupInfo)
 					groups.PATCH("/:groupUuid", groupHandler.UpdateGroupInfo)
+					groups.PUT("/:groupUuid/notice", groupHandler.UpdateGroupNotice)
+					groups.POST("/:groupUuid/apply", groupHandler.ApplyJoinGroup)
+					groups.GET("/:groupUuid/join-requests", groupHandler.ListJoinRequests)
+					groups.POST("/:groupUuid/join-requests/:applyId/review", groupHandler.ReviewJoinGroup)
 					groups.POST("/:groupUuid/transfer-owner", groupHandler.TransferGroupOwner)
 					groups.DELETE("/:groupUuid", groupHandler.DismissGroup)
 					groups.POST("/:groupUuid/members", groupHandler.AddMember)
