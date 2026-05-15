@@ -1,15 +1,12 @@
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 SET FOREIGN_KEY_CHECKS = 0;
-
 CREATE DATABASE IF NOT EXISTS `chat_server`
   DEFAULT CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 USE `chat_server`;
-
 CREATE USER IF NOT EXISTS 'debezium'@'%' IDENTIFIED BY 'debezium';
 GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'debezium'@'%';
-
 CREATE TABLE IF NOT EXISTS `outbox_events` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增事件ID',
   `event_type` VARCHAR(128) NOT NULL COMMENT '领域事件类型',
@@ -20,7 +17,6 @@ CREATE TABLE IF NOT EXISTS `outbox_events` (
   KEY `idx_outbox_event_type_created` (`event_type`, `created_at`),
   KEY `idx_outbox_entity_id` (`entity_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CDC Outbox 事件表';
-
 CREATE TABLE IF NOT EXISTS `idempotent_events` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
   `event_type` VARCHAR(64) NOT NULL COMMENT '事件类型',
@@ -29,7 +25,6 @@ CREATE TABLE IF NOT EXISTS `idempotent_events` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_type_event` (`event_type`, `event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='幂等消费记录表';
-
 CREATE TABLE IF NOT EXISTS `user_account` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `user_uuid` CHAR(20) NOT NULL COMMENT '用户唯一id',
@@ -52,7 +47,6 @@ CREATE TABLE IF NOT EXISTS `user_account` (
   KEY `idx_user_account_deleted_at` (`deleted_at`),
   KEY `idx_user_account_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户账号信息';
-
 CREATE TABLE IF NOT EXISTS `user_profile` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `user_uuid` CHAR(20) NOT NULL COMMENT '用户唯一id',
@@ -68,7 +62,6 @@ CREATE TABLE IF NOT EXISTS `user_profile` (
   UNIQUE KEY `uk_user_profile_user_uuid` (`user_uuid`),
   KEY `idx_user_profile_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户资料信息';
-
 CREATE TABLE IF NOT EXISTS `groups` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `uuid` CHAR(20) NOT NULL COMMENT '群组唯一id',
@@ -88,7 +81,6 @@ CREATE TABLE IF NOT EXISTS `groups` (
   KEY `idx_groups_status` (`status`),
   KEY `idx_groups_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群基础信息';
-
 CREATE TABLE IF NOT EXISTS `group_members` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `group_uuid` CHAR(20) NOT NULL COMMENT '群uuid',
@@ -108,12 +100,11 @@ CREATE TABLE IF NOT EXISTS `group_members` (
   KEY `idx_group_members_user_uuid` (`user_uuid`),
   KEY `idx_group_members_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群成员关系';
-
 CREATE TABLE IF NOT EXISTS `group_join_requests` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `group_uuid` CHAR(20) NOT NULL COMMENT '群uuid',
   `applicant_uuid` CHAR(20) NOT NULL COMMENT '申请人uuid',
-  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待处理 1通过 2拒绝',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待处理 1通过 2拒绝 3撤销',
   `reason` VARCHAR(255) DEFAULT NULL COMMENT '申请附言',
   `reviewer_uuid` CHAR(20) DEFAULT NULL COMMENT '处理人uuid',
   `review_remark` VARCHAR(255) DEFAULT NULL COMMENT '处理备注',
@@ -126,7 +117,6 @@ CREATE TABLE IF NOT EXISTS `group_join_requests` (
   KEY `idx_group_join_applicant` (`applicant_uuid`, `status`, `deleted_at`, `created_at`, `id`),
   KEY `idx_group_join_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群入群申请';
-
 CREATE TABLE IF NOT EXISTS `user_relations` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `user_uuid` CHAR(20) NOT NULL COMMENT '用户uuid',
@@ -147,7 +137,6 @@ CREATE TABLE IF NOT EXISTS `user_relations` (
   KEY `idx_user_blacklist_deleted_time` (`user_uuid`, `status`, `deleted_at`, `blacklisted_at`, `id`),
   KEY `idx_user_relations_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户单向关系';
-
 CREATE TABLE IF NOT EXISTS `apply_requests` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `apply_type` TINYINT NOT NULL COMMENT '0好友 1加群',
@@ -170,7 +159,6 @@ CREATE TABLE IF NOT EXISTS `apply_requests` (
   KEY `idx_apply_target_read` (`target_uuid`, `apply_type`, `is_read`, `deleted_at`),
   KEY `idx_apply_requests_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='好友/加群申请';
-
 CREATE TABLE IF NOT EXISTS `device_sessions` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_uuid` CHAR(20) NOT NULL COMMENT '用户uuid',
@@ -192,7 +180,6 @@ CREATE TABLE IF NOT EXISTS `device_sessions` (
   KEY `idx_device_user_updated` (`user_uuid`, `updated_at`, `id`),
   KEY `idx_device_user_status_deleted` (`user_uuid`, `status`, `deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='设备会话';
-
 CREATE TABLE IF NOT EXISTS `conversation` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `conv_id` VARCHAR(128) NOT NULL COMMENT '会话ID',
@@ -217,7 +204,6 @@ CREATE TABLE IF NOT EXISTS `conversation` (
   KEY `idx_owner_status_update` (`owner_uuid`, `status`, `updated_at`),
   KEY `idx_conversation_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话元数据';
-
 CREATE TABLE IF NOT EXISTS `message` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增id',
   `conv_id` VARCHAR(128) NOT NULL COMMENT '会话ID',
@@ -242,7 +228,6 @@ CREATE TABLE IF NOT EXISTS `message` (
   KEY `idx_conv_time` (`conv_id`, `send_time`),
   KEY `idx_message_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='聊天消息';
-
 CREATE TABLE IF NOT EXISTS `group_conversation` (
   `group_uuid` CHAR(20) NOT NULL COMMENT '群组唯一id(业务主键，一对一关系无需自增ID)',
   `max_seq` BIGINT NOT NULL DEFAULT 0 COMMENT '群消息当前最大seq',
@@ -253,6 +238,5 @@ CREATE TABLE IF NOT EXISTS `group_conversation` (
   PRIMARY KEY (`group_uuid`),
   KEY `idx_last_msg_at` (`last_msg_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群会话状态(热数据,每条群消息更新一次)';
-
 FLUSH PRIVILEGES;
 SET FOREIGN_KEY_CHECKS = 1;

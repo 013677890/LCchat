@@ -3,20 +3,20 @@ package service
 import (
 	"context"
 	"errors"
-	"testing"
-
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 type fakeGatewayGroupClient struct {
 	gatewaypb.GroupServiceClient
-
 	updateGroupNoticeFn func(context.Context, *grouppb.UpdateGroupNoticeRequest) (*grouppb.UpdateGroupNoticeResponse, error)
 	applyJoinGroupFn    func(context.Context, *grouppb.ApplyJoinGroupRequest) (*grouppb.ApplyJoinGroupResponse, error)
+	cancelJoinApplyFn   func(context.Context, *grouppb.CancelJoinGroupApplicationRequest) (*grouppb.CancelJoinGroupApplicationResponse, error)
+	getMyJoinApplyFn    func(context.Context, *grouppb.GetMyJoinGroupApplicationRequest) (*grouppb.GetMyJoinGroupApplicationResponse, error)
 	reviewJoinGroupFn   func(context.Context, *grouppb.ReviewJoinGroupRequest) (*grouppb.ReviewJoinGroupResponse, error)
 	listJoinRequestsFn  func(context.Context, *grouppb.ListJoinRequestsRequest) (*grouppb.ListJoinRequestsResponse, error)
 }
@@ -24,79 +24,75 @@ type fakeGatewayGroupClient struct {
 func (f *fakeGatewayGroupClient) CreateGroup(context.Context, *grouppb.CreateGroupRequest) (*grouppb.CreateGroupResponse, error) {
 	return &grouppb.CreateGroupResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) DismissGroup(context.Context, *grouppb.DismissGroupRequest) (*grouppb.DismissGroupResponse, error) {
 	return &grouppb.DismissGroupResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) GetGroupInfo(context.Context, *grouppb.GetGroupInfoRequest) (*grouppb.GetGroupInfoResponse, error) {
 	return &grouppb.GetGroupInfoResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) UpdateGroupInfo(context.Context, *grouppb.UpdateGroupInfoRequest) (*grouppb.UpdateGroupInfoResponse, error) {
 	return &grouppb.UpdateGroupInfoResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) UpdateGroupNotice(ctx context.Context, req *grouppb.UpdateGroupNoticeRequest) (*grouppb.UpdateGroupNoticeResponse, error) {
 	if f.updateGroupNoticeFn == nil {
 		return &grouppb.UpdateGroupNoticeResponse{}, nil
 	}
 	return f.updateGroupNoticeFn(ctx, req)
 }
-
 func (f *fakeGatewayGroupClient) TransferGroupOwner(context.Context, *grouppb.TransferGroupOwnerRequest) (*grouppb.TransferGroupOwnerResponse, error) {
 	return &grouppb.TransferGroupOwnerResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) UpdateMemberRole(context.Context, *grouppb.UpdateMemberRoleRequest) (*grouppb.UpdateMemberRoleResponse, error) {
 	return &grouppb.UpdateMemberRoleResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) ApplyJoinGroup(ctx context.Context, req *grouppb.ApplyJoinGroupRequest) (*grouppb.ApplyJoinGroupResponse, error) {
 	if f.applyJoinGroupFn == nil {
 		return &grouppb.ApplyJoinGroupResponse{}, nil
 	}
 	return f.applyJoinGroupFn(ctx, req)
 }
-
+func (f *fakeGatewayGroupClient) CancelJoinGroupApplication(ctx context.Context, req *grouppb.CancelJoinGroupApplicationRequest) (*grouppb.CancelJoinGroupApplicationResponse, error) {
+	if f.cancelJoinApplyFn == nil {
+		return &grouppb.CancelJoinGroupApplicationResponse{}, nil
+	}
+	return f.cancelJoinApplyFn(ctx, req)
+}
+func (f *fakeGatewayGroupClient) GetMyJoinGroupApplication(ctx context.Context, req *grouppb.GetMyJoinGroupApplicationRequest) (*grouppb.GetMyJoinGroupApplicationResponse, error) {
+	if f.getMyJoinApplyFn == nil {
+		return &grouppb.GetMyJoinGroupApplicationResponse{}, nil
+	}
+	return f.getMyJoinApplyFn(ctx, req)
+}
 func (f *fakeGatewayGroupClient) ReviewJoinGroup(ctx context.Context, req *grouppb.ReviewJoinGroupRequest) (*grouppb.ReviewJoinGroupResponse, error) {
 	if f.reviewJoinGroupFn == nil {
 		return &grouppb.ReviewJoinGroupResponse{}, nil
 	}
 	return f.reviewJoinGroupFn(ctx, req)
 }
-
 func (f *fakeGatewayGroupClient) ListJoinRequests(ctx context.Context, req *grouppb.ListJoinRequestsRequest) (*grouppb.ListJoinRequestsResponse, error) {
 	if f.listJoinRequestsFn == nil {
 		return &grouppb.ListJoinRequestsResponse{}, nil
 	}
 	return f.listJoinRequestsFn(ctx, req)
 }
-
 func (f *fakeGatewayGroupClient) AddMember(context.Context, *grouppb.AddMemberRequest) (*grouppb.AddMemberResponse, error) {
 	return &grouppb.AddMemberResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) RemoveMember(context.Context, *grouppb.RemoveMemberRequest) (*grouppb.RemoveMemberResponse, error) {
 	return &grouppb.RemoveMemberResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) GetMemberList(context.Context, *grouppb.GetMemberListRequest) (*grouppb.GetMemberListResponse, error) {
 	return &grouppb.GetMemberListResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) GetGroupList(context.Context, *grouppb.GetGroupListRequest) (*grouppb.GetGroupListResponse, error) {
 	return &grouppb.GetGroupListResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) GetGroupMemberIds(context.Context, *grouppb.GetGroupMemberIdsRequest) (*grouppb.GetGroupMemberIdsResponse, error) {
 	return &grouppb.GetGroupMemberIdsResponse{}, nil
 }
-
 func (f *fakeGatewayGroupClient) CheckGroupMember(context.Context, *grouppb.CheckGroupMemberRequest) (*grouppb.CheckGroupMemberResponse, error) {
 	return &grouppb.CheckGroupMemberResponse{}, nil
 }
-
 func TestGatewayGroupServiceJoinRequestMethods(t *testing.T) {
 	t.Run("update_notice_maps_request", func(t *testing.T) {
 		svc := NewGroupService(&fakeGatewayGroupClient{
@@ -109,7 +105,6 @@ func TestGatewayGroupServiceJoinRequestMethods(t *testing.T) {
 		err := svc.UpdateGroupNotice(context.Background(), &dto.UpdateGroupNoticeRequest{GroupUUID: "group-1", Notice: "新公告"})
 		require.NoError(t, err)
 	})
-
 	t.Run("apply_join_group_maps_response", func(t *testing.T) {
 		svc := NewGroupService(&fakeGatewayGroupClient{
 			applyJoinGroupFn: func(_ context.Context, req *grouppb.ApplyJoinGroupRequest) (*grouppb.ApplyJoinGroupResponse, error) {
@@ -124,7 +119,42 @@ func TestGatewayGroupServiceJoinRequestMethods(t *testing.T) {
 		assert.Equal(t, int64(8), resp.ApplyID)
 		assert.False(t, resp.JoinedDirectly)
 	})
-
+	t.Run("cancel_join_group_application_maps_request", func(t *testing.T) {
+		svc := NewGroupService(&fakeGatewayGroupClient{
+			cancelJoinApplyFn: func(_ context.Context, req *grouppb.CancelJoinGroupApplicationRequest) (*grouppb.CancelJoinGroupApplicationResponse, error) {
+				require.Equal(t, "group-cancel", req.GetGroupUuid())
+				return &grouppb.CancelJoinGroupApplicationResponse{}, nil
+			},
+		})
+		err := svc.CancelJoinGroupApplication(context.Background(), &dto.CancelJoinGroupApplicationRequest{GroupUUID: "group-cancel"})
+		require.NoError(t, err)
+	})
+	t.Run("get_my_join_group_application_maps_response", func(t *testing.T) {
+		svc := NewGroupService(&fakeGatewayGroupClient{
+			getMyJoinApplyFn: func(_ context.Context, req *grouppb.GetMyJoinGroupApplicationRequest) (*grouppb.GetMyJoinGroupApplicationResponse, error) {
+				require.Equal(t, "group-status", req.GetGroupUuid())
+				return &grouppb.GetMyJoinGroupApplicationResponse{
+					HasApplication: true,
+					Application: &grouppb.MyJoinGroupApplication{
+						ApplyId:      21,
+						Status:       3,
+						Reason:       "撤销原因",
+						ReviewerUuid: "",
+						ReviewRemark: "",
+						CreatedAt:    1710000000000,
+					},
+				}, nil
+			},
+		})
+		resp, err := svc.GetMyJoinGroupApplication(context.Background(), &dto.GetMyJoinGroupApplicationRequest{GroupUUID: "group-status"})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.True(t, resp.HasApplication)
+		require.NotNil(t, resp.Application)
+		assert.Equal(t, int64(21), resp.Application.ApplyID)
+		assert.Equal(t, int32(3), resp.Application.Status)
+		assert.Equal(t, "撤销原因", resp.Application.Reason)
+	})
 	t.Run("review_join_group_passes_args", func(t *testing.T) {
 		svc := NewGroupService(&fakeGatewayGroupClient{
 			reviewJoinGroupFn: func(_ context.Context, req *grouppb.ReviewJoinGroupRequest) (*grouppb.ReviewJoinGroupResponse, error) {
@@ -138,7 +168,6 @@ func TestGatewayGroupServiceJoinRequestMethods(t *testing.T) {
 		err := svc.ReviewJoinGroup(context.Background(), &dto.ReviewJoinGroupRequest{GroupUUID: "group-3", ApplyID: 9, Action: 2, Remark: "拒绝"})
 		require.NoError(t, err)
 	})
-
 	t.Run("list_join_requests_maps_items", func(t *testing.T) {
 		svc := NewGroupService(&fakeGatewayGroupClient{
 			listJoinRequestsFn: func(_ context.Context, req *grouppb.ListJoinRequestsRequest) (*grouppb.ListJoinRequestsResponse, error) {
@@ -168,7 +197,6 @@ func TestGatewayGroupServiceJoinRequestMethods(t *testing.T) {
 		assert.Equal(t, int64(11), resp.Items[0].ApplyID)
 		assert.Equal(t, "张三", resp.Items[0].Nickname)
 	})
-
 	t.Run("downstream_error_passthrough", func(t *testing.T) {
 		wantErr := errors.New("grpc unavailable")
 		svc := NewGroupService(&fakeGatewayGroupClient{

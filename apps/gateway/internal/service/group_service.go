@@ -77,6 +77,21 @@ func (s *GroupServiceImpl) ApplyJoinGroup(ctx context.Context, req *dto.ApplyJoi
 	return dto.ConvertApplyJoinGroupResponseFromProto(resp), nil
 }
 
+// CancelJoinGroupApplication 撤销当前用户自己的待审批入群申请。
+func (s *GroupServiceImpl) CancelJoinGroupApplication(ctx context.Context, req *dto.CancelJoinGroupApplicationRequest) error {
+	_, err := s.groupClient.CancelJoinGroupApplication(ctx, dto.ConvertToProtoCancelJoinGroupApplicationRequest(req))
+	return err
+}
+
+// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
+func (s *GroupServiceImpl) GetMyJoinGroupApplication(ctx context.Context, req *dto.GetMyJoinGroupApplicationRequest) (*dto.GetMyJoinGroupApplicationResponse, error) {
+	resp, err := s.groupClient.GetMyJoinGroupApplication(ctx, dto.ConvertToProtoGetMyJoinGroupApplicationRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return dto.ConvertGetMyJoinGroupApplicationResponseFromProto(resp), nil
+}
+
 // ReviewJoinGroup 审批入群申请。
 func (s *GroupServiceImpl) ReviewJoinGroup(ctx context.Context, req *dto.ReviewJoinGroupRequest) error {
 	_, err := s.groupClient.ReviewJoinGroup(ctx, dto.ConvertToProtoReviewJoinGroupRequest(req))

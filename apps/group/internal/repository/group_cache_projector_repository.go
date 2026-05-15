@@ -52,6 +52,8 @@ func (r *groupRepositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload 
 		return r.applyJoinRequestCreatedEvent(ctx, payload)
 	case groupevent.ActionJoinRequestReviewed:
 		return r.applyJoinRequestReviewedEvent(ctx, payload)
+	case groupevent.ActionJoinRequestCanceled:
+		return r.applyJoinRequestReviewedEvent(ctx, payload)
 	default:
 		return fmt.Errorf("%w: unsupported action %s", ErrInvalidProjectorPayload, payload.Action)
 	}
@@ -98,7 +100,7 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 		if len(payload.Members) == 0 {
 			return fmt.Errorf("%w: %s missing member snapshots", ErrInvalidProjectorPayload, payload.Action)
 		}
-	case groupevent.ActionJoinRequestCreated, groupevent.ActionJoinRequestReviewed:
+	case groupevent.ActionJoinRequestCreated, groupevent.ActionJoinRequestReviewed, groupevent.ActionJoinRequestCanceled:
 		if payload.JoinRequest == nil {
 			return fmt.Errorf("%w: %s missing join request snapshot", ErrInvalidProjectorPayload, payload.Action)
 		}

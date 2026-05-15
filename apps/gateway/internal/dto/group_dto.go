@@ -114,6 +114,69 @@ func ConvertApplyJoinGroupResponseFromProto(pb *grouppb.ApplyJoinGroupResponse) 
 	}
 }
 
+// CancelJoinGroupApplicationRequest 撤销当前用户待审批入群申请请求。
+type CancelJoinGroupApplicationRequest struct {
+	GroupUUID string `json:"groupUuid"`
+}
+
+// ConvertToProtoCancelJoinGroupApplicationRequest 把撤销申请 DTO 转成 proto 请求。
+func ConvertToProtoCancelJoinGroupApplicationRequest(dto *CancelJoinGroupApplicationRequest) *grouppb.CancelJoinGroupApplicationRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.CancelJoinGroupApplicationRequest{GroupUuid: dto.GroupUUID}
+}
+
+// GetMyJoinGroupApplicationRequest 获取当前用户在指定群的最新申请状态请求。
+type GetMyJoinGroupApplicationRequest struct {
+	GroupUUID string `json:"groupUuid"`
+}
+
+// MyJoinGroupApplicationDTO 当前用户在指定群的最新申请状态详情。
+type MyJoinGroupApplicationDTO struct {
+	ApplyID      int64  `json:"applyId"`
+	Status       int32  `json:"status"`
+	Reason       string `json:"reason"`
+	ReviewerUUID string `json:"reviewerUuid"`
+	ReviewRemark string `json:"reviewRemark"`
+	CreatedAt    int64  `json:"createdAt"`
+	ReviewedAt   int64  `json:"reviewedAt"`
+}
+
+// GetMyJoinGroupApplicationResponse 获取当前用户在指定群的最新申请状态响应。
+type GetMyJoinGroupApplicationResponse struct {
+	HasApplication bool                       `json:"hasApplication"`
+	Application    *MyJoinGroupApplicationDTO `json:"application,omitempty"`
+}
+
+// ConvertToProtoGetMyJoinGroupApplicationRequest 把“我的申请状态”DTO 转成 proto 请求。
+func ConvertToProtoGetMyJoinGroupApplicationRequest(dto *GetMyJoinGroupApplicationRequest) *grouppb.GetMyJoinGroupApplicationRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.GetMyJoinGroupApplicationRequest{GroupUuid: dto.GroupUUID}
+}
+
+// ConvertGetMyJoinGroupApplicationResponseFromProto 把“我的申请状态”proto 响应转成 HTTP DTO。
+func ConvertGetMyJoinGroupApplicationResponseFromProto(pb *grouppb.GetMyJoinGroupApplicationResponse) *GetMyJoinGroupApplicationResponse {
+	if pb == nil {
+		return nil
+	}
+	resp := &GetMyJoinGroupApplicationResponse{HasApplication: pb.GetHasApplication()}
+	if application := pb.GetApplication(); application != nil {
+		resp.Application = &MyJoinGroupApplicationDTO{
+			ApplyID:      application.GetApplyId(),
+			Status:       application.GetStatus(),
+			Reason:       application.GetReason(),
+			ReviewerUUID: application.GetReviewerUuid(),
+			ReviewRemark: application.GetReviewRemark(),
+			CreatedAt:    application.GetCreatedAt(),
+			ReviewedAt:   application.GetReviewedAt(),
+		}
+	}
+	return resp
+}
+
 // ReviewJoinGroupRequest 审批入群申请请求。
 type ReviewJoinGroupRequest struct {
 	GroupUUID string `json:"groupUuid"`

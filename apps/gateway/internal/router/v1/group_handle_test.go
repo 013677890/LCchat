@@ -4,22 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"sync"
-	"testing"
-
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
 )
 
 type fakeGroupHTTPService struct {
 	updateGroupNoticeFn func(context.Context, *dto.UpdateGroupNoticeRequest) error
 	applyJoinGroupFn    func(context.Context, *dto.ApplyJoinGroupRequest) (*dto.ApplyJoinGroupResponse, error)
+	cancelJoinApplyFn   func(context.Context, *dto.CancelJoinGroupApplicationRequest) error
+	getMyJoinApplyFn    func(context.Context, *dto.GetMyJoinGroupApplicationRequest) (*dto.GetMyJoinGroupApplicationResponse, error)
 	reviewJoinGroupFn   func(context.Context, *dto.ReviewJoinGroupRequest) error
 	listJoinRequestsFn  func(context.Context, *dto.ListJoinRequestsRequest) (*dto.ListJoinRequestsResponse, error)
 }
@@ -29,71 +30,69 @@ var _ service.GroupService = (*fakeGroupHTTPService)(nil)
 func (f *fakeGroupHTTPService) CreateGroup(context.Context, *dto.CreateGroupRequest) (*dto.CreateGroupResponse, error) {
 	return &dto.CreateGroupResponse{}, nil
 }
-
 func (f *fakeGroupHTTPService) DismissGroup(context.Context, *dto.DismissGroupRequest) error {
 	return nil
 }
-
 func (f *fakeGroupHTTPService) GetGroupInfo(context.Context, *dto.GetGroupInfoRequest) (*dto.GroupInfoDTO, error) {
 	return &dto.GroupInfoDTO{}, nil
 }
-
 func (f *fakeGroupHTTPService) UpdateGroupInfo(context.Context, *dto.UpdateGroupInfoRequest) error {
 	return nil
 }
-
 func (f *fakeGroupHTTPService) UpdateGroupNotice(ctx context.Context, req *dto.UpdateGroupNoticeRequest) error {
 	if f.updateGroupNoticeFn == nil {
 		return nil
 	}
 	return f.updateGroupNoticeFn(ctx, req)
 }
-
 func (f *fakeGroupHTTPService) TransferGroupOwner(context.Context, *dto.TransferGroupOwnerRequest) error {
 	return nil
 }
-
 func (f *fakeGroupHTTPService) UpdateMemberRole(context.Context, *dto.UpdateGroupMemberRoleRequest) error {
 	return nil
 }
-
 func (f *fakeGroupHTTPService) ApplyJoinGroup(ctx context.Context, req *dto.ApplyJoinGroupRequest) (*dto.ApplyJoinGroupResponse, error) {
 	if f.applyJoinGroupFn == nil {
 		return &dto.ApplyJoinGroupResponse{}, nil
 	}
 	return f.applyJoinGroupFn(ctx, req)
 }
-
+func (f *fakeGroupHTTPService) CancelJoinGroupApplication(ctx context.Context, req *dto.CancelJoinGroupApplicationRequest) error {
+	if f.cancelJoinApplyFn == nil {
+		return nil
+	}
+	return f.cancelJoinApplyFn(ctx, req)
+}
+func (f *fakeGroupHTTPService) GetMyJoinGroupApplication(ctx context.Context, req *dto.GetMyJoinGroupApplicationRequest) (*dto.GetMyJoinGroupApplicationResponse, error) {
+	if f.getMyJoinApplyFn == nil {
+		return &dto.GetMyJoinGroupApplicationResponse{}, nil
+	}
+	return f.getMyJoinApplyFn(ctx, req)
+}
 func (f *fakeGroupHTTPService) ReviewJoinGroup(ctx context.Context, req *dto.ReviewJoinGroupRequest) error {
 	if f.reviewJoinGroupFn == nil {
 		return nil
 	}
 	return f.reviewJoinGroupFn(ctx, req)
 }
-
 func (f *fakeGroupHTTPService) ListJoinRequests(ctx context.Context, req *dto.ListJoinRequestsRequest) (*dto.ListJoinRequestsResponse, error) {
 	if f.listJoinRequestsFn == nil {
 		return &dto.ListJoinRequestsResponse{}, nil
 	}
 	return f.listJoinRequestsFn(ctx, req)
 }
-
 func (f *fakeGroupHTTPService) AddMember(context.Context, *dto.AddGroupMemberRequest) error {
 	return nil
 }
-
 func (f *fakeGroupHTTPService) RemoveMember(context.Context, *dto.RemoveGroupMemberRequest) error {
 	return nil
 }
-
 func (f *fakeGroupHTTPService) GetMemberList(context.Context, *dto.GetGroupMemberListRequest) (*dto.GetGroupMemberListResponse, error) {
 	return &dto.GetGroupMemberListResponse{}, nil
 }
-
 func (f *fakeGroupHTTPService) GetGroupList(context.Context) (*dto.GetGroupListResponse, error) {
 	return &dto.GetGroupListResponse{}, nil
 }
-
 func (f *fakeGroupHTTPService) GetGroupMemberIDs(context.Context, *dto.GetGroupMemberIDsRequest) (*dto.GetGroupMemberIDsResponse, error) {
 	return &dto.GetGroupMemberIDsResponse{}, nil
 }
@@ -110,14 +109,12 @@ func initGatewayGroupHandlerLogger() {
 		gin.SetMode(gin.TestMode)
 	})
 }
-
 func decodeGroupHandlerBody(t *testing.T, w *httptest.ResponseRecorder) groupHandlerResultBody {
 	t.Helper()
 	var body groupHandlerResultBody
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	return body
 }
-
 func newGroupJSONRequest(t *testing.T, method, path, body string) *http.Request {
 	t.Helper()
 	req, err := http.NewRequest(method, path, bytes.NewBufferString(body))
@@ -125,7 +122,6 @@ func newGroupJSONRequest(t *testing.T, method, path, body string) *http.Request 
 	req.Header.Set("Content-Type", "application/json")
 	return req
 }
-
 func TestGroupHandlerUpdateGroupNotice(t *testing.T) {
 	initGatewayGroupHandlerLogger()
 	called := false
@@ -149,7 +145,6 @@ func TestGroupHandlerUpdateGroupNotice(t *testing.T) {
 	assert.Equal(t, consts.CodeSuccess, body.Code)
 	assert.True(t, called)
 }
-
 func TestGroupHandlerApplyJoinGroup(t *testing.T) {
 	initGatewayGroupHandlerLogger()
 	called := false
@@ -172,7 +167,57 @@ func TestGroupHandlerApplyJoinGroup(t *testing.T) {
 	assert.Equal(t, consts.CodeSuccess, body.Code)
 	assert.True(t, called)
 }
-
+func TestGroupHandlerCancelJoinGroupApplication(t *testing.T) {
+	initGatewayGroupHandlerLogger()
+	called := false
+	h := NewGroupHandler(&fakeGroupHTTPService{
+		cancelJoinApplyFn: func(_ context.Context, req *dto.CancelJoinGroupApplicationRequest) error {
+			called = true
+			assert.Equal(t, "group-cancel", req.GroupUUID)
+			return nil
+		},
+	})
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodDelete, "/api/v1/auth/groups/group-cancel/apply", nil)
+	require.NoError(t, err)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	c.Params = gin.Params{{Key: "groupUuid", Value: "group-cancel"}}
+	h.CancelJoinGroupApplication(c)
+	body := decodeGroupHandlerBody(t, w)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, consts.CodeSuccess, body.Code)
+	assert.True(t, called)
+}
+func TestGroupHandlerGetMyJoinGroupApplication(t *testing.T) {
+	initGatewayGroupHandlerLogger()
+	called := false
+	h := NewGroupHandler(&fakeGroupHTTPService{
+		getMyJoinApplyFn: func(_ context.Context, req *dto.GetMyJoinGroupApplicationRequest) (*dto.GetMyJoinGroupApplicationResponse, error) {
+			called = true
+			assert.Equal(t, "group-status", req.GroupUUID)
+			return &dto.GetMyJoinGroupApplicationResponse{
+				HasApplication: true,
+				Application: &dto.MyJoinGroupApplicationDTO{
+					ApplyID: 31,
+					Status:  3,
+					Reason:  "已撤销",
+				},
+			}, nil
+		},
+	})
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/groups/group-status/my-join-application", nil)
+	require.NoError(t, err)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	c.Params = gin.Params{{Key: "groupUuid", Value: "group-status"}}
+	h.GetMyJoinGroupApplication(c)
+	body := decodeGroupHandlerBody(t, w)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, consts.CodeSuccess, body.Code)
+	assert.True(t, called)
+}
 func TestGroupHandlerReviewJoinGroup(t *testing.T) {
 	initGatewayGroupHandlerLogger()
 	t.Run("invalid_apply_id", func(t *testing.T) {
@@ -193,7 +238,6 @@ func TestGroupHandlerReviewJoinGroup(t *testing.T) {
 		assert.Equal(t, consts.CodeParamError, body.Code)
 		assert.False(t, called)
 	})
-
 	t.Run("success", func(t *testing.T) {
 		called := false
 		h := NewGroupHandler(&fakeGroupHTTPService{
@@ -218,7 +262,6 @@ func TestGroupHandlerReviewJoinGroup(t *testing.T) {
 		assert.True(t, called)
 	})
 }
-
 func TestGroupHandlerListJoinRequests(t *testing.T) {
 	initGatewayGroupHandlerLogger()
 	called := false

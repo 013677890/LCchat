@@ -68,6 +68,16 @@ func (h *GroupHandler) ApplyJoinGroup(ctx context.Context, req *pb.ApplyJoinGrou
 	return h.groupService.ApplyJoinGroup(ctx, req)
 }
 
+// CancelJoinGroupApplication 撤销当前用户自己的待审批入群申请。
+func (h *GroupHandler) CancelJoinGroupApplication(ctx context.Context, req *pb.CancelJoinGroupApplicationRequest) (*pb.CancelJoinGroupApplicationResponse, error) {
+	return &pb.CancelJoinGroupApplicationResponse{}, h.groupService.CancelJoinGroupApplication(ctx, req)
+}
+
+// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
+func (h *GroupHandler) GetMyJoinGroupApplication(ctx context.Context, req *pb.GetMyJoinGroupApplicationRequest) (*pb.GetMyJoinGroupApplicationResponse, error) {
+	return h.groupService.GetMyJoinGroupApplication(ctx, req)
+}
+
 // ReviewJoinGroup 审批入群申请。
 func (h *GroupHandler) ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGroupRequest) (*pb.ReviewJoinGroupResponse, error) {
 	return &pb.ReviewJoinGroupResponse{}, h.groupService.ReviewJoinGroup(ctx, req)

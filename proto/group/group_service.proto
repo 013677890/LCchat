@@ -14,6 +14,8 @@ service GroupService {
 	rpc TransferGroupOwner(TransferGroupOwnerRequest) returns (TransferGroupOwnerResponse);
 	rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse);
 	rpc ApplyJoinGroup(ApplyJoinGroupRequest) returns (ApplyJoinGroupResponse);
+	rpc CancelJoinGroupApplication(CancelJoinGroupApplicationRequest) returns (CancelJoinGroupApplicationResponse);
+	rpc GetMyJoinGroupApplication(GetMyJoinGroupApplicationRequest) returns (GetMyJoinGroupApplicationResponse);
 	rpc ReviewJoinGroup(ReviewJoinGroupRequest) returns (ReviewJoinGroupResponse);
 	rpc ListJoinRequests(ListJoinRequestsRequest) returns (ListJoinRequestsResponse);
 	rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
@@ -71,6 +73,26 @@ message ApplyJoinGroupRequest {
 message ApplyJoinGroupResponse {
 	int64 apply_id = 1;
 	bool joined_directly = 2;
+}
+message CancelJoinGroupApplicationRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+}
+message CancelJoinGroupApplicationResponse {}
+message MyJoinGroupApplication {
+	int64 apply_id = 1;
+	int32 status = 2;
+	string reason = 3;
+	string reviewer_uuid = 4;
+	string review_remark = 5;
+	int64 created_at = 6;
+	int64 reviewed_at = 7;
+}
+message GetMyJoinGroupApplicationRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+}
+message GetMyJoinGroupApplicationResponse {
+	bool has_application = 1;
+	MyJoinGroupApplication application = 2;
 }
 message ReviewJoinGroupRequest {
 	string group_uuid = 1 [(validate.rules).string.min_len = 1];

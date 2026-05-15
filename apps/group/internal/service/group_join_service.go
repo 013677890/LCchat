@@ -62,6 +62,51 @@ func (s *groupServiceImpl) ApplyJoinGroup(ctx context.Context, req *pb.ApplyJoin
 	return &pb.ApplyJoinGroupResponse{ApplyId: result.ApplyID, JoinedDirectly: result.JoinedDirectly}, nil
 }
 
+// CancelJoinGroupApplication 撤销当前用户自己的待审批入群申请。
+func (s *groupServiceImpl) CancelJoinGroupApplication(ctx context.Context, req *pb.CancelJoinGroupApplicationRequest) error {
+	currentUserUUID := util.GetUserUUIDFromContext(ctx)
+	if currentUserUUID == "" {
+		return apperr.New(consts.CodeUnauthorized)
+	}
+	if req == nil {
+		return apperr.New(consts.CodeParamError)
+	}
+	groupUUID := strings.TrimSpace(req.GetGroupUuid())
+	if groupUUID == "" {
+		return apperr.New(consts.CodeParamError)
+	}
+	return mapGroupWriteError(
+		s.groupRepo.CancelJoinGroupApplication(ctx, groupUUID, currentUserUUID),
+		"撤销入群申请失败",
+	)
+}
+
+// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
+func (s *groupServiceImpl) GetMyJoinGroupApplication(ctx context.Context, req *pb.GetMyJoinGroupApplicationRequest) (*pb.GetMyJoinGroupApplicationResponse, error) {
+	currentUserUUID := util.GetUserUUIDFromContext(ctx)
+	if currentUserUUID == "" {
+		return nil, apperr.New(consts.CodeUnauthorized)
+	}
+	if req == nil {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	groupUUID := strings.TrimSpace(req.GetGroupUuid())
+	if groupUUID == "" {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	joinRequest, err := s.groupRepo.GetMyJoinGroupApplication(ctx, groupUUID, currentUserUUID)
+	if err != nil {
+		return nil, mapGroupWriteError(err, "获取我的入群申请状态失败")
+	}
+	if joinRequest == nil {
+		return &pb.GetMyJoinGroupApplicationResponse{HasApplication: false}, nil
+	}
+	return &pb.GetMyJoinGroupApplicationResponse{
+		HasApplication: true,
+		Application:    buildMyJoinGroupApplicationProto(joinRequest),
+	}, nil
+}
+
 // ReviewJoinGroup 审批入群申请。
 func (s *groupServiceImpl) ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGroupRequest) error {
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)

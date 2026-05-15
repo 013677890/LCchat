@@ -78,3 +78,25 @@ func buildGroupJoinRequestItemProto(request *model.GroupJoinRequest, profile *mo
 	}
 	return item
 }
+
+// buildMyJoinGroupApplicationProto 将“我的入群申请状态”模型转换为 proto 响应。
+//
+// 这里直接暴露申请单当前最新事实，避免 gateway 再拼装状态字段，
+// 保证待审批、已通过、已拒绝、已撤销四类状态都由 group-service 单点输出。
+func buildMyJoinGroupApplicationProto(request *model.GroupJoinRequest) *pb.MyJoinGroupApplication {
+	if request == nil || request.Id <= 0 {
+		return nil
+	}
+	item := &pb.MyJoinGroupApplication{
+		ApplyId:      request.Id,
+		Status:       int32(request.Status),
+		Reason:       request.Reason,
+		ReviewerUuid: request.ReviewerUuid,
+		ReviewRemark: request.ReviewRemark,
+		CreatedAt:    request.CreatedAt.UnixMilli(),
+	}
+	if request.ReviewedAt != nil {
+		item.ReviewedAt = request.ReviewedAt.UnixMilli()
+	}
+	return item
+}

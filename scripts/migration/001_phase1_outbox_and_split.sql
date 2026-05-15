@@ -2,7 +2,6 @@
 -- Outbox 基础设施表与非 Group Schema 统一 DDL
 -- 执行前请先做全量 DB 备份！
 -- ============================================================
-
 -- ==================== 1. Outbox 事件表 ====================
 CREATE TABLE IF NOT EXISTS `outbox_events` (
     `id`            BIGINT        NOT NULL AUTO_INCREMENT,
@@ -14,7 +13,6 @@ CREATE TABLE IF NOT EXISTS `outbox_events` (
     INDEX `idx_outbox_event_type_created` (`event_type`, `created_at`),
     INDEX `idx_outbox_entity_id` (`entity_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='Outbox 事件表';
-
 -- ==================== 2. 幂等消费记录表 ====================
 CREATE TABLE IF NOT EXISTS `idempotent_events` (
     `id`           BIGINT      NOT NULL AUTO_INCREMENT,
@@ -24,7 +22,6 @@ CREATE TABLE IF NOT EXISTS `idempotent_events` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_type_event` (`event_type`, `event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='幂等消费记录表';
-
 -- ==================== 3. user_account 表（auth-service 归属）====================
 CREATE TABLE IF NOT EXISTS `user_account` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT,
@@ -45,7 +42,6 @@ CREATE TABLE IF NOT EXISTS `user_account` (
     UNIQUE KEY `uk_email` (`email`),
     UNIQUE KEY `uk_telephone` (`telephone`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户账号表（auth-service 归属）';
-
 -- ==================== 4. user_profile 表（user-service 归属）====================
 CREATE TABLE IF NOT EXISTS `user_profile` (
     `id`           BIGINT       NOT NULL AUTO_INCREMENT,
@@ -61,22 +57,19 @@ CREATE TABLE IF NOT EXISTS `user_profile` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_uuid` (`user_uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户资料表（user-service 归属）';
-
 -- ==================== 5. 表名标准化（复数命名）====================
 -- 注意：RENAME TABLE 是原子操作，但会短暂锁表，建议在低峰期执行
-
 RENAME TABLE `user_relation` TO `user_relations`;
 RENAME TABLE `apply_request` TO `apply_requests`;
 RENAME TABLE `device_session` TO `device_sessions`;
 RENAME TABLE `group_info` TO `groups`;
 RENAME TABLE `group_member` TO `group_members`;
-
 -- ==================== 6. group_join_requests 表（group-service 独占）====================
 CREATE TABLE IF NOT EXISTS `group_join_requests` (
     `id`             BIGINT       NOT NULL AUTO_INCREMENT,
     `group_uuid`     CHAR(20)     NOT NULL COMMENT '群 uuid',
     `applicant_uuid` CHAR(20)     NOT NULL COMMENT '申请人 uuid',
-    `status`         TINYINT      NOT NULL DEFAULT 0 COMMENT '状态: 0=待处理 1=通过 2=拒绝',
+    `status`         TINYINT      NOT NULL DEFAULT 0 COMMENT '状态: 0=待处理 1=通过 2=拒绝 3=撤销',
     `reason`         VARCHAR(255) NULL     DEFAULT NULL COMMENT '申请附言',
     `reviewer_uuid`  CHAR(20)     NULL     DEFAULT NULL COMMENT '处理人 uuid',
     `review_remark`  VARCHAR(255) NULL     DEFAULT NULL COMMENT '处理备注',

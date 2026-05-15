@@ -26,6 +26,8 @@ type fakeGroupRepoForService struct {
 	transferOwnerFn    func(context.Context, string, string, string) error
 	updateMemberRoleFn func(context.Context, string, string, string, int8) error
 	applyJoinGroupFn   func(context.Context, string, string, string) (repository.ApplyJoinGroupResult, error)
+	cancelJoinApplyFn  func(context.Context, string, string) error
+	getMyJoinApplyFn   func(context.Context, string, string) (*model.GroupJoinRequest, error)
 	reviewJoinGroupFn  func(context.Context, string, string, int64, int8, string) error
 	listJoinReqsFn     func(context.Context, string, string, int, int) ([]*model.GroupJoinRequest, int64, error)
 	getGroupInfoFn     func(context.Context, string) (*model.GroupInfo, error)
@@ -88,6 +90,18 @@ func (f *fakeGroupRepoForService) ApplyJoinGroup(ctx context.Context, groupUUID,
 		return repository.ApplyJoinGroupResult{}, nil
 	}
 	return f.applyJoinGroupFn(ctx, groupUUID, applicantUUID, reason)
+}
+func (f *fakeGroupRepoForService) CancelJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) error {
+	if f.cancelJoinApplyFn == nil {
+		return nil
+	}
+	return f.cancelJoinApplyFn(ctx, groupUUID, applicantUUID)
+}
+func (f *fakeGroupRepoForService) GetMyJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) (*model.GroupJoinRequest, error) {
+	if f.getMyJoinApplyFn == nil {
+		return nil, nil
+	}
+	return f.getMyJoinApplyFn(ctx, groupUUID, applicantUUID)
 }
 func (f *fakeGroupRepoForService) ReviewJoinGroup(ctx context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error {
 	if f.reviewJoinGroupFn == nil {
@@ -311,6 +325,61 @@ func TestApplyJoinGroupReturnsRepositoryResult(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.Equal(t, int64(123), resp.GetApplyId())
 	assert.False(t, resp.GetJoinedDirectly())
+}
+func TestCancelJoinGroupApplicationPassesNormalizedArgs(t *testing.T) {
+	var gotGroupUUID string
+	var gotApplicantUUID string
+	repo := &fakeGroupRepoForService{
+		cancelJoinApplyFn: func(_ context.Context, groupUUID, applicantUUID string) error {
+			gotGroupUUID = groupUUID
+			gotApplicantUUID = applicantUUID
+			return nil
+		},
+	}
+	svc := NewGroupService(repo)
+	err := svc.CancelJoinGroupApplication(groupServiceTestContext("user-uuid"), &pb.CancelJoinGroupApplicationRequest{GroupUuid: " group-uuid "})
+	require.NoError(t, err)
+	assert.Equal(t, "group-uuid", gotGroupUUID)
+	assert.Equal(t, "user-uuid", gotApplicantUUID)
+}
+func TestGetMyJoinGroupApplicationBuildsResponse(t *testing.T) {
+	reviewedAt := time.Unix(1710000100, 0)
+	repo := &fakeGroupRepoForService{
+		getMyJoinApplyFn: func(_ context.Context, groupUUID, applicantUUID string) (*model.GroupJoinRequest, error) {
+			assert.Equal(t, "group-uuid", groupUUID)
+			assert.Equal(t, "user-uuid", applicantUUID)
+			return &model.GroupJoinRequest{
+				Id:            18,
+				ApplicantUuid: applicantUUID,
+				Status:        2,
+				Reason:        "申请原因",
+				ReviewerUuid:  "admin-1",
+				ReviewRemark:  "拒绝",
+				CreatedAt:     time.Unix(1710000000, 0),
+				ReviewedAt:    &reviewedAt,
+			}, nil
+		},
+	}
+	svc := NewGroupService(repo)
+	resp, err := svc.GetMyJoinGroupApplication(groupServiceTestContext("user-uuid"), &pb.GetMyJoinGroupApplicationRequest{GroupUuid: " group-uuid "})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, resp.GetHasApplication())
+	require.NotNil(t, resp.GetApplication())
+	assert.Equal(t, int64(18), resp.GetApplication().GetApplyId())
+	assert.Equal(t, int32(2), resp.GetApplication().GetStatus())
+	assert.Equal(t, "申请原因", resp.GetApplication().GetReason())
+	assert.Equal(t, "admin-1", resp.GetApplication().GetReviewerUuid())
+	assert.Equal(t, "拒绝", resp.GetApplication().GetReviewRemark())
+	assert.Equal(t, reviewedAt.UnixMilli(), resp.GetApplication().GetReviewedAt())
+}
+func TestGetMyJoinGroupApplicationReturnsEmptyWhenMissing(t *testing.T) {
+	svc := NewGroupService(&fakeGroupRepoForService{})
+	resp, err := svc.GetMyJoinGroupApplication(groupServiceTestContext("user-uuid"), &pb.GetMyJoinGroupApplicationRequest{GroupUuid: "group-uuid"})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.False(t, resp.GetHasApplication())
+	assert.Nil(t, resp.GetApplication())
 }
 func TestReviewJoinGroupPassesNormalizedArgs(t *testing.T) {
 	var gotApplyID int64

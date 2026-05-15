@@ -175,6 +175,37 @@ func (h *GroupHandler) ApplyJoinGroup(c *gin.Context) {
 	result.Success(c, resp)
 }
 
+// CancelJoinGroupApplication 撤销当前用户自己的待审批入群申请。
+func (h *GroupHandler) CancelJoinGroupApplication(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+	groupUUID := c.Param("groupUuid")
+	if groupUUID == "" {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	if err := h.groupService.CancelJoinGroupApplication(ctx, &dto.CancelJoinGroupApplicationRequest{GroupUUID: groupUUID}); err != nil {
+		handleGroupError(c, err)
+		return
+	}
+	result.Success(c, nil)
+}
+
+// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
+func (h *GroupHandler) GetMyJoinGroupApplication(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+	groupUUID := c.Param("groupUuid")
+	if groupUUID == "" {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	resp, err := h.groupService.GetMyJoinGroupApplication(ctx, &dto.GetMyJoinGroupApplicationRequest{GroupUUID: groupUUID})
+	if err != nil {
+		handleGroupError(c, err)
+		return
+	}
+	result.Success(c, resp)
+}
+
 // ReviewJoinGroup 审批入群申请。
 func (h *GroupHandler) ReviewJoinGroup(c *gin.Context) {
 	ctx := middleware.NewContextWithGin(c)

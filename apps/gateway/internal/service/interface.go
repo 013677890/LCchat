@@ -183,6 +183,10 @@ type GroupService interface {
 	UpdateMemberRole(ctx context.Context, req *dto.UpdateGroupMemberRoleRequest) error
 	// ApplyJoinGroup 申请加入群聊。
 	ApplyJoinGroup(ctx context.Context, req *dto.ApplyJoinGroupRequest) (*dto.ApplyJoinGroupResponse, error)
+	// CancelJoinGroupApplication 撤销当前用户自己的待审批入群申请。
+	CancelJoinGroupApplication(ctx context.Context, req *dto.CancelJoinGroupApplicationRequest) error
+	// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
+	GetMyJoinGroupApplication(ctx context.Context, req *dto.GetMyJoinGroupApplicationRequest) (*dto.GetMyJoinGroupApplicationResponse, error)
 	// ReviewJoinGroup 审批入群申请。
 	ReviewJoinGroup(ctx context.Context, req *dto.ReviewJoinGroupRequest) error
 	// ListJoinRequests 获取待审批入群申请列表。

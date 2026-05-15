@@ -40,6 +40,7 @@ const (
 	joinRequestStatusPending  int8  = 0
 	joinRequestStatusApproved int8  = 1
 	joinRequestStatusRejected int8  = 2
+	joinRequestStatusCanceled int8  = 3
 	maxGroupAdminCount        int64 = 10
 )
 
@@ -662,6 +663,48 @@ func (r *groupRepositoryImpl) ApplyJoinGroup(ctx context.Context, groupUUID, app
 		r.upsertGroupMemberCacheAsync(ctx, groupUUID, changedMember)
 	}
 	return result, nil
+}
+
+// CancelJoinGroupApplication 撤销当前用户自己发起的待审批入群申请。
+func (r *groupRepositoryImpl) CancelJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) error {
+	if r == nil || r.db == nil || groupUUID == "" || applicantUUID == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID); err != nil {
+			return err
+		}
+		joinRequest, err := r.loadPendingJoinRequestByApplicantForUpdate(ctx, tx, groupUUID, applicantUUID)
+		if err != nil {
+			return err
+		}
+		if joinRequest == nil {
+			return ErrGroupApplyNotFound
+		}
+		now := time.Now()
+		if err := tx.Model(&model.GroupJoinRequest{}).
+			Where("id = ?", joinRequest.Id).
+			Updates(map[string]interface{}{
+				"status":     joinRequestStatusCanceled,
+				"updated_at": now,
+			}).Error; err != nil {
+			return WrapDBError(err)
+		}
+		joinRequest.Status = joinRequestStatusCanceled
+		joinRequest.UpdatedAt = now
+		return r.insertJoinRequestCanceledEvent(tx, groupUUID, applicantUUID, joinRequest)
+	})
+}
+
+// GetMyJoinGroupApplication 获取当前用户在指定群的最新入群申请状态。
+func (r *groupRepositoryImpl) GetMyJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) (*model.GroupJoinRequest, error) {
+	if r == nil || r.db == nil || groupUUID == "" || applicantUUID == "" {
+		return nil, nil
+	}
+	if err := r.ensureGroupNormal(ctx, groupUUID); err != nil {
+		return nil, err
+	}
+	return r.loadLatestJoinRequestByApplicant(ctx, groupUUID, applicantUUID)
 }
 
 // ReviewJoinGroup 审批入群申请。

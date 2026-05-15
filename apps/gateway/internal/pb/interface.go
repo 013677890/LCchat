@@ -53,6 +53,10 @@ type GroupServiceClient interface {
 	UpdateMemberRole(ctx context.Context, req *grouppb.UpdateMemberRoleRequest) (*grouppb.UpdateMemberRoleResponse, error)
 	// ApplyJoinGroup 申请加入群聊。
 	ApplyJoinGroup(ctx context.Context, req *grouppb.ApplyJoinGroupRequest) (*grouppb.ApplyJoinGroupResponse, error)
+	// CancelJoinGroupApplication 撤销当前用户自己的待审批入群申请。
+	CancelJoinGroupApplication(ctx context.Context, req *grouppb.CancelJoinGroupApplicationRequest) (*grouppb.CancelJoinGroupApplicationResponse, error)
+	// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
+	GetMyJoinGroupApplication(ctx context.Context, req *grouppb.GetMyJoinGroupApplicationRequest) (*grouppb.GetMyJoinGroupApplicationResponse, error)
 	// ReviewJoinGroup 审批入群申请。
 	ReviewJoinGroup(ctx context.Context, req *grouppb.ReviewJoinGroupRequest) (*grouppb.ReviewJoinGroupResponse, error)
 	// ListJoinRequests 获取待审批入群申请列表。

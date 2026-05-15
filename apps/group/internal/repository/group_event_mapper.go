@@ -143,6 +143,19 @@ func (r *groupRepositoryImpl) insertJoinRequestReviewedEvent(tx *gorm.DB, groupU
 	})
 }
 
+// insertJoinRequestCanceledEvent 把“申请人主动撤销待审批入群申请”事实写入 group.cache outbox。
+//
+// 撤销后待审批缓存需要移除对应申请，但历史申请记录仍需保留供“我的申请状态”查询，
+// 因此这里继续复用申请快照表达“移出待审批集合”的最小事实。
+func (r *groupRepositoryImpl) insertJoinRequestCanceledEvent(tx *gorm.DB, groupUUID, operatorUUID string, request *model.GroupJoinRequest) error {
+	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		Action:       groupevent.ActionJoinRequestCanceled,
+		GroupUUID:    groupUUID,
+		OperatorUUID: operatorUUID,
+		JoinRequest:  buildGroupJoinRequestSnapshot(request),
+	})
+}
+
 // insertGroupCacheEvent 统一封装 group.cache 事件的编码与落库。
 //
 // 关键约束：

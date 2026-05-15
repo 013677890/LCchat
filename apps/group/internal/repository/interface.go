@@ -52,6 +52,10 @@ type IGroupRepository interface {
 	UpdateMemberRole(ctx context.Context, groupUUID, operatorUUID, targetUserUUID string, role int8) error
 	// ApplyJoinGroup 按当前群 add_mode 执行直加入群或创建待审批申请。
 	ApplyJoinGroup(ctx context.Context, groupUUID, applicantUUID, reason string) (ApplyJoinGroupResult, error)
+	// CancelJoinGroupApplication 撤销当前用户自己发起的待审批入群申请。
+	CancelJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) error
+	// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
+	GetMyJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) (*model.GroupJoinRequest, error)
 	// ReviewJoinGroup 审批入群申请。
 	ReviewJoinGroup(ctx context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error
 	// ListJoinRequests 获取群待审批入群申请列表。

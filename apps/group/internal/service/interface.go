@@ -29,6 +29,10 @@ type IGroupService interface {
 	UpdateMemberRole(ctx context.Context, req *pb.UpdateMemberRoleRequest) error
 	// ApplyJoinGroup 申请加入群聊，必要时直接入群。
 	ApplyJoinGroup(ctx context.Context, req *pb.ApplyJoinGroupRequest) (*pb.ApplyJoinGroupResponse, error)
+	// CancelJoinGroupApplication 撤销当前用户自己的待审批入群申请。
+	CancelJoinGroupApplication(ctx context.Context, req *pb.CancelJoinGroupApplicationRequest) error
+	// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
+	GetMyJoinGroupApplication(ctx context.Context, req *pb.GetMyJoinGroupApplicationRequest) (*pb.GetMyJoinGroupApplicationResponse, error)
 	// ReviewJoinGroup 审批入群申请。
 	ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGroupRequest) error
 	// ListJoinRequests 获取群待审批申请列表。

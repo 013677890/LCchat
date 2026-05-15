@@ -27,6 +27,8 @@ const (
 	ActionJoinRequestCreated = "join_request_created"
 	// ActionJoinRequestReviewed 表示一条待审批入群申请已被处理，应从待审批缓存移除。
 	ActionJoinRequestReviewed = "join_request_reviewed"
+	// ActionJoinRequestCanceled 表示申请人主动撤销了待审批入群申请，应从待审批缓存移除。
+	ActionJoinRequestCanceled = "join_request_canceled"
 )
 
 // GroupSnapshot 描述单条群聚合快照。

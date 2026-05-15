@@ -80,6 +80,7 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/groups/:groupUuid":                               2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/notice":                        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/apply":                         2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/my-join-application":           1 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/join-requests":                 2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/join-requests/:applyId/review": 2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/transfer-owner":                2 * time.Second,
@@ -242,6 +243,8 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 					groups.PATCH("/:groupUuid", groupHandler.UpdateGroupInfo)
 					groups.PUT("/:groupUuid/notice", groupHandler.UpdateGroupNotice)
 					groups.POST("/:groupUuid/apply", groupHandler.ApplyJoinGroup)
+					groups.DELETE("/:groupUuid/apply", groupHandler.CancelJoinGroupApplication)
+					groups.GET("/:groupUuid/my-join-application", groupHandler.GetMyJoinGroupApplication)
 					groups.GET("/:groupUuid/join-requests", groupHandler.ListJoinRequests)
 					groups.POST("/:groupUuid/join-requests/:applyId/review", groupHandler.ReviewJoinGroup)
 					groups.POST("/:groupUuid/transfer-owner", groupHandler.TransferGroupOwner)
