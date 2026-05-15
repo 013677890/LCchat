@@ -57,6 +57,14 @@ func mustReadGroupMemberFields(t *testing.T, client *goredis.Client, groupUUID s
 	return fields
 }
 
+// mustReadGroupJoinRequestFields 读取群待审批申请 Hash。
+func mustReadGroupJoinRequestFields(t *testing.T, client *goredis.Client, groupUUID string) map[string]string {
+	t.Helper()
+	fields, err := client.HGetAll(context.Background(), rediskey.GroupJoinRequestPendingKey(groupUUID)).Result()
+	require.NoError(t, err)
+	return fields
+}
+
 // mustReadUserGroups 读取用户群列表缓存。
 func mustReadUserGroups(t *testing.T, client *goredis.Client, userUUID string) []string {
 	t.Helper()
@@ -86,6 +94,16 @@ func buildProjectorMemberSnapshot(userUUID string, role int32, joinedAt time.Tim
 		UserUUID:       userUUID,
 		Role:           role,
 		JoinedAtUnixMs: joinedAt.UnixMilli(),
+	}
+}
+
+// buildProjectorJoinRequestSnapshot 构造测试用待审批入群申请快照。
+func buildProjectorJoinRequestSnapshot(applyID int64, applicantUUID, reason string, createdAt time.Time) *groupevent.GroupJoinRequestSnapshot {
+	return &groupevent.GroupJoinRequestSnapshot{
+		ApplyID:         applyID,
+		ApplicantUUID:   applicantUUID,
+		Reason:          reason,
+		CreatedAtUnixMs: createdAt.UnixMilli(),
 	}
 }
 
@@ -382,6 +400,38 @@ func TestApplyGroupCacheEventMemberRoleUpdatedOnlyTouchesRole(t *testing.T) {
 	entry, err := decodeGroupMemberCacheValue(fields["member-1"])
 	require.NoError(t, err)
 	assert.Equal(t, memberRoleAdmin, entry.Role)
+}
+
+// TestApplyGroupCacheEventJoinRequestLifecycle 验证待审批申请创建与处理的缓存投影。
+func TestApplyGroupCacheEventJoinRequestLifecycle(t *testing.T) {
+	repo, client := newProjectorTestRepository(t)
+	ctx := context.Background()
+	createdAt := time.Unix(1710004800, 0)
+
+	require.NoError(t, repo.rebuildGroupJoinRequestsCache(ctx, "group-1", []*model.GroupJoinRequest{}))
+	err := repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
+		EventID:     "evt-join-created",
+		Action:      groupevent.ActionJoinRequestCreated,
+		GroupUUID:   "group-1",
+		JoinRequest: buildProjectorJoinRequestSnapshot(10, "user-1", "申请加入", createdAt),
+	})
+	require.NoError(t, err)
+	fields := mustReadGroupJoinRequestFields(t, client, "group-1")
+	entry, err := decodeGroupJoinRequestCacheValue(fields["10"])
+	require.NoError(t, err)
+	assert.Equal(t, int64(10), entry.ApplyID)
+	assert.Equal(t, "user-1", entry.ApplicantUUID)
+	assert.Equal(t, "申请加入", entry.Reason)
+
+	err = repo.ApplyGroupCacheEvent(ctx, groupevent.GroupCacheEventPayload{
+		EventID:     "evt-join-reviewed",
+		Action:      groupevent.ActionJoinRequestReviewed,
+		GroupUUID:   "group-1",
+		JoinRequest: buildProjectorJoinRequestSnapshot(10, "user-1", "申请加入", createdAt),
+	})
+	require.NoError(t, err)
+	fields = mustReadGroupJoinRequestFields(t, client, "group-1")
+	assert.Equal(t, map[string]string{groupJoinRequestsEmptyField: groupJoinRequestsEmptyValue}, fields)
 }
 
 // TestApplyGroupCacheEventWrongTypeDeletesDirtyKey 验证投影遇到脏 key 时会清理并降级成功。

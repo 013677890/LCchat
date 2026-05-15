@@ -1,12 +1,14 @@
 package repository
 
 import (
+	"testing"
+	"time"
+
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"testing"
-	"time"
 )
 
 func TestCanRemoveGroupMemberRoleMatrix(t *testing.T) {
@@ -31,6 +33,7 @@ func TestCanRemoveGroupMemberRoleMatrix(t *testing.T) {
 		})
 	}
 }
+
 func TestCanUpdateGroupMemberRoleMatrix(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -52,6 +55,7 @@ func TestCanUpdateGroupMemberRoleMatrix(t *testing.T) {
 		})
 	}
 }
+
 func TestIsActiveGroupMember(t *testing.T) {
 	now := time.Now()
 	cases := []struct {
@@ -71,6 +75,7 @@ func TestIsActiveGroupMember(t *testing.T) {
 		})
 	}
 }
+
 func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
 	updatedAt := time.Unix(1710000000, 0)
 	group := &model.GroupInfo{
@@ -84,6 +89,7 @@ func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
 		Status:    groupStatusNormal,
 		UpdatedAt: updatedAt,
 	}
+
 	// 事件快照需要完整承接缓存投影所需字段，回放后应能还原出一致的群资料视图。
 	snapshot := buildGroupSnapshot(group)
 	restored := buildGroupInfoFromSnapshot(snapshot)
@@ -102,6 +108,7 @@ func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
 		assert.True(t, group.UpdatedAt.Equal(restored.UpdatedAt))
 	}
 }
+
 func TestBuildGroupMemberSnapshotsDeduplicate(t *testing.T) {
 	joinedAt := time.UnixMilli(1710000000123)
 	members := []*model.GroupMember{
@@ -110,6 +117,7 @@ func TestBuildGroupMemberSnapshotsDeduplicate(t *testing.T) {
 		{GroupUuid: "group-1", UserUuid: "user-1", Role: memberRoleMember, JoinedAt: joinedAt.Add(time.Minute)},
 		{GroupUuid: "group-1", UserUuid: "user-2", Role: memberRoleMember, JoinedAt: joinedAt.Add(2 * time.Minute)},
 	}
+
 	// 写链路合并“新增成员 + 恢复成员”时可能出现重复 UUID，mapper 必须保证先到的有效快照只保留一次。
 	snapshots := buildGroupMemberSnapshots(members)
 	userUUIDs := collectGroupMemberSnapshotUUIDs(members)
@@ -122,6 +130,71 @@ func TestBuildGroupMemberSnapshotsDeduplicate(t *testing.T) {
 	}
 	assert.Equal(t, []string{"user-1", "user-2"}, userUUIDs)
 }
+
+func TestBuildGroupJoinRequestSnapshotRoundTrip(t *testing.T) {
+	createdAt := time.Unix(1710000000, 0)
+	request := &model.GroupJoinRequest{
+		Id:            7,
+		ApplicantUuid: "user-1",
+		Reason:        "申请加入",
+		Status:        joinRequestStatusPending,
+		CreatedAt:     createdAt,
+	}
+
+	// 申请事件快照需要同时支撑 projector 增量投影和后续重放，
+	// 因此这里验证“模型 -> 快照 -> 模型”后关键字段不丢失。
+	snapshot := buildGroupJoinRequestSnapshot(request)
+	restored := buildGroupJoinRequestFromSnapshot(snapshot)
+	if assert.NotNil(t, snapshot) && assert.NotNil(t, restored) {
+		assert.Equal(t, request.Id, snapshot.ApplyID)
+		assert.Equal(t, request.ApplicantUuid, snapshot.ApplicantUUID)
+		assert.Equal(t, request.Reason, snapshot.Reason)
+		assert.Equal(t, request.CreatedAt.UnixMilli(), snapshot.CreatedAtUnixMs)
+		assert.Equal(t, request.Id, restored.Id)
+		assert.Equal(t, request.ApplicantUuid, restored.ApplicantUuid)
+		assert.Equal(t, request.Reason, restored.Reason)
+		assert.True(t, request.CreatedAt.Equal(restored.CreatedAt))
+	}
+}
+
+func TestBuildGroupJoinRequestFromCacheRoundTrip(t *testing.T) {
+	createdAt := time.Unix(1710000100, 0)
+	request := &model.GroupJoinRequest{
+		Id:            9,
+		ApplicantUuid: "user-9",
+		Reason:        "想进群",
+		Status:        joinRequestStatusPending,
+		CreatedAt:     createdAt,
+	}
+
+	entry, err := decodeGroupJoinRequestCacheValue(encodeGroupJoinRequestCacheValue(request))
+	if assert.NoError(t, err) {
+		restored := buildGroupJoinRequestFromCache(entry)
+		if assert.NotNil(t, restored) {
+			assert.Equal(t, request.Id, restored.Id)
+			assert.Equal(t, request.ApplicantUuid, restored.ApplicantUuid)
+			assert.Equal(t, request.Reason, restored.Reason)
+			assert.True(t, request.CreatedAt.Equal(restored.CreatedAt))
+		}
+	}
+}
+
+func TestSortGroupJoinRequests(t *testing.T) {
+	older := time.Unix(1710000000, 0)
+	newer := older.Add(time.Minute)
+	items := []*model.GroupJoinRequest{
+		{Id: 1, ApplicantUuid: "u1", CreatedAt: older},
+		{Id: 3, ApplicantUuid: "u3", CreatedAt: newer},
+		{Id: 2, ApplicantUuid: "u2", CreatedAt: newer},
+	}
+
+	sortGroupJoinRequests(items)
+	require.Len(t, items, 3)
+	assert.Equal(t, int64(3), items[0].Id)
+	assert.Equal(t, int64(2), items[1].Id)
+	assert.Equal(t, int64(1), items[2].Id)
+}
+
 func TestValidateGroupCacheEventPayload(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -156,6 +229,30 @@ func TestValidateGroupCacheEventPayload(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "申请创建事件缺少申请快照",
+			payload: groupevent.GroupCacheEventPayload{
+				EventID:   "evt-3",
+				Action:    groupevent.ActionJoinRequestCreated,
+				GroupUUID: "group-1",
+			},
+			wantErr: true,
+		},
+		{
+			name: "申请处理事件最小载荷合法",
+			payload: groupevent.GroupCacheEventPayload{
+				EventID:   "evt-4",
+				Action:    groupevent.ActionJoinRequestReviewed,
+				GroupUUID: "group-1",
+				JoinRequest: &groupevent.GroupJoinRequestSnapshot{
+					ApplyID:         11,
+					ApplicantUUID:   "user-1",
+					Reason:          "申请加入",
+					CreatedAtUnixMs: time.Unix(1710000200, 0).UnixMilli(),
+				},
+			},
+			wantErr: false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -168,25 +265,22 @@ func TestValidateGroupCacheEventPayload(t *testing.T) {
 		})
 	}
 }
+
 func TestCollectProjectedUserUUIDs(t *testing.T) {
 	payloadWithExplicitUsers := groupevent.GroupCacheEventPayload{
 		UserUUIDs: []string{"user-1", "user-2"},
-		Members: []groupevent.GroupMemberSnapshot{
-			{UserUUID: "ignored-user"},
-		},
+		Members:   []groupevent.GroupMemberSnapshot{{UserUUID: "ignored-user"}},
 	}
 	assert.Equal(t, []string{"user-1", "user-2"}, collectProjectedUserUUIDs(payloadWithExplicitUsers))
+
 	payloadWithMembers := groupevent.GroupCacheEventPayload{
-		Members: []groupevent.GroupMemberSnapshot{
-			{UserUUID: "user-1"},
-			{UserUUID: "user-1"},
-			{UserUUID: "user-2"},
-		},
+		Members: []groupevent.GroupMemberSnapshot{{UserUUID: "user-1"}, {UserUUID: "user-1"}, {UserUUID: "user-2"}},
 	}
 	// 当事件没有显式 user_uuids 时，projector 需要从成员快照中回退提取并去重，
 	// 这样新增成员和恢复成员都能稳定更新 user_groups 反向索引。
 	assert.Equal(t, []string{"user-1", "user-2"}, collectProjectedUserUUIDs(payloadWithMembers))
 }
+
 func deletedAt(t time.Time) gorm.DeletedAt {
 	return gorm.DeletedAt{Time: t, Valid: true}
 }
