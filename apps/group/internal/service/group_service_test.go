@@ -28,9 +28,12 @@ type fakeGroupRepoForService struct {
 	applyJoinGroupFn   func(context.Context, string, string, string) (repository.ApplyJoinGroupResult, error)
 	cancelJoinApplyFn  func(context.Context, string, string) error
 	getMyJoinApplyFn   func(context.Context, string, string) (*model.GroupJoinRequest, error)
+	listMyJoinAppsFn   func(context.Context, string, int, int) ([]*model.GroupJoinRequest, int64, error)
 	reviewJoinGroupFn  func(context.Context, string, string, int64, int8, string) error
 	listJoinReqsFn     func(context.Context, string, string, int, int) ([]*model.GroupJoinRequest, int64, error)
+	listReviewedFn     func(context.Context, string, string, int, int) ([]*model.GroupJoinRequest, int64, error)
 	getGroupInfoFn     func(context.Context, string) (*model.GroupInfo, error)
+	getGroupsByUUIDsFn func(context.Context, []string) (map[string]*model.GroupInfo, error)
 	getGroupMembersFn  func(context.Context, string) ([]*model.GroupMember, error)
 	checkMemberFn      func(context.Context, string, string) (bool, int8, error)
 	listUserGroupsFn   func(context.Context, string) ([]*model.GroupInfo, error)
@@ -103,6 +106,12 @@ func (f *fakeGroupRepoForService) GetMyJoinGroupApplication(ctx context.Context,
 	}
 	return f.getMyJoinApplyFn(ctx, groupUUID, applicantUUID)
 }
+func (f *fakeGroupRepoForService) ListMyJoinGroupApplications(ctx context.Context, applicantUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+	if f.listMyJoinAppsFn == nil {
+		return []*model.GroupJoinRequest{}, 0, nil
+	}
+	return f.listMyJoinAppsFn(ctx, applicantUUID, page, pageSize)
+}
 func (f *fakeGroupRepoForService) ReviewJoinGroup(ctx context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error {
 	if f.reviewJoinGroupFn == nil {
 		return nil
@@ -115,11 +124,23 @@ func (f *fakeGroupRepoForService) ListJoinRequests(ctx context.Context, groupUUI
 	}
 	return f.listJoinReqsFn(ctx, groupUUID, operatorUUID, page, pageSize)
 }
+func (f *fakeGroupRepoForService) ListReviewedJoinRequests(ctx context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+	if f.listReviewedFn == nil {
+		return []*model.GroupJoinRequest{}, 0, nil
+	}
+	return f.listReviewedFn(ctx, groupUUID, operatorUUID, page, pageSize)
+}
 func (f *fakeGroupRepoForService) GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error) {
 	if f.getGroupInfoFn == nil {
 		return nil, repository.ErrRecordNotFound
 	}
 	return f.getGroupInfoFn(ctx, groupUUID)
+}
+func (f *fakeGroupRepoForService) GetGroupsByUUIDs(ctx context.Context, groupUUIDs []string) (map[string]*model.GroupInfo, error) {
+	if f.getGroupsByUUIDsFn == nil {
+		return map[string]*model.GroupInfo{}, nil
+	}
+	return f.getGroupsByUUIDsFn(ctx, groupUUIDs)
 }
 func (f *fakeGroupRepoForService) GetGroupMembers(ctx context.Context, groupUUID string) ([]*model.GroupMember, error) {
 	if f.getGroupMembersFn == nil {
@@ -602,4 +623,119 @@ func TestGetMemberListBuildsProfileAwareItems(t *testing.T) {
 	assert.Equal(t, "owner.png", resp.GetMembers()[0].GetAvatar())
 	assert.Equal(t, "member-1", resp.GetMembers()[1].GetUserUuid())
 	assert.Equal(t, "成员", resp.GetMembers()[1].GetNickname())
+}
+
+func TestListMyJoinGroupApplicationsBuildsGroupAwareItems(t *testing.T) {
+	var gotApplicantUUID string
+	var gotPage int
+	var gotPageSize int
+	var gotGroupUUIDs []string
+	reviewedAt := time.UnixMilli(1710000005000)
+	repo := &fakeGroupRepoForService{
+		listMyJoinAppsFn: func(_ context.Context, applicantUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+			gotApplicantUUID = applicantUUID
+			gotPage = page
+			gotPageSize = pageSize
+			return []*model.GroupJoinRequest{
+				{
+					Id:           101,
+					GroupUuid:    "group-1",
+					Status:       1,
+					Reason:       "想加入群一",
+					ReviewerUuid: "admin-1",
+					ReviewRemark: "已通过",
+					CreatedAt:    time.UnixMilli(1710000000000),
+					ReviewedAt:   &reviewedAt,
+				},
+				{
+					Id:        102,
+					GroupUuid: "group-2",
+					Status:    0,
+					Reason:    "想加入群二",
+					CreatedAt: time.UnixMilli(1710000003000),
+				},
+			}, 2, nil
+		},
+		getGroupsByUUIDsFn: func(_ context.Context, groupUUIDs []string) (map[string]*model.GroupInfo, error) {
+			gotGroupUUIDs = append([]string(nil), groupUUIDs...)
+			return map[string]*model.GroupInfo{
+				"group-1": {Uuid: "group-1", Name: "群一", Avatar: "group-1.png"},
+				"group-2": {Uuid: "group-2", Name: "群二", Avatar: "group-2.png"},
+			}, nil
+		},
+	}
+	svc := NewGroupService(repo)
+	resp, err := svc.ListMyJoinGroupApplications(groupServiceTestContext("user-join"), &pb.ListMyJoinGroupApplicationsRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "user-join", gotApplicantUUID)
+	assert.Equal(t, 1, gotPage)
+	assert.Equal(t, 20, gotPageSize)
+	assert.Equal(t, []string{"group-1", "group-2"}, gotGroupUUIDs)
+	require.Len(t, resp.GetItems(), 2)
+	assert.Equal(t, int64(2), resp.GetTotal())
+	assert.Equal(t, int32(1), resp.GetPage())
+	assert.Equal(t, int32(20), resp.GetPageSize())
+	assert.Equal(t, int64(101), resp.GetItems()[0].GetApplyId())
+	assert.Equal(t, "group-1", resp.GetItems()[0].GetGroupUuid())
+	assert.Equal(t, "群一", resp.GetItems()[0].GetGroupName())
+	assert.Equal(t, "group-1.png", resp.GetItems()[0].GetGroupAvatar())
+	assert.Equal(t, int32(1), resp.GetItems()[0].GetStatus())
+	assert.Equal(t, "已通过", resp.GetItems()[0].GetReviewRemark())
+	assert.Equal(t, reviewedAt.UnixMilli(), resp.GetItems()[0].GetReviewedAt())
+	assert.Equal(t, int64(102), resp.GetItems()[1].GetApplyId())
+	assert.Equal(t, "群二", resp.GetItems()[1].GetGroupName())
+	assert.Equal(t, int32(0), resp.GetItems()[1].GetStatus())
+	assert.Zero(t, resp.GetItems()[1].GetReviewedAt())
+}
+
+func TestListReviewedJoinRequestsBuildsApplicantAwareItems(t *testing.T) {
+	var gotGroupUUID string
+	var gotOperatorUUID string
+	var gotPage int
+	var gotPageSize int
+	var gotUserUUIDs []string
+	reviewedAt := time.UnixMilli(1710000010000)
+	repo := &fakeGroupRepoForService{
+		listReviewedFn: func(_ context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+			gotGroupUUID = groupUUID
+			gotOperatorUUID = operatorUUID
+			gotPage = page
+			gotPageSize = pageSize
+			return []*model.GroupJoinRequest{{
+				Id:            201,
+				ApplicantUuid: "user-a",
+				Status:        2,
+				Reason:        "资料不完整",
+				ReviewerUuid:  "admin-reviewer",
+				ReviewRemark:  "已拒绝",
+				CreatedAt:     time.UnixMilli(1710000006000),
+				ReviewedAt:    &reviewedAt,
+			}}, 1, nil
+		},
+		getUserProfilesFn: func(_ context.Context, userUUIDs []string) (map[string]*model.UserProfile, error) {
+			gotUserUUIDs = append([]string(nil), userUUIDs...)
+			return map[string]*model.UserProfile{
+				"user-a": {UserUuid: "user-a", Nickname: "申请人A", Avatar: "user-a.png"},
+			}, nil
+		},
+	}
+	svc := NewGroupService(repo)
+	resp, err := svc.ListReviewedJoinRequests(groupServiceTestContext("admin-reviewer"), &pb.ListReviewedJoinRequestsRequest{GroupUuid: " group-review ", Page: 2, PageSize: 50})
+	require.NoError(t, err)
+	assert.Equal(t, "group-review", gotGroupUUID)
+	assert.Equal(t, "admin-reviewer", gotOperatorUUID)
+	assert.Equal(t, 2, gotPage)
+	assert.Equal(t, 50, gotPageSize)
+	assert.Equal(t, []string{"user-a"}, gotUserUUIDs)
+	require.Len(t, resp.GetItems(), 1)
+	assert.Equal(t, int64(1), resp.GetTotal())
+	assert.Equal(t, int32(2), resp.GetPage())
+	assert.Equal(t, int32(50), resp.GetPageSize())
+	assert.Equal(t, int64(201), resp.GetItems()[0].GetApplyId())
+	assert.Equal(t, "user-a", resp.GetItems()[0].GetApplicantUuid())
+	assert.Equal(t, "申请人A", resp.GetItems()[0].GetNickname())
+	assert.Equal(t, "user-a.png", resp.GetItems()[0].GetAvatar())
+	assert.Equal(t, int32(2), resp.GetItems()[0].GetStatus())
+	assert.Equal(t, "已拒绝", resp.GetItems()[0].GetReviewRemark())
+	assert.Equal(t, reviewedAt.UnixMilli(), resp.GetItems()[0].GetReviewedAt())
 }

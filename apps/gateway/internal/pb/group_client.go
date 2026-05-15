@@ -69,6 +69,11 @@ func (c *groupServiceClientImpl) GetMyJoinGroupApplication(ctx context.Context, 
 	return c.groupClient.GetMyJoinGroupApplication(ctx, req)
 }
 
+// ListMyJoinGroupApplications 转发当前用户发起的入群申请列表查询请求。
+func (c *groupServiceClientImpl) ListMyJoinGroupApplications(ctx context.Context, req *grouppb.ListMyJoinGroupApplicationsRequest) (*grouppb.ListMyJoinGroupApplicationsResponse, error) {
+	return c.groupClient.ListMyJoinGroupApplications(ctx, req)
+}
+
 // ReviewJoinGroup 转发审批入群申请请求。
 func (c *groupServiceClientImpl) ReviewJoinGroup(ctx context.Context, req *grouppb.ReviewJoinGroupRequest) (*grouppb.ReviewJoinGroupResponse, error) {
 	return c.groupClient.ReviewJoinGroup(ctx, req)
@@ -77,6 +82,11 @@ func (c *groupServiceClientImpl) ReviewJoinGroup(ctx context.Context, req *group
 // ListJoinRequests 转发待审批入群申请列表请求。
 func (c *groupServiceClientImpl) ListJoinRequests(ctx context.Context, req *grouppb.ListJoinRequestsRequest) (*grouppb.ListJoinRequestsResponse, error) {
 	return c.groupClient.ListJoinRequests(ctx, req)
+}
+
+// ListReviewedJoinRequests 转发群已审批申请列表请求。
+func (c *groupServiceClientImpl) ListReviewedJoinRequests(ctx context.Context, req *grouppb.ListReviewedJoinRequestsRequest) (*grouppb.ListReviewedJoinRequestsResponse, error) {
+	return c.groupClient.ListReviewedJoinRequests(ctx, req)
 }
 
 // AddMember 转发添加群成员请求。

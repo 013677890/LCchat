@@ -56,12 +56,18 @@ type IGroupRepository interface {
 	CancelJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) error
 	// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
 	GetMyJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) (*model.GroupJoinRequest, error)
+	// ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
+	ListMyJoinGroupApplications(ctx context.Context, applicantUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error)
 	// ReviewJoinGroup 审批入群申请。
 	ReviewJoinGroup(ctx context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error
 	// ListJoinRequests 获取群待审批入群申请列表。
 	ListJoinRequests(ctx context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error)
+	// ListReviewedJoinRequests 获取群已审批入群申请列表。
+	ListReviewedJoinRequests(ctx context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error)
 	// GetGroupInfo 按群 UUID 获取有效群资料。
 	GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error)
+	// GetGroupsByUUIDs 按群 UUID 批量查询群资料，用于申请列表补齐展示字段。
+	GetGroupsByUUIDs(ctx context.Context, groupUUIDs []string) (map[string]*model.GroupInfo, error)
 	// GetGroupMembers 获取群内有效成员列表。
 	GetGroupMembers(ctx context.Context, groupUUID string) ([]*model.GroupMember, error)
 	// CheckGroupMember 检查指定用户是否仍是群内有效成员，并返回角色。

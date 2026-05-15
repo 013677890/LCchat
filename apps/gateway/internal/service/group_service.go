@@ -92,6 +92,17 @@ func (s *GroupServiceImpl) GetMyJoinGroupApplication(ctx context.Context, req *d
 	return dto.ConvertGetMyJoinGroupApplicationResponseFromProto(resp), nil
 }
 
+// ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
+func (s *GroupServiceImpl) ListMyJoinGroupApplications(ctx context.Context, req *dto.ListMyJoinGroupApplicationsRequest) (*dto.ListMyJoinGroupApplicationsResponse, error) {
+	// gateway 只负责转发分页参数，不在这里二次聚合群资料，
+	// 这样可以保证列表读模型始终由 group-service 单点维护。
+	resp, err := s.groupClient.ListMyJoinGroupApplications(ctx, dto.ConvertToProtoListMyJoinGroupApplicationsRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return dto.ConvertListMyJoinGroupApplicationsResponseFromProto(resp), nil
+}
+
 // ReviewJoinGroup 审批入群申请。
 func (s *GroupServiceImpl) ReviewJoinGroup(ctx context.Context, req *dto.ReviewJoinGroupRequest) error {
 	_, err := s.groupClient.ReviewJoinGroup(ctx, dto.ConvertToProtoReviewJoinGroupRequest(req))
@@ -105,6 +116,17 @@ func (s *GroupServiceImpl) ListJoinRequests(ctx context.Context, req *dto.ListJo
 		return nil, err
 	}
 	return dto.ConvertListJoinRequestsResponseFromProto(resp), nil
+}
+
+// ListReviewedJoinRequests 获取群已审批申请列表。
+func (s *GroupServiceImpl) ListReviewedJoinRequests(ctx context.Context, req *dto.ListReviewedJoinRequestsRequest) (*dto.ListReviewedJoinRequestsResponse, error) {
+	// 审批记录的申请人资料和审批结果都由下游一次性组装完成，
+	// gateway 只做协议转换，避免把管理规则复制到接入层。
+	resp, err := s.groupClient.ListReviewedJoinRequests(ctx, dto.ConvertToProtoListReviewedJoinRequestsRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return dto.ConvertListReviewedJoinRequestsResponseFromProto(resp), nil
 }
 
 // AddMember 添加群成员。

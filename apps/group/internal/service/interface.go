@@ -33,10 +33,14 @@ type IGroupService interface {
 	CancelJoinGroupApplication(ctx context.Context, req *pb.CancelJoinGroupApplicationRequest) error
 	// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
 	GetMyJoinGroupApplication(ctx context.Context, req *pb.GetMyJoinGroupApplicationRequest) (*pb.GetMyJoinGroupApplicationResponse, error)
+	// ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
+	ListMyJoinGroupApplications(ctx context.Context, req *pb.ListMyJoinGroupApplicationsRequest) (*pb.ListMyJoinGroupApplicationsResponse, error)
 	// ReviewJoinGroup 审批入群申请。
 	ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGroupRequest) error
 	// ListJoinRequests 获取群待审批申请列表。
 	ListJoinRequests(ctx context.Context, req *pb.ListJoinRequestsRequest) (*pb.ListJoinRequestsResponse, error)
+	// ListReviewedJoinRequests 获取群已审批申请列表。
+	ListReviewedJoinRequests(ctx context.Context, req *pb.ListReviewedJoinRequestsRequest) (*pb.ListReviewedJoinRequestsResponse, error)
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *pb.AddMemberRequest) error
 	// RemoveMember 移除群成员。

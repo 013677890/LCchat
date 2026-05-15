@@ -187,10 +187,14 @@ type GroupService interface {
 	CancelJoinGroupApplication(ctx context.Context, req *dto.CancelJoinGroupApplicationRequest) error
 	// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
 	GetMyJoinGroupApplication(ctx context.Context, req *dto.GetMyJoinGroupApplicationRequest) (*dto.GetMyJoinGroupApplicationResponse, error)
+	// ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
+	ListMyJoinGroupApplications(ctx context.Context, req *dto.ListMyJoinGroupApplicationsRequest) (*dto.ListMyJoinGroupApplicationsResponse, error)
 	// ReviewJoinGroup 审批入群申请。
 	ReviewJoinGroup(ctx context.Context, req *dto.ReviewJoinGroupRequest) error
 	// ListJoinRequests 获取待审批入群申请列表。
 	ListJoinRequests(ctx context.Context, req *dto.ListJoinRequestsRequest) (*dto.ListJoinRequestsResponse, error)
+	// ListReviewedJoinRequests 获取群已审批申请列表。
+	ListReviewedJoinRequests(ctx context.Context, req *dto.ListReviewedJoinRequestsRequest) (*dto.ListReviewedJoinRequestsResponse, error)
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *dto.AddGroupMemberRequest) error
 	// RemoveMember 移除群成员。

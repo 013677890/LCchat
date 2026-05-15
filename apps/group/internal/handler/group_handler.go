@@ -78,6 +78,11 @@ func (h *GroupHandler) GetMyJoinGroupApplication(ctx context.Context, req *pb.Ge
 	return h.groupService.GetMyJoinGroupApplication(ctx, req)
 }
 
+// ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
+func (h *GroupHandler) ListMyJoinGroupApplications(ctx context.Context, req *pb.ListMyJoinGroupApplicationsRequest) (*pb.ListMyJoinGroupApplicationsResponse, error) {
+	return h.groupService.ListMyJoinGroupApplications(ctx, req)
+}
+
 // ReviewJoinGroup 审批入群申请。
 func (h *GroupHandler) ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGroupRequest) (*pb.ReviewJoinGroupResponse, error) {
 	return &pb.ReviewJoinGroupResponse{}, h.groupService.ReviewJoinGroup(ctx, req)
@@ -86,6 +91,11 @@ func (h *GroupHandler) ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGr
 // ListJoinRequests 获取群待审批申请列表。
 func (h *GroupHandler) ListJoinRequests(ctx context.Context, req *pb.ListJoinRequestsRequest) (*pb.ListJoinRequestsResponse, error) {
 	return h.groupService.ListJoinRequests(ctx, req)
+}
+
+// ListReviewedJoinRequests 获取群已审批申请列表。
+func (h *GroupHandler) ListReviewedJoinRequests(ctx context.Context, req *pb.ListReviewedJoinRequestsRequest) (*pb.ListReviewedJoinRequestsResponse, error) {
+	return h.groupService.ListReviewedJoinRequests(ctx, req)
 }
 
 // AddMember 添加群成员。

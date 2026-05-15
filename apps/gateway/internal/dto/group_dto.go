@@ -177,6 +177,76 @@ func ConvertGetMyJoinGroupApplicationResponseFromProto(pb *grouppb.GetMyJoinGrou
 	return resp
 }
 
+// MyJoinGroupApplicationListItemDTO 当前用户发起的入群申请列表项。
+type MyJoinGroupApplicationListItemDTO struct {
+	ApplyID      int64  `json:"applyId"`
+	GroupUUID    string `json:"groupUuid"`
+	GroupName    string `json:"groupName"`
+	GroupAvatar  string `json:"groupAvatar"`
+	Status       int32  `json:"status"`
+	Reason       string `json:"reason"`
+	ReviewerUUID string `json:"reviewerUuid"`
+	ReviewRemark string `json:"reviewRemark"`
+	CreatedAt    int64  `json:"createdAt"`
+	ReviewedAt   int64  `json:"reviewedAt"`
+}
+
+// ListMyJoinGroupApplicationsRequest 获取当前用户发起的入群申请列表请求。
+type ListMyJoinGroupApplicationsRequest struct {
+	Page     int32 `form:"page" json:"page" binding:"omitempty,min=1"`
+	PageSize int32 `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"`
+}
+
+// ListMyJoinGroupApplicationsResponse 获取当前用户发起的入群申请列表响应。
+type ListMyJoinGroupApplicationsResponse struct {
+	Items    []*MyJoinGroupApplicationListItemDTO `json:"items"`
+	Total    int64                                `json:"total"`
+	Page     int32                                `json:"page"`
+	PageSize int32                                `json:"pageSize"`
+}
+
+// ConvertToProtoListMyJoinGroupApplicationsRequest 把“我的申请列表”DTO 转成 proto 请求。
+func ConvertToProtoListMyJoinGroupApplicationsRequest(dto *ListMyJoinGroupApplicationsRequest) *grouppb.ListMyJoinGroupApplicationsRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.ListMyJoinGroupApplicationsRequest{
+		Page:     dto.Page,
+		PageSize: dto.PageSize,
+	}
+}
+
+// ConvertListMyJoinGroupApplicationsResponseFromProto 把“我的申请列表”proto 响应转成 HTTP DTO。
+func ConvertListMyJoinGroupApplicationsResponseFromProto(pb *grouppb.ListMyJoinGroupApplicationsResponse) *ListMyJoinGroupApplicationsResponse {
+	if pb == nil {
+		return nil
+	}
+	items := make([]*MyJoinGroupApplicationListItemDTO, 0, len(pb.GetItems()))
+	for _, item := range pb.GetItems() {
+		if item == nil {
+			continue
+		}
+		items = append(items, &MyJoinGroupApplicationListItemDTO{
+			ApplyID:      item.GetApplyId(),
+			GroupUUID:    item.GetGroupUuid(),
+			GroupName:    item.GetGroupName(),
+			GroupAvatar:  item.GetGroupAvatar(),
+			Status:       item.GetStatus(),
+			Reason:       item.GetReason(),
+			ReviewerUUID: item.GetReviewerUuid(),
+			ReviewRemark: item.GetReviewRemark(),
+			CreatedAt:    item.GetCreatedAt(),
+			ReviewedAt:   item.GetReviewedAt(),
+		})
+	}
+	return &ListMyJoinGroupApplicationsResponse{
+		Items:    items,
+		Total:    pb.GetTotal(),
+		Page:     pb.GetPage(),
+		PageSize: pb.GetPageSize(),
+	}
+}
+
 // ReviewJoinGroupRequest 审批入群申请请求。
 type ReviewJoinGroupRequest struct {
 	GroupUUID string `json:"groupUuid"`
@@ -255,6 +325,78 @@ func ConvertListJoinRequestsResponseFromProto(pb *grouppb.ListJoinRequestsRespon
 		})
 	}
 	return &ListJoinRequestsResponse{
+		Items:    items,
+		Total:    pb.GetTotal(),
+		Page:     pb.GetPage(),
+		PageSize: pb.GetPageSize(),
+	}
+}
+
+// ReviewedJoinRequestItemDTO 已审批入群申请项 DTO。
+type ReviewedJoinRequestItemDTO struct {
+	ApplyID       int64  `json:"applyId"`
+	ApplicantUUID string `json:"applicantUuid"`
+	Nickname      string `json:"nickname"`
+	Avatar        string `json:"avatar"`
+	Status        int32  `json:"status"`
+	Reason        string `json:"reason"`
+	ReviewerUUID  string `json:"reviewerUuid"`
+	ReviewRemark  string `json:"reviewRemark"`
+	CreatedAt     int64  `json:"createdAt"`
+	ReviewedAt    int64  `json:"reviewedAt"`
+}
+
+// ListReviewedJoinRequestsRequest 获取群已审批入群申请列表请求。
+type ListReviewedJoinRequestsRequest struct {
+	GroupUUID string `json:"groupUuid"`
+	Page      int32  `form:"page" json:"page" binding:"omitempty,min=1"`
+	PageSize  int32  `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"`
+}
+
+// ListReviewedJoinRequestsResponse 获取群已审批入群申请列表响应。
+type ListReviewedJoinRequestsResponse struct {
+	Items    []*ReviewedJoinRequestItemDTO `json:"items"`
+	Total    int64                         `json:"total"`
+	Page     int32                         `json:"page"`
+	PageSize int32                         `json:"pageSize"`
+}
+
+// ConvertToProtoListReviewedJoinRequestsRequest 把审批记录列表 DTO 转成 proto 请求。
+func ConvertToProtoListReviewedJoinRequestsRequest(dto *ListReviewedJoinRequestsRequest) *grouppb.ListReviewedJoinRequestsRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.ListReviewedJoinRequestsRequest{
+		GroupUuid: dto.GroupUUID,
+		Page:      dto.Page,
+		PageSize:  dto.PageSize,
+	}
+}
+
+// ConvertListReviewedJoinRequestsResponseFromProto 把审批记录列表 proto 响应转成 HTTP DTO。
+func ConvertListReviewedJoinRequestsResponseFromProto(pb *grouppb.ListReviewedJoinRequestsResponse) *ListReviewedJoinRequestsResponse {
+	if pb == nil {
+		return nil
+	}
+	items := make([]*ReviewedJoinRequestItemDTO, 0, len(pb.GetItems()))
+	for _, item := range pb.GetItems() {
+		if item == nil {
+			continue
+		}
+		items = append(items, &ReviewedJoinRequestItemDTO{
+			ApplyID:       item.GetApplyId(),
+			ApplicantUUID: item.GetApplicantUuid(),
+			Nickname:      item.GetNickname(),
+			Avatar:        item.GetAvatar(),
+			Status:        item.GetStatus(),
+			Reason:        item.GetReason(),
+			ReviewerUUID:  item.GetReviewerUuid(),
+			ReviewRemark:  item.GetReviewRemark(),
+			CreatedAt:     item.GetCreatedAt(),
+			ReviewedAt:    item.GetReviewedAt(),
+		})
+	}
+	return &ListReviewedJoinRequestsResponse{
 		Items:    items,
 		Total:    pb.GetTotal(),
 		Page:     pb.GetPage(),

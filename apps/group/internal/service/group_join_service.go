@@ -107,6 +107,37 @@ func (s *groupServiceImpl) GetMyJoinGroupApplication(ctx context.Context, req *p
 	}, nil
 }
 
+// ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
+func (s *groupServiceImpl) ListMyJoinGroupApplications(ctx context.Context, req *pb.ListMyJoinGroupApplicationsRequest) (*pb.ListMyJoinGroupApplicationsResponse, error) {
+	currentUserUUID := util.GetUserUUIDFromContext(ctx)
+	if currentUserUUID == "" {
+		return nil, apperr.New(consts.CodeUnauthorized)
+	}
+	if req == nil {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	page, pageSize := normalizeJoinRequestPage(req.GetPage(), req.GetPageSize())
+	items, total, err := s.groupRepo.ListMyJoinGroupApplications(ctx, currentUserUUID, page, pageSize)
+	if err != nil {
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取我的入群申请列表失败")
+	}
+	// 用户侧列表需要直接展示群名称和头像，因此在 service 层一次性补齐群资料，
+	// 避免 gateway 为了渲染列表再额外回查一轮群信息。
+	groupUUIDs := collectJoinRequestGroupUUIDs(items)
+	groups, err := s.groupRepo.GetGroupsByUUIDs(ctx, groupUUIDs)
+	if err != nil {
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询申请关联群资料失败")
+	}
+	respItems := make([]*pb.MyJoinGroupApplicationListItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		respItems = append(respItems, buildMyJoinGroupApplicationListItemProto(item, groups[item.GroupUuid]))
+	}
+	return &pb.ListMyJoinGroupApplicationsResponse{Items: respItems, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
+}
+
 // ReviewJoinGroup 审批入群申请。
 func (s *groupServiceImpl) ReviewJoinGroup(ctx context.Context, req *pb.ReviewJoinGroupRequest) error {
 	currentUserUUID := util.GetUserUUIDFromContext(ctx)
@@ -152,6 +183,7 @@ func (s *groupServiceImpl) ListJoinRequests(ctx context.Context, req *pb.ListJoi
 	if err != nil {
 		return nil, mapGroupWriteError(err, "获取入群申请列表失败")
 	}
+	// 审批侧列表按“申请事实 + 申请人资料”输出，先批量补齐资料可以避免逐条查询造成 N+1。
 	userUUIDs := collectJoinRequestApplicantUUIDs(items)
 	profiles, err := s.groupRepo.GetUserProfiles(ctx, userUUIDs)
 	if err != nil {
@@ -167,15 +199,52 @@ func (s *groupServiceImpl) ListJoinRequests(ctx context.Context, req *pb.ListJoi
 	return &pb.ListJoinRequestsResponse{Items: respItems, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
 }
 
+// ListReviewedJoinRequests 获取群已审批申请列表。
+func (s *groupServiceImpl) ListReviewedJoinRequests(ctx context.Context, req *pb.ListReviewedJoinRequestsRequest) (*pb.ListReviewedJoinRequestsResponse, error) {
+	currentUserUUID := util.GetUserUUIDFromContext(ctx)
+	if currentUserUUID == "" {
+		return nil, apperr.New(consts.CodeUnauthorized)
+	}
+	if req == nil {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	groupUUID := strings.TrimSpace(req.GetGroupUuid())
+	if groupUUID == "" {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	page, pageSize := normalizeJoinRequestPage(req.GetPage(), req.GetPageSize())
+	items, total, err := s.groupRepo.ListReviewedJoinRequests(ctx, groupUUID, currentUserUUID, page, pageSize)
+	if err != nil {
+		return nil, mapGroupWriteError(err, "获取审批记录列表失败")
+	}
+	// 审批记录列表同样需要回显申请人资料，这里复用批量聚合策略，避免管理端列表退化成多次回源。
+	userUUIDs := collectJoinRequestApplicantUUIDs(items)
+	profiles, err := s.groupRepo.GetUserProfiles(ctx, userUUIDs)
+	if err != nil {
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询审批记录申请人资料失败")
+	}
+	respItems := make([]*pb.ReviewedJoinRequestItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		respItems = append(respItems, buildReviewedJoinRequestItemProto(item, profiles[item.ApplicantUuid]))
+	}
+	return &pb.ListReviewedJoinRequestsResponse{Items: respItems, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
+}
+
 // normalizeJoinRequestPage 归一化入群申请分页参数。
 func normalizeJoinRequestPage(page, pageSize int32) (int, int) {
 	if page <= 0 {
+		// 列表接口统一回退到第一页，避免把无效页码继续透传到仓储层。
 		page = 1
 	}
 	if pageSize <= 0 {
+		// 默认页大小取 20，兼顾管理列表可读性和单次查询成本。
 		pageSize = 20
 	}
 	if pageSize > 100 {
+		// 上限收敛到 100，避免一次拉太多审批记录压垮数据库和网络负载。
 		pageSize = 100
 	}
 	return int(page), int(pageSize)
@@ -197,6 +266,26 @@ func collectJoinRequestApplicantUUIDs(items []*model.GroupJoinRequest) []string 
 		}
 		seen[item.ApplicantUuid] = struct{}{}
 		result = append(result, item.ApplicantUuid)
+	}
+	return result
+}
+
+// collectJoinRequestGroupUUIDs 提取申请关联的群 UUID，供批量补齐群展示资料。
+func collectJoinRequestGroupUUIDs(items []*model.GroupJoinRequest) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.GroupUuid == "" {
+			continue
+		}
+		if _, exists := seen[item.GroupUuid]; exists {
+			continue
+		}
+		seen[item.GroupUuid] = struct{}{}
+		result = append(result, item.GroupUuid)
 	}
 	return result
 }

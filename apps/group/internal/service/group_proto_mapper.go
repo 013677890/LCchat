@@ -100,3 +100,57 @@ func buildMyJoinGroupApplicationProto(request *model.GroupJoinRequest) *pb.MyJoi
 	}
 	return item
 }
+
+// buildMyJoinGroupApplicationListItemProto 将“我的入群申请列表”项组装成 proto 响应。
+//
+// 这里把申请事实和群展示资料聚合到一起，避免 gateway 为了列表展示再次回查群资料，
+// 让用户侧可以直接拿到群名称、头像和申请流转状态。
+func buildMyJoinGroupApplicationListItemProto(request *model.GroupJoinRequest, group *model.GroupInfo) *pb.MyJoinGroupApplicationListItem {
+	if request == nil || request.Id <= 0 || request.GroupUuid == "" {
+		return nil
+	}
+	item := &pb.MyJoinGroupApplicationListItem{
+		ApplyId:      request.Id,
+		GroupUuid:    request.GroupUuid,
+		Status:       int32(request.Status),
+		Reason:       request.Reason,
+		ReviewerUuid: request.ReviewerUuid,
+		ReviewRemark: request.ReviewRemark,
+		CreatedAt:    request.CreatedAt.UnixMilli(),
+	}
+	if request.ReviewedAt != nil {
+		item.ReviewedAt = request.ReviewedAt.UnixMilli()
+	}
+	if group != nil {
+		item.GroupName = group.Name
+		item.GroupAvatar = group.Avatar
+	}
+	return item
+}
+
+// buildReviewedJoinRequestItemProto 将审批记录与申请人资料组装成 proto 响应项。
+//
+// 审批记录列表不仅要展示申请人信息，还要回显审批结果与处理备注，
+// 因此这里统一输出完整的审批事实读模型。
+func buildReviewedJoinRequestItemProto(request *model.GroupJoinRequest, profile *model.UserProfile) *pb.ReviewedJoinRequestItem {
+	if request == nil || request.Id <= 0 || request.ApplicantUuid == "" {
+		return nil
+	}
+	item := &pb.ReviewedJoinRequestItem{
+		ApplyId:       request.Id,
+		ApplicantUuid: request.ApplicantUuid,
+		Status:        int32(request.Status),
+		Reason:        request.Reason,
+		ReviewerUuid:  request.ReviewerUuid,
+		ReviewRemark:  request.ReviewRemark,
+		CreatedAt:     request.CreatedAt.UnixMilli(),
+	}
+	if request.ReviewedAt != nil {
+		item.ReviewedAt = request.ReviewedAt.UnixMilli()
+	}
+	if profile != nil {
+		item.Nickname = profile.Nickname
+		item.Avatar = profile.Avatar
+	}
+	return item
+}

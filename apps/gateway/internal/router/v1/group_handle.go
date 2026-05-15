@@ -206,6 +206,23 @@ func (h *GroupHandler) GetMyJoinGroupApplication(c *gin.Context) {
 	result.Success(c, resp)
 }
 
+// ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
+func (h *GroupHandler) ListMyJoinGroupApplications(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+	var req dto.ListMyJoinGroupApplicationsRequest
+	// 该接口是“当前登录用户”的全局申请列表，只接收分页参数，不依赖群路径参数。
+	if err := c.ShouldBindQuery(&req); err != nil {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	resp, err := h.groupService.ListMyJoinGroupApplications(ctx, &req)
+	if err != nil {
+		handleGroupError(c, err)
+		return
+	}
+	result.Success(c, resp)
+}
+
 // ReviewJoinGroup 审批入群申请。
 func (h *GroupHandler) ReviewJoinGroup(c *gin.Context) {
 	ctx := middleware.NewContextWithGin(c)
@@ -316,6 +333,29 @@ func (h *GroupHandler) ListJoinRequests(c *gin.Context) {
 	}
 	req.GroupUUID = groupUUID
 	resp, err := h.groupService.ListJoinRequests(ctx, &req)
+	if err != nil {
+		handleGroupError(c, err)
+		return
+	}
+	result.Success(c, resp)
+}
+
+// ListReviewedJoinRequests 获取群已审批申请列表。
+func (h *GroupHandler) ListReviewedJoinRequests(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+	groupUUID := c.Param("groupUuid")
+	if groupUUID == "" {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	var req dto.ListReviewedJoinRequestsRequest
+	// 路由参数决定审批记录的群范围，query 只负责分页，避免请求体里再传一份重复 group_uuid。
+	if err := c.ShouldBindQuery(&req); err != nil {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+	req.GroupUUID = groupUUID
+	resp, err := h.groupService.ListReviewedJoinRequests(ctx, &req)
 	if err != nil {
 		handleGroupError(c, err)
 		return

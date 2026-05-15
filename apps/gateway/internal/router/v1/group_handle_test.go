@@ -21,8 +21,10 @@ type fakeGroupHTTPService struct {
 	applyJoinGroupFn    func(context.Context, *dto.ApplyJoinGroupRequest) (*dto.ApplyJoinGroupResponse, error)
 	cancelJoinApplyFn   func(context.Context, *dto.CancelJoinGroupApplicationRequest) error
 	getMyJoinApplyFn    func(context.Context, *dto.GetMyJoinGroupApplicationRequest) (*dto.GetMyJoinGroupApplicationResponse, error)
+	listMyJoinAppsFn    func(context.Context, *dto.ListMyJoinGroupApplicationsRequest) (*dto.ListMyJoinGroupApplicationsResponse, error)
 	reviewJoinGroupFn   func(context.Context, *dto.ReviewJoinGroupRequest) error
 	listJoinRequestsFn  func(context.Context, *dto.ListJoinRequestsRequest) (*dto.ListJoinRequestsResponse, error)
+	listReviewedFn      func(context.Context, *dto.ListReviewedJoinRequestsRequest) (*dto.ListReviewedJoinRequestsResponse, error)
 }
 
 var _ service.GroupService = (*fakeGroupHTTPService)(nil)
@@ -69,6 +71,12 @@ func (f *fakeGroupHTTPService) GetMyJoinGroupApplication(ctx context.Context, re
 	}
 	return f.getMyJoinApplyFn(ctx, req)
 }
+func (f *fakeGroupHTTPService) ListMyJoinGroupApplications(ctx context.Context, req *dto.ListMyJoinGroupApplicationsRequest) (*dto.ListMyJoinGroupApplicationsResponse, error) {
+	if f.listMyJoinAppsFn == nil {
+		return &dto.ListMyJoinGroupApplicationsResponse{}, nil
+	}
+	return f.listMyJoinAppsFn(ctx, req)
+}
 func (f *fakeGroupHTTPService) ReviewJoinGroup(ctx context.Context, req *dto.ReviewJoinGroupRequest) error {
 	if f.reviewJoinGroupFn == nil {
 		return nil
@@ -80,6 +88,12 @@ func (f *fakeGroupHTTPService) ListJoinRequests(ctx context.Context, req *dto.Li
 		return &dto.ListJoinRequestsResponse{}, nil
 	}
 	return f.listJoinRequestsFn(ctx, req)
+}
+func (f *fakeGroupHTTPService) ListReviewedJoinRequests(ctx context.Context, req *dto.ListReviewedJoinRequestsRequest) (*dto.ListReviewedJoinRequestsResponse, error) {
+	if f.listReviewedFn == nil {
+		return &dto.ListReviewedJoinRequestsResponse{}, nil
+	}
+	return f.listReviewedFn(ctx, req)
 }
 func (f *fakeGroupHTTPService) AddMember(context.Context, *dto.AddGroupMemberRequest) error {
 	return nil
@@ -218,6 +232,35 @@ func TestGroupHandlerGetMyJoinGroupApplication(t *testing.T) {
 	assert.Equal(t, consts.CodeSuccess, body.Code)
 	assert.True(t, called)
 }
+func TestGroupHandlerListMyJoinGroupApplications(t *testing.T) {
+	initGatewayGroupHandlerLogger()
+	called := false
+	h := NewGroupHandler(&fakeGroupHTTPService{
+		listMyJoinAppsFn: func(_ context.Context, req *dto.ListMyJoinGroupApplicationsRequest) (*dto.ListMyJoinGroupApplicationsResponse, error) {
+			called = true
+			assert.Equal(t, int32(3), req.Page)
+			assert.Equal(t, int32(10), req.PageSize)
+			return &dto.ListMyJoinGroupApplicationsResponse{
+				Total: 1,
+				Items: []*dto.MyJoinGroupApplicationListItemDTO{{
+					ApplyID:   41,
+					GroupUUID: "group-9",
+					GroupName: "群九",
+				}},
+			}, nil
+		},
+	})
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/groups/join-applications?page=3&pageSize=10", nil)
+	require.NoError(t, err)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	h.ListMyJoinGroupApplications(c)
+	body := decodeGroupHandlerBody(t, w)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, consts.CodeSuccess, body.Code)
+	assert.True(t, called)
+}
 func TestGroupHandlerReviewJoinGroup(t *testing.T) {
 	initGatewayGroupHandlerLogger()
 	t.Run("invalid_apply_id", func(t *testing.T) {
@@ -281,6 +324,36 @@ func TestGroupHandlerListJoinRequests(t *testing.T) {
 	c.Request = req
 	c.Params = gin.Params{{Key: "groupUuid", Value: "group-4"}}
 	h.ListJoinRequests(c)
+	body := decodeGroupHandlerBody(t, w)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, consts.CodeSuccess, body.Code)
+	assert.True(t, called)
+}
+func TestGroupHandlerListReviewedJoinRequests(t *testing.T) {
+	initGatewayGroupHandlerLogger()
+	called := false
+	h := NewGroupHandler(&fakeGroupHTTPService{
+		listReviewedFn: func(_ context.Context, req *dto.ListReviewedJoinRequestsRequest) (*dto.ListReviewedJoinRequestsResponse, error) {
+			called = true
+			assert.Equal(t, "group-reviewed", req.GroupUUID)
+			assert.Equal(t, int32(2), req.Page)
+			assert.Equal(t, int32(30), req.PageSize)
+			return &dto.ListReviewedJoinRequestsResponse{
+				Total: 1,
+				Items: []*dto.ReviewedJoinRequestItemDTO{{
+					ApplyID:       55,
+					ApplicantUUID: "user-reviewed",
+				}},
+			}, nil
+		},
+	})
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/groups/group-reviewed/join-requests/reviewed?page=2&pageSize=30", nil)
+	require.NoError(t, err)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	c.Params = gin.Params{{Key: "groupUuid", Value: "group-reviewed"}}
+	h.ListReviewedJoinRequests(c)
 	body := decodeGroupHandlerBody(t, w)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, consts.CodeSuccess, body.Code)

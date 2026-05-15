@@ -80,8 +80,10 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/groups/:groupUuid":                               2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/notice":                        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/apply":                         2 * time.Second,
+	"/api/v1/auth/groups/join-applications":                        1 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/my-join-application":           1 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/join-requests":                 2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/join-requests/reviewed":        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/join-requests/:applyId/review": 2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/transfer-owner":                2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/members":                       2 * time.Second,
@@ -239,6 +241,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				{
 					groups.POST("", groupHandler.CreateGroup)
 					groups.GET("", groupHandler.GetGroupList)
+					groups.GET("/join-applications", groupHandler.ListMyJoinGroupApplications)
 					groups.GET("/:groupUuid", groupHandler.GetGroupInfo)
 					groups.PATCH("/:groupUuid", groupHandler.UpdateGroupInfo)
 					groups.PUT("/:groupUuid/notice", groupHandler.UpdateGroupNotice)
@@ -246,6 +249,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 					groups.DELETE("/:groupUuid/apply", groupHandler.CancelJoinGroupApplication)
 					groups.GET("/:groupUuid/my-join-application", groupHandler.GetMyJoinGroupApplication)
 					groups.GET("/:groupUuid/join-requests", groupHandler.ListJoinRequests)
+					groups.GET("/:groupUuid/join-requests/reviewed", groupHandler.ListReviewedJoinRequests)
 					groups.POST("/:groupUuid/join-requests/:applyId/review", groupHandler.ReviewJoinGroup)
 					groups.POST("/:groupUuid/transfer-owner", groupHandler.TransferGroupOwner)
 					groups.DELETE("/:groupUuid", groupHandler.DismissGroup)
