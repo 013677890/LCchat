@@ -79,4 +79,3 @@ message MarkReadNotice {
   // read_seq: 已读到的最大 seq。
   int64 read_seq = 2;
 }
-

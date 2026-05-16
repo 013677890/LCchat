@@ -19,16 +19,16 @@ func init() { logger.ReplaceGlobal(zap.NewNop()) }
 // ==================== mock Repository ====================
 
 type mockRepo struct {
-	tryAcquireFn      func(ctx context.Context, from, dev, cid string) (*model.Message, error)
-	setIdempotentFn   func(ctx context.Context, from, dev, cid string, msg *model.Message) error
-	allocSeqFn        func(ctx context.Context, convId string) (int64, error)
-	createFn          func(ctx context.Context, msg *model.Message) error
+	tryAcquireFn        func(ctx context.Context, from, dev, cid string) (*model.Message, error)
+	setIdempotentFn     func(ctx context.Context, from, dev, cid string, msg *model.Message) error
+	allocSeqFn          func(ctx context.Context, convId string) (int64, error)
+	createFn            func(ctx context.Context, msg *model.Message) error
 	getByDuplicateKeyFn func(ctx context.Context, from, dev, cid string) (*model.Message, error)
-	getBySeqRangeFn   func(ctx context.Context, convId string, anchor int64, dir int, limit int, clearSeq int64) ([]*model.Message, error)
-	getByIdsFn        func(ctx context.Context, convId string, ids []string) ([]*model.Message, error)
-	getByIdFn         func(ctx context.Context, convId, msgId string) (*model.Message, error)
-	getMaxSeqFn       func(ctx context.Context, convId string) (int64, error)
-	updateStatusFn    func(ctx context.Context, convId, msgId string, status int8, content string) error
+	getBySeqRangeFn     func(ctx context.Context, convId string, anchor int64, dir int, limit int, clearSeq int64) ([]*model.Message, error)
+	getByIdsFn          func(ctx context.Context, convId string, ids []string) ([]*model.Message, error)
+	getByIdFn           func(ctx context.Context, convId, msgId string) (*model.Message, error)
+	getMaxSeqFn         func(ctx context.Context, convId string) (int64, error)
+	updateStatusFn      func(ctx context.Context, convId, msgId string, status int8, content string) error
 }
 
 func (m *mockRepo) TryAcquireIdempotent(ctx context.Context, from, dev, cid string) (*model.Message, error) {

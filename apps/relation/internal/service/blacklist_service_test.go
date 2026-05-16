@@ -21,13 +21,13 @@ func TestRelationBlacklistServiceAddBlacklist(t *testing.T) {
 	repoErr := errors.New("repo failed")
 
 	tests := []struct {
-		name        string
-		ctx         context.Context
-		req         *pb.AddBlacklistRequest
-		isBlocked   bool
+		name         string
+		ctx          context.Context
+		req          *pb.AddBlacklistRequest
+		isBlocked    bool
 		isBlockedErr error
-		addErr      error
-		wantErr     int
+		addErr       error
+		wantErr      int
 	}{
 		{name: "unauthenticated", ctx: context.Background(), req: &pb.AddBlacklistRequest{TargetUuid: "u2"}, wantErr: consts.CodeUnauthorized},
 		{name: "param_error", ctx: withRelationUserUUID("u1"), req: nil, wantErr: consts.CodeParamError},

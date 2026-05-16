@@ -67,16 +67,30 @@ type GroupServiceClient interface {
 	ListReviewedJoinRequests(ctx context.Context, req *grouppb.ListReviewedJoinRequestsRequest) (*grouppb.ListReviewedJoinRequestsResponse, error)
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *grouppb.AddMemberRequest) (*grouppb.AddMemberResponse, error)
+	// LeaveGroup 当前登录用户主动退出群聊。
+	LeaveGroup(ctx context.Context, req *grouppb.LeaveGroupRequest) (*grouppb.LeaveGroupResponse, error)
 	// RemoveMember 移除群成员。
 	RemoveMember(ctx context.Context, req *grouppb.RemoveMemberRequest) (*grouppb.RemoveMemberResponse, error)
 	// GetMemberList 获取群成员列表。
 	GetMemberList(ctx context.Context, req *grouppb.GetMemberListRequest) (*grouppb.GetMemberListResponse, error)
+	// SearchGroupMembers 搜索群成员。
+	SearchGroupMembers(ctx context.Context, req *grouppb.SearchGroupMembersRequest) (*grouppb.SearchGroupMembersResponse, error)
+	// UpdateMyGroupNickname 更新当前用户自己的群名片。
+	UpdateMyGroupNickname(ctx context.Context, req *grouppb.UpdateMyGroupNicknameRequest) (*grouppb.UpdateMyGroupNicknameResponse, error)
+	// MuteGroupMember 设置或取消指定成员单人禁言。
+	MuteGroupMember(ctx context.Context, req *grouppb.MuteGroupMemberRequest) (*grouppb.MuteGroupMemberResponse, error)
+	// UpdateGroupMuteSetting 更新全员禁言开关。
+	UpdateGroupMuteSetting(ctx context.Context, req *grouppb.UpdateGroupMuteSettingRequest) (*grouppb.UpdateGroupMuteSettingResponse, error)
 	// GetGroupList 获取当前用户群列表。
 	GetGroupList(ctx context.Context, req *grouppb.GetGroupListRequest) (*grouppb.GetGroupListResponse, error)
 	// GetGroupMemberIds 获取群成员 UUID 列表。
 	GetGroupMemberIds(ctx context.Context, req *grouppb.GetGroupMemberIdsRequest) (*grouppb.GetGroupMemberIdsResponse, error)
 	// CheckGroupMember 检查群成员关系与角色。
 	CheckGroupMember(ctx context.Context, req *grouppb.CheckGroupMemberRequest) (*grouppb.CheckGroupMemberResponse, error)
+	// CheckGroupSendPermission 检查指定用户是否允许发送群消息。
+	CheckGroupSendPermission(ctx context.Context, req *grouppb.CheckGroupSendPermissionRequest) (*grouppb.CheckGroupSendPermissionResponse, error)
+	// GetJoinRequestPendingCount 获取群待审批入群申请数量。
+	GetJoinRequestPendingCount(ctx context.Context, req *grouppb.GetJoinRequestPendingCountRequest) (*grouppb.GetJoinRequestPendingCountResponse, error)
 }
 
 // UserServiceClient 用户服务 gRPC 客户端接口

@@ -5,8 +5,8 @@
 package mocks
 
 import (
-	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	context "context"
+	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"

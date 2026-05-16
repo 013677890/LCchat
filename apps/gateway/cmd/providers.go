@@ -1,9 +1,7 @@
 package main
+
 import (
 	"context"
-	"net/http"
-	"os"
-	"time"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/router"
 	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
@@ -20,7 +18,11 @@ import (
 	"github.com/sony/gobreaker"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"net/http"
+	"os"
+	"time"
 )
+
 // 使用别名类型避免 Wire 在多个 string / *grpc.ClientConn / *gobreaker.CircuitBreaker 之间误绑定。
 type gatewayAuthServiceAddr string
 type gatewayUserServiceAddr string
@@ -39,27 +41,35 @@ type gatewayUserConn struct{ value *grpc.ClientConn }
 type gatewayRelationConn struct{ value *grpc.ClientConn }
 type gatewayMsgConn struct{ value *grpc.ClientConn }
 type gatewayGroupConn struct{ value *grpc.ClientConn }
+
 // provideGatewayBaseContext 提供启动期基础上下文。
 // 这个上下文不绑定具体请求，只用于进程启动、降级告警、后台组件初始化等场景。
 func provideGatewayBaseContext() context.Context {
 	return ctxmeta.WithTraceID(context.Background(), "0")
 }
+
 // provideGatewayLoggerConfig 提供日志默认配置。
 func provideGatewayLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
+
 // provideGatewayRedisConfig 提供 Redis 默认配置。
 func provideGatewayRedisConfig() config.RedisConfig { return config.DefaultRedisConfig() }
+
 // provideGatewayAsyncConfig 提供异步协程池默认配置。
 func provideGatewayAsyncConfig() config.AsyncConfig { return config.DefaultAsyncConfig() }
+
 // provideGatewayMinIOConfig 提供对象存储默认配置。
 func provideGatewayMinIOConfig() config.MinIOConfig { return config.DefaultMinIOConfig() }
+
 // provideGatewayDeviceActiveConfig 提供设备活跃同步配置（仅配置，不触发全局副作用）。
 func provideGatewayDeviceActiveConfig() config.DeviceActiveConfig {
 	return config.DefaultDeviceActiveConfig()
 }
+
 // provideGatewayLogger 构建 logger（不注册全局，全局注册在 GatewayApp.Run）。
 func provideGatewayLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
 	return logger.Build(cfg)
 }
+
 // provideGatewayRedisClient 初始化 Redis 客户端。
 // 降级策略：
 // - Redis 不可用时不阻塞 gateway 启动；
@@ -75,6 +85,7 @@ func provideGatewayRedisClient(ctx context.Context, log *zap.Logger, cfg config.
 	logger.Info(ctx, "Redis 初始化成功", logger.String("addr", cfg.Addr))
 	return client, nil
 }
+
 // provideGatewayAsyncPool 构建异步协程池（全局注册在 GatewayApp.Run）。
 func provideGatewayAsyncPool(_ context.Context, cfg config.AsyncConfig) (*ants.Pool, error) {
 	return async.Build(cfg)
@@ -82,6 +93,7 @@ func provideGatewayAsyncPool(_ context.Context, cfg config.AsyncConfig) (*ants.P
 func provideGatewayAsyncReleaseTimeout(cfg config.AsyncConfig) gatewayAsyncReleaseTimeout {
 	return gatewayAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
+
 // provideGatewayMinIOClient 初始化 MinIO 客户端。
 // 降级策略：
 // - MinIO 失败时不阻塞 gateway；
@@ -101,6 +113,7 @@ func provideGatewayMinIOClient(ctx context.Context, log *zap.Logger, cfg config.
 	)
 	return client, nil
 }
+
 // provideGatewayAuthServiceAddr 提供 auth-service 地址。
 func provideGatewayAuthServiceAddr() gatewayAuthServiceAddr {
 	addr := os.Getenv("AUTH_SERVICE_ADDR")
@@ -109,6 +122,7 @@ func provideGatewayAuthServiceAddr() gatewayAuthServiceAddr {
 	}
 	return gatewayAuthServiceAddr(addr)
 }
+
 // provideGatewayUserServiceAddr 提供 user-service 地址。
 func provideGatewayUserServiceAddr() gatewayUserServiceAddr {
 	addr := os.Getenv("USER_SERVICE_ADDR")
@@ -117,6 +131,7 @@ func provideGatewayUserServiceAddr() gatewayUserServiceAddr {
 	}
 	return gatewayUserServiceAddr(addr)
 }
+
 // provideGatewayRelationServiceAddr 提供 relation-service 地址。
 // 这里将好友/黑名单两个子域统一指向同一个 relation-service 入口。
 func provideGatewayRelationServiceAddr() gatewayRelationServiceAddr {
@@ -147,36 +162,42 @@ func provideGatewayHTTPAddr() gatewayHTTPAddr {
 	}
 	return gatewayHTTPAddr(addr)
 }
+
 // provideGatewayAuthBreaker 创建 auth-service 熔断器。
 func provideGatewayAuthBreaker(ctx context.Context) gatewayAuthBreaker {
 	breaker := pb.CreateCircuitBreaker("auth-service")
 	logger.Info(ctx, "认证服务熔断器创建成功", logger.String("name", "auth-service"))
 	return gatewayAuthBreaker{value: breaker}
 }
+
 // provideGatewayUserBreaker 创建 user-service 熔断器。
 func provideGatewayUserBreaker(ctx context.Context) gatewayUserBreaker {
 	breaker := pb.CreateCircuitBreaker("user-service")
 	logger.Info(ctx, "用户服务熔断器创建成功", logger.String("name", "user-service"))
 	return gatewayUserBreaker{value: breaker}
 }
+
 // provideGatewayRelationBreaker 创建 relation-service 熔断器。
 func provideGatewayRelationBreaker(ctx context.Context) gatewayRelationBreaker {
 	breaker := pb.CreateCircuitBreaker("relation-service")
 	logger.Info(ctx, "关系服务熔断器创建成功", logger.String("name", "relation-service"))
 	return gatewayRelationBreaker{value: breaker}
 }
+
 // provideGatewayMsgBreaker 创建 msg-service 熔断器。
 func provideGatewayMsgBreaker(ctx context.Context) gatewayMsgBreaker {
 	breaker := pb.CreateCircuitBreaker("msg-service")
 	logger.Info(ctx, "消息服务熔断器创建成功", logger.String("name", "msg-service"))
 	return gatewayMsgBreaker{value: breaker}
 }
+
 // provideGatewayGroupBreaker 创建 group-service 熔断器。
 func provideGatewayGroupBreaker(ctx context.Context) gatewayGroupBreaker {
 	breaker := pb.CreateCircuitBreaker("group-service")
 	logger.Info(ctx, "群组服务熔断器创建成功", logger.String("name", "group-service"))
 	return gatewayGroupBreaker{value: breaker}
 }
+
 // provideGatewayAuthConn 建立到 auth-service 的 gRPC 连接。
 // 认证、账号安全、设备会话与内部账号查询都依赖该连接，因此不允许降级为 nil。
 func provideGatewayAuthConn(ctx context.Context, addr gatewayAuthServiceAddr, breaker gatewayAuthBreaker) (gatewayAuthConn, error) {
@@ -187,6 +208,7 @@ func provideGatewayAuthConn(ctx context.Context, addr gatewayAuthServiceAddr, br
 	logger.Info(ctx, "认证服务 gRPC 连接创建成功", logger.String("address", string(addr)))
 	return gatewayAuthConn{value: conn}, nil
 }
+
 // provideGatewayUserConn 建立到 user-service 的 gRPC 连接。
 // 这里不允许降级为 nil，因为 gateway 的绝大多数核心接口都依赖 user-service。
 func provideGatewayUserConn(ctx context.Context, addr gatewayUserServiceAddr, breaker gatewayUserBreaker) (gatewayUserConn, error) {
@@ -197,6 +219,7 @@ func provideGatewayUserConn(ctx context.Context, addr gatewayUserServiceAddr, br
 	logger.Info(ctx, "用户服务 gRPC 连接创建成功", logger.String("address", string(addr)))
 	return gatewayUserConn{value: conn}, nil
 }
+
 // provideGatewayRelationConn 建立到 relation-service 的 gRPC 连接。
 // 好友/黑名单路由已经切分出去，因此这里也视为 gateway 的必需依赖。
 func provideGatewayRelationConn(ctx context.Context, addr gatewayRelationServiceAddr, breaker gatewayRelationBreaker) (gatewayRelationConn, error) {
@@ -207,6 +230,7 @@ func provideGatewayRelationConn(ctx context.Context, addr gatewayRelationService
 	logger.Info(ctx, "关系服务 gRPC 连接创建成功", logger.String("address", string(addr)))
 	return gatewayRelationConn{value: conn}, nil
 }
+
 // provideGatewayMsgConn 建立到 msg-service 的 gRPC 连接。
 // 这里同样视为 gateway 的必需依赖，因为消息接口已经对外暴露在同一个入口服务中。
 func provideGatewayMsgConn(ctx context.Context, addr gatewayMsgServiceAddr, breaker gatewayMsgBreaker) (gatewayMsgConn, error) {
@@ -217,6 +241,7 @@ func provideGatewayMsgConn(ctx context.Context, addr gatewayMsgServiceAddr, brea
 	logger.Info(ctx, "消息服务 gRPC 连接创建成功", logger.String("address", string(addr)))
 	return gatewayMsgConn{value: conn}, nil
 }
+
 // provideGatewayGroupConn 建立到 group-service 的 gRPC 连接。
 // 群组 HTTP 接口已经在 gateway 暴露，因此这里作为必需依赖处理。
 func provideGatewayGroupConn(ctx context.Context, addr gatewayGroupServiceAddr, breaker gatewayGroupBreaker) (gatewayGroupConn, error) {
@@ -227,6 +252,7 @@ func provideGatewayGroupConn(ctx context.Context, addr gatewayGroupServiceAddr, 
 	logger.Info(ctx, "群组服务 gRPC 连接创建成功", logger.String("address", string(addr)))
 	return gatewayGroupConn{value: conn}, nil
 }
+
 // provideGatewayUserClient 聚合 gateway 对多个下游服务的客户端。
 // 当前拆分策略：
 // - auth/account/internalAuth/device 走 auth-service；
@@ -245,14 +271,17 @@ func provideGatewayUserClient(
 		authConn.value,
 	)
 }
+
 // provideGatewayMsgClient 构造消息服务客户端。
 func provideGatewayMsgClient(conn gatewayMsgConn) pb.MsgServiceClient {
 	return pb.NewMsgServiceClient(conn.value)
 }
+
 // provideGatewayGroupClient 构造群组服务客户端。
 func provideGatewayGroupClient(conn gatewayGroupConn) pb.GroupServiceClient {
 	return pb.NewGroupServiceClient(conn.value)
 }
+
 // provideGatewayRouter 统一设置 Gin 模式并构造路由树。
 // 这样路由装配与 HTTP Server 构造边界清晰：
 // - provider 负责拿到 *gin.Engine；
@@ -268,6 +297,7 @@ func provideGatewayRouter(
 ) http.Handler {
 	return router.InitRouter(authHandler, userHandler, friendHandler, blacklistHandler, deviceHandler, msgHandler, groupHandler)
 }
+
 // provideGatewayHTTPServer 构造 HTTP Server。
 // 注意这里只构造 server，不真正启动监听，保持“构造”和“运行”解耦。
 func provideGatewayHTTPServer(addr gatewayHTTPAddr, handler http.Handler) *http.Server {
@@ -279,6 +309,7 @@ func provideGatewayHTTPServer(addr gatewayHTTPAddr, handler http.Handler) *http.
 		MaxHeaderBytes: 1 << 20,
 	}
 }
+
 var gatewayInfraProviderSet = wire.NewSet(
 	provideGatewayBaseContext,
 	provideGatewayLoggerConfig,

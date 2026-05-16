@@ -19,4 +19,3 @@ flowchart LR
     CM --> D2[Device connection]
     CM --> DN[Device connection]
 ```
-

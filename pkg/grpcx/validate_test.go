@@ -18,7 +18,9 @@ func (v *validReq) Validate() error { return nil }
 
 type invalidReq struct{}
 
-func (v *invalidReq) Validate() error { return errors.New("from_uuid: value length must be at least 1") }
+func (v *invalidReq) Validate() error {
+	return errors.New("from_uuid: value length must be at least 1")
+}
 
 type noValidateReq struct{}
 

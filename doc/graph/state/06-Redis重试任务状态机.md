@@ -20,4 +20,3 @@ stateDiagram-v2
     Success --> [*]
     Discarded --> [*]
 ```
-

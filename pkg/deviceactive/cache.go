@@ -229,23 +229,23 @@ func (s *Syncer) flushLoop() {
 }
 
 func (s *Syncer) consumeLoop() {
-    defer s.wg.Done()
+	defer s.wg.Done()
 
-    for batch := range s.batchCh {
-        if len(batch) == 0 {
-            continue
-        }
+	for batch := range s.batchCh {
+		if len(batch) == 0 {
+			continue
+		}
 
-        // 给每次批量发送增加 10 秒超时控制
-        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-        err := s.handler(ctx, batch)
-        cancel() // 必须调 cancel 释放资源
+		// 给每次批量发送增加 10 秒超时控制
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := s.handler(ctx, batch)
+		cancel() // 必须调 cancel 释放资源
 
-        if err != nil {
-            // 失败回塞到缓冲 map，等待下次消费。
-            s.mergePending(batch)
-        }
-    }
+		if err != nil {
+			// 失败回塞到缓冲 map，等待下次消费。
+			s.mergePending(batch)
+		}
+	}
 }
 
 func (s *Syncer) flushOnce() {
@@ -281,20 +281,20 @@ func (s *Syncer) swapPending() []BatchItem {
 }
 
 func (s *Syncer) mergePending(items []BatchItem) {
-    if len(items) == 0 {
-        return
-    }
-    s.pendingMu.Lock()
-    defer s.pendingMu.Unlock() // 推荐用 defer 防御 panic 死锁
+	if len(items) == 0 {
+		return
+	}
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock() // 推荐用 defer 防御 panic 死锁
 
-    for _, item := range items {
-        key := item.key()
-        // 防御时光倒流：如果缓冲池里已经有更新的数据，则忽略这次回塞
-        if existing, ok := s.pending[key]; ok && existing.UnixSec >= item.UnixSec {
-            continue
-        }
-        s.pending[key] = item
-    }
+	for _, item := range items {
+		key := item.key()
+		// 防御时光倒流：如果缓冲池里已经有更新的数据，则忽略这次回塞
+		if existing, ok := s.pending[key]; ok && existing.UnixSec >= item.UnixSec {
+			continue
+		}
+		s.pending[key] = item
+	}
 }
 
 func (s *Syncer) shardFor(key string) *throttleShard {
@@ -306,10 +306,10 @@ func composeKey(userUUID, deviceID string) string {
 }
 
 func hashString(value string) uint32 {
-    var hash uint32 = 2166136261 // FNV offset basis
-    for i := 0; i < len(value); i++ {
-        hash ^= uint32(value[i])
-        hash *= 16777619 // FNV prime
-    }
-    return hash
+	var hash uint32 = 2166136261 // FNV offset basis
+	for i := 0; i < len(value); i++ {
+		hash ^= uint32(value[i])
+		hash *= 16777619 // FNV prime
+	}
+	return hash
 }

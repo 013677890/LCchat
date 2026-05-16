@@ -148,7 +148,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 		pushEvent := &pb.MsgPushEvent{
 			ReceiverUuid: req.TargetUuid, // 单聊=对端 UUID, 群聊=群 UUID
 			DeviceId:     req.DeviceId,   // 发送方设备 ID（多端同步时排除）
-			Type:         "MSG_PUSH",    // 新消息推送
+			Type:         "MSG_PUSH",     // 新消息推送
 			ConvType:     req.ConvType,   // Push-Job 据此判断扩散策略
 			Data:         msgItemData,    // MsgItem 序列化 bytes
 			FromUuid:     req.FromUuid,   // 多端同步用

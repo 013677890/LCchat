@@ -18,4 +18,3 @@ flowchart LR
     Handler --> MD[gRPC metadata interceptor]
     MD --> User[User gRPC]
 ```
-

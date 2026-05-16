@@ -114,4 +114,3 @@ func RefreshAccessToken(refreshToken string) (string, error) {
 	// 生成新的 access token
 	return GenerateToken(claims.UserUUID, claims.DeviceID)
 }
-

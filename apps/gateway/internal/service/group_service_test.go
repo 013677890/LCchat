@@ -107,6 +107,27 @@ func (f *fakeGatewayGroupClient) GetGroupMemberIds(context.Context, *grouppb.Get
 func (f *fakeGatewayGroupClient) CheckGroupMember(context.Context, *grouppb.CheckGroupMemberRequest) (*grouppb.CheckGroupMemberResponse, error) {
 	return &grouppb.CheckGroupMemberResponse{}, nil
 }
+func (f *fakeGatewayGroupClient) LeaveGroup(context.Context, *grouppb.LeaveGroupRequest) (*grouppb.LeaveGroupResponse, error) {
+	return &grouppb.LeaveGroupResponse{}, nil
+}
+func (f *fakeGatewayGroupClient) SearchGroupMembers(context.Context, *grouppb.SearchGroupMembersRequest) (*grouppb.SearchGroupMembersResponse, error) {
+	return &grouppb.SearchGroupMembersResponse{}, nil
+}
+func (f *fakeGatewayGroupClient) UpdateMyGroupNickname(context.Context, *grouppb.UpdateMyGroupNicknameRequest) (*grouppb.UpdateMyGroupNicknameResponse, error) {
+	return &grouppb.UpdateMyGroupNicknameResponse{}, nil
+}
+func (f *fakeGatewayGroupClient) MuteGroupMember(context.Context, *grouppb.MuteGroupMemberRequest) (*grouppb.MuteGroupMemberResponse, error) {
+	return &grouppb.MuteGroupMemberResponse{}, nil
+}
+func (f *fakeGatewayGroupClient) UpdateGroupMuteSetting(context.Context, *grouppb.UpdateGroupMuteSettingRequest) (*grouppb.UpdateGroupMuteSettingResponse, error) {
+	return &grouppb.UpdateGroupMuteSettingResponse{}, nil
+}
+func (f *fakeGatewayGroupClient) CheckGroupSendPermission(context.Context, *grouppb.CheckGroupSendPermissionRequest) (*grouppb.CheckGroupSendPermissionResponse, error) {
+	return &grouppb.CheckGroupSendPermissionResponse{}, nil
+}
+func (f *fakeGatewayGroupClient) GetJoinRequestPendingCount(context.Context, *grouppb.GetJoinRequestPendingCountRequest) (*grouppb.GetJoinRequestPendingCountResponse, error) {
+	return &grouppb.GetJoinRequestPendingCountResponse{}, nil
+}
 func TestGatewayGroupServiceJoinRequestMethods(t *testing.T) {
 	t.Run("update_notice_maps_request", func(t *testing.T) {
 		svc := NewGroupService(&fakeGatewayGroupClient{

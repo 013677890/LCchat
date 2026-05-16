@@ -6,6 +6,10 @@ import (
 	"gorm.io/gorm"
 )
 
+// GroupInfo 描述群基础资料与群级管理开关。
+//
+// 群成员、群名片、单人禁言等成员维度事实不放在这里，避免群表承载过多职责；
+// 这里只保留对整个群生效的资料字段和全员禁言等群级策略。
 type GroupInfo struct {
 	Id        int64          `gorm:"column:id;primaryKey;autoIncrement;comment:自增id"`
 	Uuid      string         `gorm:"column:uuid;type:char(20);uniqueIndex;not null;comment:群组唯一id"`
@@ -14,6 +18,7 @@ type GroupInfo struct {
 	MemberCnt int            `gorm:"column:member_cnt;not null;default:1;comment:群人数"` // 默认群主1人
 	OwnerUuid string         `gorm:"column:owner_uuid;type:char(20);not null;index;comment:群主uuid"`
 	AddMode   int8           `gorm:"column:add_mode;not null;default:0;comment:加群方式,0.直接 1.审核"`
+	MuteAll   bool           `gorm:"column:mute_all;not null;default:false;comment:是否全员禁言"`
 	Avatar    string         `gorm:"column:avatar;type:varchar(255);not null;default:https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png;comment:群头像URL"`
 	Status    int8           `gorm:"column:status;not null;default:0;comment:状态,0.正常 1.禁用 2.解散"`
 	CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime"`
@@ -21,6 +26,7 @@ type GroupInfo struct {
 	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
 
+// TableName 返回群基础资料表名。
 func (GroupInfo) TableName() string {
 	return "groups"
 }

@@ -193,8 +193,9 @@ type MyJoinGroupApplicationListItemDTO struct {
 
 // ListMyJoinGroupApplicationsRequest 获取当前用户发起的入群申请列表请求。
 type ListMyJoinGroupApplicationsRequest struct {
-	Page     int32 `form:"page" json:"page" binding:"omitempty,min=1"`
-	PageSize int32 `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"`
+	Page     int32  `form:"page" json:"page" binding:"omitempty,min=1"`
+	PageSize int32  `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"`
+	Status   *int32 `form:"status" json:"status" binding:"omitempty,min=0,max=3"`
 }
 
 // ListMyJoinGroupApplicationsResponse 获取当前用户发起的入群申请列表响应。
@@ -210,10 +211,14 @@ func ConvertToProtoListMyJoinGroupApplicationsRequest(dto *ListMyJoinGroupApplic
 	if dto == nil {
 		return nil
 	}
-	return &grouppb.ListMyJoinGroupApplicationsRequest{
+	req := &grouppb.ListMyJoinGroupApplicationsRequest{
 		Page:     dto.Page,
 		PageSize: dto.PageSize,
 	}
+	if dto.Status != nil {
+		req.Status = dto.Status
+	}
+	return req
 }
 
 // ConvertListMyJoinGroupApplicationsResponseFromProto 把“我的申请列表”proto 响应转成 HTTP DTO。
@@ -351,6 +356,7 @@ type ListReviewedJoinRequestsRequest struct {
 	GroupUUID string `json:"groupUuid"`
 	Page      int32  `form:"page" json:"page" binding:"omitempty,min=1"`
 	PageSize  int32  `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"`
+	Status    *int32 `form:"status" json:"status" binding:"omitempty,min=1,max=2"`
 }
 
 // ListReviewedJoinRequestsResponse 获取群已审批入群申请列表响应。
@@ -366,11 +372,15 @@ func ConvertToProtoListReviewedJoinRequestsRequest(dto *ListReviewedJoinRequests
 	if dto == nil {
 		return nil
 	}
-	return &grouppb.ListReviewedJoinRequestsRequest{
+	req := &grouppb.ListReviewedJoinRequestsRequest{
 		GroupUuid: dto.GroupUUID,
 		Page:      dto.Page,
 		PageSize:  dto.PageSize,
 	}
+	if dto.Status != nil {
+		req.Status = dto.Status
+	}
+	return req
 }
 
 // ConvertListReviewedJoinRequestsResponseFromProto 把审批记录列表 proto 响应转成 HTTP DTO。
@@ -457,6 +467,19 @@ func ConvertToProtoAddGroupMemberRequest(dto *AddGroupMemberRequest) *grouppb.Ad
 	}
 }
 
+// LeaveGroupRequest 当前用户主动退群请求。
+type LeaveGroupRequest struct {
+	GroupUUID string `json:"groupUuid"`
+}
+
+// ConvertToProtoLeaveGroupRequest 把主动退群 DTO 转成 proto 请求。
+func ConvertToProtoLeaveGroupRequest(dto *LeaveGroupRequest) *grouppb.LeaveGroupRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.LeaveGroupRequest{GroupUuid: dto.GroupUUID}
+}
+
 // RemoveGroupMemberRequest 移除群成员请求。
 type RemoveGroupMemberRequest struct {
 	GroupUUID string `json:"groupUuid"`
@@ -501,6 +524,7 @@ type GroupInfoDTO struct {
 	OwnerUUID   string `json:"ownerUuid"`
 	MemberCount int32  `json:"memberCount"`
 	AddMode     int32  `json:"addMode"`
+	MuteAll     bool   `json:"muteAll"`
 }
 
 // ConvertToProtoGetGroupInfoRequest 把查群资料 DTO 转成 proto 请求。
@@ -524,6 +548,7 @@ func ConvertGroupInfoFromProto(pb *grouppb.GetGroupInfoResponse) *GroupInfoDTO {
 		OwnerUUID:   pb.GetOwnerUuid(),
 		MemberCount: pb.GetMemberCount(),
 		AddMode:     pb.GetAddMode(),
+		MuteAll:     pb.GetMuteAll(),
 	}
 }
 
@@ -551,10 +576,12 @@ type GetGroupMemberListRequest struct {
 
 // GroupMemberItemDTO 群成员项 DTO。
 type GroupMemberItemDTO struct {
-	UserUUID string `json:"userUuid"`
-	Role     int32  `json:"role"`
-	Nickname string `json:"nickname"`
-	Avatar   string `json:"avatar"`
+	UserUUID      string `json:"userUuid"`
+	Role          int32  `json:"role"`
+	Nickname      string `json:"nickname"`
+	Avatar        string `json:"avatar"`
+	GroupNickname string `json:"groupNickname"`
+	MuteUntil     int64  `json:"muteUntil"`
 }
 
 // GetGroupMemberListResponse 获取群成员列表响应。
@@ -580,14 +607,152 @@ func ConvertGroupMemberListResponseFromProto(pb *grouppb.GetMemberListResponse) 
 		if member == nil {
 			continue
 		}
-		members = append(members, &GroupMemberItemDTO{
-			UserUUID: member.GetUserUuid(),
-			Role:     member.GetRole(),
-			Nickname: member.GetNickname(),
-			Avatar:   member.GetAvatar(),
-		})
+		members = append(members, convertGroupMemberItemFromProto(member))
 	}
 	return &GetGroupMemberListResponse{Members: members}
+}
+
+// SearchGroupMembersRequest 搜索群成员请求。
+type SearchGroupMembersRequest struct {
+	GroupUUID string `json:"groupUuid"`
+	Keyword   string `form:"keyword" json:"keyword" binding:"omitempty,max=64"`
+	Page      int32  `form:"page" json:"page" binding:"omitempty,min=1"`
+	PageSize  int32  `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"`
+}
+
+// SearchGroupMembersResponse 搜索群成员响应。
+type SearchGroupMembersResponse struct {
+	Members  []*GroupMemberItemDTO `json:"members"`
+	Total    int64                 `json:"total"`
+	Page     int32                 `json:"page"`
+	PageSize int32                 `json:"pageSize"`
+}
+
+// ConvertToProtoSearchGroupMembersRequest 把成员搜索 DTO 转成 proto 请求。
+func ConvertToProtoSearchGroupMembersRequest(dto *SearchGroupMembersRequest) *grouppb.SearchGroupMembersRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.SearchGroupMembersRequest{
+		GroupUuid: dto.GroupUUID,
+		Keyword:   dto.Keyword,
+		Page:      dto.Page,
+		PageSize:  dto.PageSize,
+	}
+}
+
+// ConvertSearchGroupMembersResponseFromProto 把成员搜索 proto 响应转成 HTTP DTO。
+func ConvertSearchGroupMembersResponseFromProto(pb *grouppb.SearchGroupMembersResponse) *SearchGroupMembersResponse {
+	if pb == nil {
+		return nil
+	}
+	members := make([]*GroupMemberItemDTO, 0, len(pb.GetMembers()))
+	for _, member := range pb.GetMembers() {
+		if member == nil {
+			continue
+		}
+		members = append(members, convertGroupMemberItemFromProto(member))
+	}
+	return &SearchGroupMembersResponse{
+		Members:  members,
+		Total:    pb.GetTotal(),
+		Page:     pb.GetPage(),
+		PageSize: pb.GetPageSize(),
+	}
+}
+
+// UpdateMyGroupNicknameRequest 更新当前用户群名片请求。
+type UpdateMyGroupNicknameRequest struct {
+	GroupUUID     string `json:"groupUuid"`
+	GroupNickname string `json:"groupNickname" binding:"max=64"`
+}
+
+// ConvertToProtoUpdateMyGroupNicknameRequest 把群名片 DTO 转成 proto 请求。
+func ConvertToProtoUpdateMyGroupNicknameRequest(dto *UpdateMyGroupNicknameRequest) *grouppb.UpdateMyGroupNicknameRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.UpdateMyGroupNicknameRequest{
+		GroupUuid:     dto.GroupUUID,
+		GroupNickname: dto.GroupNickname,
+	}
+}
+
+// MuteGroupMemberRequest 设置成员禁言请求。
+type MuteGroupMemberRequest struct {
+	GroupUUID string `json:"groupUuid"`
+	UserUUID  string `json:"userUuid"`
+	MuteUntil int64  `json:"muteUntil" binding:"omitempty,min=0"`
+}
+
+// ConvertToProtoMuteGroupMemberRequest 把成员禁言 DTO 转成 proto 请求。
+func ConvertToProtoMuteGroupMemberRequest(dto *MuteGroupMemberRequest) *grouppb.MuteGroupMemberRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.MuteGroupMemberRequest{
+		GroupUuid: dto.GroupUUID,
+		UserUuid:  dto.UserUUID,
+		MuteUntil: dto.MuteUntil,
+	}
+}
+
+// UpdateGroupMuteSettingRequest 更新群全员禁言设置请求。
+type UpdateGroupMuteSettingRequest struct {
+	GroupUUID string `json:"groupUuid"`
+	MuteAll   *bool  `json:"muteAll" binding:"required"`
+}
+
+// ConvertToProtoUpdateGroupMuteSettingRequest 把全员禁言 DTO 转成 proto 请求。
+func ConvertToProtoUpdateGroupMuteSettingRequest(dto *UpdateGroupMuteSettingRequest) *grouppb.UpdateGroupMuteSettingRequest {
+	if dto == nil || dto.MuteAll == nil {
+		return nil
+	}
+	return &grouppb.UpdateGroupMuteSettingRequest{
+		GroupUuid: dto.GroupUUID,
+		MuteAll:   *dto.MuteAll,
+	}
+}
+
+// GetJoinRequestPendingCountRequest 获取待审批入群申请数量请求。
+type GetJoinRequestPendingCountRequest struct {
+	GroupUUID string `json:"groupUuid"`
+}
+
+// GetJoinRequestPendingCountResponse 获取待审批入群申请数量响应。
+type GetJoinRequestPendingCountResponse struct {
+	Count int64 `json:"count"`
+}
+
+// ConvertToProtoGetJoinRequestPendingCountRequest 把待审批数量 DTO 转成 proto 请求。
+func ConvertToProtoGetJoinRequestPendingCountRequest(dto *GetJoinRequestPendingCountRequest) *grouppb.GetJoinRequestPendingCountRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.GetJoinRequestPendingCountRequest{GroupUuid: dto.GroupUUID}
+}
+
+// ConvertGetJoinRequestPendingCountResponseFromProto 把待审批数量 proto 响应转成 HTTP DTO。
+func ConvertGetJoinRequestPendingCountResponseFromProto(pb *grouppb.GetJoinRequestPendingCountResponse) *GetJoinRequestPendingCountResponse {
+	if pb == nil {
+		return nil
+	}
+	return &GetJoinRequestPendingCountResponse{Count: pb.GetCount()}
+}
+
+// convertGroupMemberItemFromProto 统一转换群成员展示项。
+func convertGroupMemberItemFromProto(member *grouppb.GroupMemberItem) *GroupMemberItemDTO {
+	if member == nil {
+		return nil
+	}
+	return &GroupMemberItemDTO{
+		UserUUID:      member.GetUserUuid(),
+		Role:          member.GetRole(),
+		Nickname:      member.GetNickname(),
+		Avatar:        member.GetAvatar(),
+		GroupNickname: member.GetGroupNickname(),
+		MuteUntil:     member.GetMuteUntil(),
+	}
 }
 
 // GetGroupMemberIDsRequest 获取群成员 UUID 请求。

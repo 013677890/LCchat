@@ -18,16 +18,16 @@ func init() { logger.ReplaceGlobal(zap.NewNop()) }
 // ==================== mock Repository ====================
 
 type mockRepo struct {
-	upsertFn             func(ctx context.Context, conv *model.Conversation, isSender bool) error
-	upsertGroupConvFn    func(ctx context.Context, gc *model.GroupConversation) error
-	batchInitFn          func(ctx context.Context, members []string, groupUUID string) error
-	getByOwnerAndConvFn  func(ctx context.Context, owner, convId string) (*model.Conversation, error)
-	updateReadSeqFn      func(ctx context.Context, owner, convId string, readSeq int64) error
-	deleteFn             func(ctx context.Context, owner, convId string) error
-	updateSettingsFn     func(ctx context.Context, owner, convId string, mute *bool, pin *bool) error
-	listP2PFn            func(ctx context.Context, owner string, since, cursorMs, cursorId int64, size int) ([]*model.Conversation, error)
-	listGroupFn          func(ctx context.Context, owner string, since, cursorMs, cursorId int64, size int) ([]*model.Conversation, error)
-	getGroupConvFn       func(ctx context.Context, groupUuid string) (*model.GroupConversation, error)
+	upsertFn            func(ctx context.Context, conv *model.Conversation, isSender bool) error
+	upsertGroupConvFn   func(ctx context.Context, gc *model.GroupConversation) error
+	batchInitFn         func(ctx context.Context, members []string, groupUUID string) error
+	getByOwnerAndConvFn func(ctx context.Context, owner, convId string) (*model.Conversation, error)
+	updateReadSeqFn     func(ctx context.Context, owner, convId string, readSeq int64) error
+	deleteFn            func(ctx context.Context, owner, convId string) error
+	updateSettingsFn    func(ctx context.Context, owner, convId string, mute *bool, pin *bool) error
+	listP2PFn           func(ctx context.Context, owner string, since, cursorMs, cursorId int64, size int) ([]*model.Conversation, error)
+	listGroupFn         func(ctx context.Context, owner string, since, cursorMs, cursorId int64, size int) ([]*model.Conversation, error)
+	getGroupConvFn      func(ctx context.Context, groupUuid string) (*model.GroupConversation, error)
 }
 
 func (m *mockRepo) Upsert(ctx context.Context, conv *model.Conversation, isSender bool) error {

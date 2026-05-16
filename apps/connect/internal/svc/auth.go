@@ -1,12 +1,12 @@
 package svc
 
 import (
-	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/util"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"strings"
 
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"

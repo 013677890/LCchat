@@ -110,6 +110,24 @@ func (f *fakeGroupHTTPService) GetGroupList(context.Context) (*dto.GetGroupListR
 func (f *fakeGroupHTTPService) GetGroupMemberIDs(context.Context, *dto.GetGroupMemberIDsRequest) (*dto.GetGroupMemberIDsResponse, error) {
 	return &dto.GetGroupMemberIDsResponse{}, nil
 }
+func (f *fakeGroupHTTPService) LeaveGroup(context.Context, *dto.LeaveGroupRequest) error {
+	return nil
+}
+func (f *fakeGroupHTTPService) SearchGroupMembers(context.Context, *dto.SearchGroupMembersRequest) (*dto.SearchGroupMembersResponse, error) {
+	return &dto.SearchGroupMembersResponse{}, nil
+}
+func (f *fakeGroupHTTPService) UpdateMyGroupNickname(context.Context, *dto.UpdateMyGroupNicknameRequest) error {
+	return nil
+}
+func (f *fakeGroupHTTPService) MuteGroupMember(context.Context, *dto.MuteGroupMemberRequest) error {
+	return nil
+}
+func (f *fakeGroupHTTPService) UpdateGroupMuteSetting(context.Context, *dto.UpdateGroupMuteSettingRequest) error {
+	return nil
+}
+func (f *fakeGroupHTTPService) GetJoinRequestPendingCount(context.Context, *dto.GetJoinRequestPendingCountRequest) (*dto.GetJoinRequestPendingCountResponse, error) {
+	return &dto.GetJoinRequestPendingCountResponse{}, nil
+}
 
 type groupHandlerResultBody struct {
 	Code int `json:"code"`

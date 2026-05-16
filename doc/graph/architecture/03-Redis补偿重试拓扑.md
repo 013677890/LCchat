@@ -18,4 +18,3 @@ flowchart LR
     Consumer -->|fail and retry<max| Topic
     Consumer -->|max retries| DeadLog[Error log or alert]
 ```
-

@@ -8,9 +8,9 @@ import (
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/async"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -83,11 +83,17 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/groups/join-applications":                        1 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/my-join-application":           1 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/join-requests":                 2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/join-requests/pending-count":   1 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/join-requests/reviewed":        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/join-requests/:applyId/review": 2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/transfer-owner":                2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/leave":                         2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/my-nickname":                   2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/mute-setting":                  2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/members":                       2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members/search":                3 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/members/:userUuid":             2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members/:userUuid/mute":        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/members/:userUuid/role":        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/member-ids":                    1 * time.Second,
 }
@@ -249,13 +255,19 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 					groups.DELETE("/:groupUuid/apply", groupHandler.CancelJoinGroupApplication)
 					groups.GET("/:groupUuid/my-join-application", groupHandler.GetMyJoinGroupApplication)
 					groups.GET("/:groupUuid/join-requests", groupHandler.ListJoinRequests)
+					groups.GET("/:groupUuid/join-requests/pending-count", groupHandler.GetJoinRequestPendingCount)
 					groups.GET("/:groupUuid/join-requests/reviewed", groupHandler.ListReviewedJoinRequests)
 					groups.POST("/:groupUuid/join-requests/:applyId/review", groupHandler.ReviewJoinGroup)
 					groups.POST("/:groupUuid/transfer-owner", groupHandler.TransferGroupOwner)
+					groups.POST("/:groupUuid/leave", groupHandler.LeaveGroup)
+					groups.PATCH("/:groupUuid/my-nickname", groupHandler.UpdateMyGroupNickname)
+					groups.PATCH("/:groupUuid/mute-setting", groupHandler.UpdateGroupMuteSetting)
 					groups.DELETE("/:groupUuid", groupHandler.DismissGroup)
 					groups.POST("/:groupUuid/members", groupHandler.AddMember)
+					groups.GET("/:groupUuid/members/search", groupHandler.SearchGroupMembers)
 					groups.GET("/:groupUuid/members", groupHandler.GetMemberList)
 					groups.DELETE("/:groupUuid/members/:userUuid", groupHandler.RemoveMember)
+					groups.PATCH("/:groupUuid/members/:userUuid/mute", groupHandler.MuteGroupMember)
 					groups.PATCH("/:groupUuid/members/:userUuid/role", groupHandler.UpdateMemberRole)
 					groups.GET("/:groupUuid/member-ids", groupHandler.GetGroupMemberIDs)
 				}

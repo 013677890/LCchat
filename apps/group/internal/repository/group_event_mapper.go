@@ -117,6 +117,49 @@ func (r *groupRepositoryImpl) insertMemberRoleUpdatedEvent(tx *gorm.DB, group *m
 	})
 }
 
+// insertMemberProfileUpdatedEvent 把“成员群名片更新”事实写入 group.cache outbox。
+//
+// 群名片属于成员在单个群内的个人资料，不应刷新整组成员缓存；
+// 事件仅携带受影响成员最终快照，让 projector 按 patch-if-exists 更新现有 Hash。
+func (r *groupRepositoryImpl) insertMemberProfileUpdatedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
+	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		Action:       groupevent.ActionMemberProfileUpdated,
+		GroupUUID:    group.Uuid,
+		OperatorUUID: operatorUUID,
+		Group:        buildGroupSnapshot(group),
+		Members:      buildGroupMemberSnapshots(members),
+		UserUUIDs:    collectGroupMemberSnapshotUUIDs(members),
+	})
+}
+
+// insertMemberMutedEvent 把“成员单人禁言更新”事实写入 group.cache outbox。
+//
+// 禁言是消息发送链路的高频权限事实，必须随写事务进入 outbox，
+// 避免 msg-service 读到旧缓存后错误放行或错误拦截成员发言。
+func (r *groupRepositoryImpl) insertMemberMutedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
+	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		Action:       groupevent.ActionMemberMuted,
+		GroupUUID:    group.Uuid,
+		OperatorUUID: operatorUUID,
+		Group:        buildGroupSnapshot(group),
+		Members:      buildGroupMemberSnapshots(members),
+		UserUUIDs:    collectGroupMemberSnapshotUUIDs(members),
+	})
+}
+
+// insertGroupMuteSettingUpdatedEvent 把“全员禁言开关更新”事实写入 group.cache outbox。
+//
+// 全员禁言属于群级策略，只需要携带群快照即可；成员缓存不需要变更，
+// 发送权限检查会同时读取 group:info 与成员角色来判断管理员豁免规则。
+func (r *groupRepositoryImpl) insertGroupMuteSettingUpdatedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string) error {
+	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		Action:       groupevent.ActionGroupMuteSettingUpdated,
+		GroupUUID:    group.Uuid,
+		OperatorUUID: operatorUUID,
+		Group:        buildGroupSnapshot(group),
+	})
+}
+
 // insertJoinRequestCreatedEvent 把“新增待审批入群申请”事实写入 group.cache outbox。
 //
 // 申请列表缓存本质上也是群维度投影，因此继续复用同一个 group.cache topic，
@@ -195,6 +238,7 @@ func buildGroupSnapshot(group *model.GroupInfo) *groupevent.GroupSnapshot {
 		OwnerUUID:     group.OwnerUuid,
 		MemberCount:   int32(group.MemberCnt),
 		AddMode:       int32(group.AddMode),
+		MuteAll:       group.MuteAll,
 		Status:        int32(group.Status),
 		UpdatedAtUnix: group.UpdatedAt.Unix(),
 	}
@@ -221,12 +265,22 @@ func buildGroupMemberSnapshots(members []*model.GroupMember) []groupevent.GroupM
 		}
 		seen[member.UserUuid] = struct{}{}
 		result = append(result, groupevent.GroupMemberSnapshot{
-			UserUUID:       member.UserUuid,
-			Role:           int32(member.Role),
-			JoinedAtUnixMs: member.JoinedAt.UnixMilli(),
+			UserUUID:        member.UserUuid,
+			Role:            int32(member.Role),
+			Remark:          member.Remark,
+			JoinedAtUnixMs:  member.JoinedAt.UnixMilli(),
+			MuteUntilUnixMs: buildMuteUntilUnixMs(member),
 		})
 	}
 	return result
+}
+
+// buildMuteUntilUnixMs 把可空禁言时间转换为事件里的毫秒时间戳。
+func buildMuteUntilUnixMs(member *model.GroupMember) int64 {
+	if member == nil || member.MuteUntil == nil {
+		return 0
+	}
+	return member.MuteUntil.UnixMilli()
 }
 
 // buildGroupJoinRequestSnapshot 把入群申请模型转换为事件快照。

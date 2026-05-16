@@ -25,4 +25,3 @@ sequenceDiagram
         CG-->>S: success flag
     end
 ```
-

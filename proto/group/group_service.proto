@@ -36,11 +36,32 @@ service GroupService {
 	// 这里的“已审批”只包含管理员已通过/已拒绝的历史，不包含申请人主动撤销的记录。
 	rpc ListReviewedJoinRequests(ListReviewedJoinRequestsRequest) returns (ListReviewedJoinRequestsResponse);
 	rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
+	// LeaveGroup 让当前登录用户主动退出群聊。
+	// 群主不能直接退群，必须先转让群主或解散群，避免群聚合失去唯一 owner。
+	rpc LeaveGroup(LeaveGroupRequest) returns (LeaveGroupResponse);
 	rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
 	rpc GetMemberList(GetMemberListRequest) returns (GetMemberListResponse);
+	// SearchGroupMembers 在指定群内按用户 UUID、群名片或昵称搜索成员。
+	// 该接口用于大群成员管理页，分页上限固定为 100，避免单次扫描返回过大结果集。
+	rpc SearchGroupMembers(SearchGroupMembersRequest) returns (SearchGroupMembersResponse);
+	// UpdateMyGroupNickname 更新当前登录用户自己的群名片。
+	// 只允许修改自己的群内展示名，管理员修改他人名片需要后续独立管理接口承载。
+	rpc UpdateMyGroupNickname(UpdateMyGroupNicknameRequest) returns (UpdateMyGroupNicknameResponse);
+	// MuteGroupMember 设置或取消指定成员的单人禁言。
+	// mute_until=0 表示解除禁言；大于 0 表示禁言截止 Unix 毫秒时间戳。
+	rpc MuteGroupMember(MuteGroupMemberRequest) returns (MuteGroupMemberResponse);
+	// UpdateGroupMuteSetting 更新全员禁言开关。
+	// 开启后普通成员不能发送群消息，群主和管理员仍保留管理沟通能力。
+	rpc UpdateGroupMuteSetting(UpdateGroupMuteSettingRequest) returns (UpdateGroupMuteSettingResponse);
 	rpc GetGroupList(GetGroupListRequest) returns (GetGroupListResponse);
 	rpc GetGroupMemberIds(GetGroupMemberIdsRequest) returns (GetGroupMemberIdsResponse);
 	rpc CheckGroupMember(CheckGroupMemberRequest) returns (CheckGroupMemberResponse);
+	// CheckGroupSendPermission 检查指定用户在群内是否允许发送消息。
+	// 该接口面向 msg-service 等内部调用方，用于统一收口群成员、全员禁言和单人禁言判断。
+	rpc CheckGroupSendPermission(CheckGroupSendPermissionRequest) returns (CheckGroupSendPermissionResponse);
+	// GetJoinRequestPendingCount 获取群待审批入群申请数量。
+	// 仅管理员及以上角色可读，用于群管理入口展示红点或待办数量。
+	rpc GetJoinRequestPendingCount(GetJoinRequestPendingCountRequest) returns (GetJoinRequestPendingCountResponse);
 }
 message CreateGroupRequest {
 	string name = 1 [(validate.rules).string = {min_len: 1, max_len: 64}];
@@ -59,6 +80,7 @@ message GetGroupInfoResponse {
 	int32 member_count = 5;
 	string notice = 6;
 	int32 add_mode = 7;
+	bool mute_all = 8;
 }
 message UpdateGroupInfoRequest {
 	string group_uuid = 1 [(validate.rules).string.min_len = 1];
@@ -139,6 +161,8 @@ message MyJoinGroupApplicationListItem {
 message ListMyJoinGroupApplicationsRequest {
 	int32 page = 1 [(validate.rules).int32 = {gte: 1}];
 	int32 page_size = 2 [(validate.rules).int32 = {gte: 1, lte: 100}];
+	// status 为空表示读取全部状态；传值时按 0待审批/1通过/2拒绝/3撤销过滤。
+	optional int32 status = 3 [(validate.rules).int32 = {gte: 0, lte: 3}];
 }
 // ListMyJoinGroupApplicationsResponse 返回当前用户的入群申请分页列表。
 // items 允许同时出现待审批、已通过、已拒绝、已撤销等不同终态记录。
@@ -202,6 +226,8 @@ message ListReviewedJoinRequestsRequest {
 	string group_uuid = 1 [(validate.rules).string.min_len = 1];
 	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
 	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
+	// status 为空表示读取全部审批历史；传值时仅允许 1=通过、2=拒绝。
+	optional int32 status = 4 [(validate.rules).int32 = {gte: 1, lte: 2}];
 }
 // ListReviewedJoinRequestsResponse 返回管理员已经处理过的审批记录分页结果。
 // 结果只包含“已通过、已拒绝”两类历史，不包含申请人主动撤销记录。
@@ -216,6 +242,10 @@ message AddMemberRequest {
 	repeated string user_uuids = 2;
 }
 message AddMemberResponse {}
+message LeaveGroupRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+}
+message LeaveGroupResponse {}
 message RemoveMemberRequest {
 	string group_uuid = 1 [(validate.rules).string.min_len = 1];
 	string user_uuid = 2 [(validate.rules).string.min_len = 1];
@@ -226,9 +256,39 @@ message GroupMemberItem {
 	int32 role = 2;
 	string nickname = 3;
 	string avatar = 4;
+	string group_nickname = 5;
+	int64 mute_until = 6;
 }
 message GetMemberListRequest { string group_uuid = 1 [(validate.rules).string.min_len = 1]; }
 message GetMemberListResponse { repeated GroupMemberItem members = 1; }
+message SearchGroupMembersRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string keyword = 2 [(validate.rules).string.max_len = 64];
+	int32 page = 3 [(validate.rules).int32 = {gte: 1}];
+	int32 page_size = 4 [(validate.rules).int32 = {gte: 1, lte: 100}];
+}
+message SearchGroupMembersResponse {
+	repeated GroupMemberItem members = 1;
+	int64 total = 2;
+	int32 page = 3;
+	int32 page_size = 4;
+}
+message UpdateMyGroupNicknameRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string group_nickname = 2 [(validate.rules).string.max_len = 64];
+}
+message UpdateMyGroupNicknameResponse {}
+message MuteGroupMemberRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string user_uuid = 2 [(validate.rules).string.min_len = 1];
+	int64 mute_until = 3 [(validate.rules).int64 = {gte: 0}];
+}
+message MuteGroupMemberResponse {}
+message UpdateGroupMuteSettingRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	bool mute_all = 2;
+}
+message UpdateGroupMuteSettingResponse {}
 message GetGroupListRequest {}
 message GetGroupListResponse {
 	repeated GetGroupInfoResponse groups = 1;
@@ -243,3 +303,18 @@ message CheckGroupMemberResponse {
 	bool is_member = 1;
 	int32 role = 2;
 }
+message CheckGroupSendPermissionRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string user_uuid = 2 [(validate.rules).string.min_len = 1];
+}
+message CheckGroupSendPermissionResponse {
+	bool can_send = 1;
+	int32 role = 2;
+	string reason = 3;
+	int64 mute_until = 4;
+	bool mute_all = 5;
+}
+message GetJoinRequestPendingCountRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+}
+message GetJoinRequestPendingCountResponse { int64 count = 1; }

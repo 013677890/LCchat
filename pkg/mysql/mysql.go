@@ -37,7 +37,7 @@ func Build(cfg config.MySQLConfig) (*gorm.DB, error) {
 	gormLog := newGormLogger(cfg.LogLevel)
 
 	db, err := gorm.Open(gmysql.Open(cfg.DSN), &gorm.Config{
-		Logger: gormLog,
+		Logger:                                   gormLog,
 		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	if err != nil {

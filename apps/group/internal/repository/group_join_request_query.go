@@ -35,13 +35,17 @@ func (r *groupRepositoryImpl) loadLatestJoinRequestByApplicant(ctx context.Conte
 //  1. 用户侧需要回看最近申请是否已通过、已拒绝或已撤销；
 //  2. 申请列表是低频读，直接回源 MySQL 比额外维护复杂缓存更划算；
 //  3. 结果集按创建时间倒序输出，更符合用户查看最近申请进度的习惯。
-func (r *groupRepositoryImpl) ListMyJoinGroupApplications(ctx context.Context, applicantUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+func (r *groupRepositoryImpl) ListMyJoinGroupApplications(ctx context.Context, applicantUUID string, status *int8, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
 	if r == nil || r.db == nil || applicantUUID == "" {
 		return []*model.GroupJoinRequest{}, 0, nil
 	}
 	query := r.db.WithContext(ctx).
 		Model(&model.GroupJoinRequest{}).
 		Where("applicant_uuid = ? AND deleted_at IS NULL", applicantUUID)
+	if status != nil {
+		// 状态筛选只追加到查询条件，不改变默认“查看全部终态”的产品语义。
+		query = query.Where("status = ?", *status)
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, WrapDBError(err)
@@ -67,7 +71,7 @@ func (r *groupRepositoryImpl) ListMyJoinGroupApplications(ctx context.Context, a
 //  2. 已拒绝；
 //
 // 不包含申请人自己撤销的记录，避免把用户自助动作和管理审批历史混在一起。
-func (r *groupRepositoryImpl) ListReviewedJoinRequests(ctx context.Context, groupUUID, operatorUUID string, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
+func (r *groupRepositoryImpl) ListReviewedJoinRequests(ctx context.Context, groupUUID, operatorUUID string, status *int8, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
 	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" {
 		return []*model.GroupJoinRequest{}, 0, nil
 	}
@@ -89,9 +93,14 @@ func (r *groupRepositoryImpl) ListReviewedJoinRequests(ctx context.Context, grou
 		return nil, 0, ErrNoPermission
 	}
 	// 这里显式排除“申请人主动撤销”，保证审批记录只保留管理员真正处理过的历史。
+	statuses := []int8{joinRequestStatusApproved, joinRequestStatusRejected}
+	if status != nil {
+		// service 层已经保证只会传入已通过或已拒绝，仓储层只负责按最终条件查询。
+		statuses = []int8{*status}
+	}
 	query := r.db.WithContext(ctx).
 		Model(&model.GroupJoinRequest{}).
-		Where("group_uuid = ? AND status IN ? AND deleted_at IS NULL", groupUUID, []int8{joinRequestStatusApproved, joinRequestStatusRejected})
+		Where("group_uuid = ? AND status IN ? AND deleted_at IS NULL", groupUUID, statuses)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, WrapDBError(err)

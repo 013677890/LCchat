@@ -94,6 +94,11 @@ func (c *groupServiceClientImpl) AddMember(ctx context.Context, req *grouppb.Add
 	return c.groupClient.AddMember(ctx, req)
 }
 
+// LeaveGroup 转发当前用户主动退群请求。
+func (c *groupServiceClientImpl) LeaveGroup(ctx context.Context, req *grouppb.LeaveGroupRequest) (*grouppb.LeaveGroupResponse, error) {
+	return c.groupClient.LeaveGroup(ctx, req)
+}
+
 // RemoveMember 转发移除群成员请求。
 func (c *groupServiceClientImpl) RemoveMember(ctx context.Context, req *grouppb.RemoveMemberRequest) (*grouppb.RemoveMemberResponse, error) {
 	return c.groupClient.RemoveMember(ctx, req)
@@ -102,6 +107,26 @@ func (c *groupServiceClientImpl) RemoveMember(ctx context.Context, req *grouppb.
 // GetMemberList 转发群成员列表请求。
 func (c *groupServiceClientImpl) GetMemberList(ctx context.Context, req *grouppb.GetMemberListRequest) (*grouppb.GetMemberListResponse, error) {
 	return c.groupClient.GetMemberList(ctx, req)
+}
+
+// SearchGroupMembers 转发群成员搜索请求。
+func (c *groupServiceClientImpl) SearchGroupMembers(ctx context.Context, req *grouppb.SearchGroupMembersRequest) (*grouppb.SearchGroupMembersResponse, error) {
+	return c.groupClient.SearchGroupMembers(ctx, req)
+}
+
+// UpdateMyGroupNickname 转发当前用户群名片更新请求。
+func (c *groupServiceClientImpl) UpdateMyGroupNickname(ctx context.Context, req *grouppb.UpdateMyGroupNicknameRequest) (*grouppb.UpdateMyGroupNicknameResponse, error) {
+	return c.groupClient.UpdateMyGroupNickname(ctx, req)
+}
+
+// MuteGroupMember 转发成员单人禁言设置请求。
+func (c *groupServiceClientImpl) MuteGroupMember(ctx context.Context, req *grouppb.MuteGroupMemberRequest) (*grouppb.MuteGroupMemberResponse, error) {
+	return c.groupClient.MuteGroupMember(ctx, req)
+}
+
+// UpdateGroupMuteSetting 转发全员禁言开关更新请求。
+func (c *groupServiceClientImpl) UpdateGroupMuteSetting(ctx context.Context, req *grouppb.UpdateGroupMuteSettingRequest) (*grouppb.UpdateGroupMuteSettingResponse, error) {
+	return c.groupClient.UpdateGroupMuteSetting(ctx, req)
 }
 
 // GetGroupList 转发当前用户群列表请求。
@@ -117,4 +142,14 @@ func (c *groupServiceClientImpl) GetGroupMemberIds(ctx context.Context, req *gro
 // CheckGroupMember 转发群成员关系检查请求。
 func (c *groupServiceClientImpl) CheckGroupMember(ctx context.Context, req *grouppb.CheckGroupMemberRequest) (*grouppb.CheckGroupMemberResponse, error) {
 	return c.groupClient.CheckGroupMember(ctx, req)
+}
+
+// CheckGroupSendPermission 转发群消息发送权限检查请求。
+func (c *groupServiceClientImpl) CheckGroupSendPermission(ctx context.Context, req *grouppb.CheckGroupSendPermissionRequest) (*grouppb.CheckGroupSendPermissionResponse, error) {
+	return c.groupClient.CheckGroupSendPermission(ctx, req)
+}
+
+// GetJoinRequestPendingCount 转发待审批入群申请数量查询请求。
+func (c *groupServiceClientImpl) GetJoinRequestPendingCount(ctx context.Context, req *grouppb.GetJoinRequestPendingCountRequest) (*grouppb.GetJoinRequestPendingCountResponse, error) {
+	return c.groupClient.GetJoinRequestPendingCount(ctx, req)
 }

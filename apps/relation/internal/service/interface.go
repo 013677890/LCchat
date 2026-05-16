@@ -1,8 +1,10 @@
 package service
+
 import (
 	"context"
 	pb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 )
+
 // ==================== 好友服务接口 ====================
 // IFriendService 好友服务接口
 // 职责：好友申请、好友列表、备注标签
@@ -38,6 +40,7 @@ type IFriendService interface {
 	// GetRelationStatus 获取关系状态
 	GetRelationStatus(ctx context.Context, req *pb.GetRelationStatusRequest) (*pb.GetRelationStatusResponse, error)
 }
+
 // ==================== 黑名单服务接口 ====================
 // IBlacklistService 黑名单服务接口
 // 职责：拉黑、取消拉黑、黑名单列表、判断是否拉黑
@@ -51,8 +54,10 @@ type IBlacklistService interface {
 	// CheckIsBlacklist 判断是否拉黑
 	CheckIsBlacklist(ctx context.Context, req *pb.CheckIsBlacklistRequest) (*pb.CheckIsBlacklistResponse, error)
 }
+
 // ==================== 别名类型定义 ====================
 // FriendService 别名 IFriendService
 type FriendService = IFriendService
+
 // BlacklistService 别名 IBlacklistService
 type BlacklistService = IBlacklistService

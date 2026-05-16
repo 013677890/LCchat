@@ -44,10 +44,16 @@ func (r *groupRepositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload 
 		return r.applyGroupDismissedEvent(ctx, payload)
 	case groupevent.ActionGroupInfoUpdated:
 		return r.applyGroupInfoUpdatedEvent(ctx, payload)
+	case groupevent.ActionGroupMuteSettingUpdated:
+		return r.applyGroupMuteSettingUpdatedEvent(ctx, payload)
 	case groupevent.ActionOwnerTransferred:
 		return r.applyOwnerTransferredEvent(ctx, payload)
 	case groupevent.ActionMemberRoleUpdated:
 		return r.applyMemberRoleUpdatedEvent(ctx, payload)
+	case groupevent.ActionMemberProfileUpdated:
+		return r.applyMemberProfileUpdatedEvent(ctx, payload)
+	case groupevent.ActionMemberMuted:
+		return r.applyMemberMutedEvent(ctx, payload)
 	case groupevent.ActionJoinRequestCreated:
 		return r.applyJoinRequestCreatedEvent(ctx, payload)
 	case groupevent.ActionJoinRequestReviewed:
@@ -89,11 +95,11 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 		if payload.Group == nil || payload.UserUUID == "" {
 			return fmt.Errorf("%w: member_removed missing required fields", ErrInvalidProjectorPayload)
 		}
-	case groupevent.ActionGroupDismissed, groupevent.ActionGroupInfoUpdated:
+	case groupevent.ActionGroupDismissed, groupevent.ActionGroupInfoUpdated, groupevent.ActionGroupMuteSettingUpdated:
 		if payload.Group == nil {
 			return fmt.Errorf("%w: %s missing group snapshot", ErrInvalidProjectorPayload, payload.Action)
 		}
-	case groupevent.ActionOwnerTransferred, groupevent.ActionMemberRoleUpdated:
+	case groupevent.ActionOwnerTransferred, groupevent.ActionMemberRoleUpdated, groupevent.ActionMemberProfileUpdated, groupevent.ActionMemberMuted:
 		if payload.Group == nil {
 			return fmt.Errorf("%w: %s missing group snapshot", ErrInvalidProjectorPayload, payload.Action)
 		}
@@ -192,6 +198,14 @@ func (r *groupRepositoryImpl) applyGroupInfoUpdatedEvent(ctx context.Context, pa
 	return r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group))
 }
 
+// applyGroupMuteSettingUpdatedEvent 处理全员禁言开关变更后的缓存投影。
+//
+// 全员禁言只影响群级发送策略，因此这里只刷新 group:info；
+// 成员角色和单人禁言仍保留在 group:members，由发送权限检查组合判断。
+func (r *groupRepositoryImpl) applyGroupMuteSettingUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+	return r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group))
+}
+
 // applyOwnerTransferredEvent 处理群主转让后的缓存投影。
 //
 // 该事件需要同步两类缓存：
@@ -223,6 +237,20 @@ func (r *groupRepositoryImpl) applyMemberRoleUpdatedEvent(ctx context.Context, p
 		}
 	}
 	return nil
+}
+
+// applyMemberProfileUpdatedEvent 处理成员群名片变更后的缓存投影。
+//
+// 该事件与角色更新一样只 patch 受影响成员字段，避免为了单个群名片更新重建整个成员 Hash。
+func (r *groupRepositoryImpl) applyMemberProfileUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+	return r.applyMemberRoleUpdatedEvent(ctx, payload)
+}
+
+// applyMemberMutedEvent 处理成员单人禁言变更后的缓存投影。
+//
+// 单人禁言是成员维度权限事实，复用成员 patch 逻辑即可同步 mute_until 到 Redis。
+func (r *groupRepositoryImpl) applyMemberMutedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+	return r.applyMemberRoleUpdatedEvent(ctx, payload)
 }
 
 // applyJoinRequestCreatedEvent 处理新增待审批入群申请后的缓存投影。

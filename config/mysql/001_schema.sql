@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS `groups` (
   `member_cnt` INT NOT NULL DEFAULT 1 COMMENT '群人数',
   `owner_uuid` CHAR(20) NOT NULL COMMENT '群主uuid',
   `add_mode` TINYINT NOT NULL DEFAULT 0 COMMENT '加群方式,0.直接 1.审核',
+  `mute_all` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否全员禁言,0否 1是',
   `avatar` VARCHAR(255) NOT NULL DEFAULT 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png' COMMENT '群头像URL',
   `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态,0.正常 1.禁用 2.解散',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
@@ -115,6 +116,8 @@ CREATE TABLE IF NOT EXISTS `group_join_requests` (
   PRIMARY KEY (`id`),
   KEY `idx_group_join_pending` (`group_uuid`, `status`, `deleted_at`, `created_at`, `id`),
   KEY `idx_group_join_applicant` (`applicant_uuid`, `status`, `deleted_at`, `created_at`, `id`),
+  KEY `idx_group_join_group_applicant_id` (`group_uuid`, `applicant_uuid`, `deleted_at`, `id`),
+  KEY `idx_group_join_reviewed` (`group_uuid`, `status`, `deleted_at`, `reviewed_at`, `id`),
   KEY `idx_group_join_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群入群申请';
 CREATE TABLE IF NOT EXISTS `user_relations` (

@@ -197,12 +197,24 @@ type GroupService interface {
 	ListReviewedJoinRequests(ctx context.Context, req *dto.ListReviewedJoinRequestsRequest) (*dto.ListReviewedJoinRequestsResponse, error)
 	// AddMember 添加群成员。
 	AddMember(ctx context.Context, req *dto.AddGroupMemberRequest) error
+	// LeaveGroup 当前用户主动退出群聊。
+	LeaveGroup(ctx context.Context, req *dto.LeaveGroupRequest) error
 	// RemoveMember 移除群成员。
 	RemoveMember(ctx context.Context, req *dto.RemoveGroupMemberRequest) error
 	// GetMemberList 获取群成员列表。
 	GetMemberList(ctx context.Context, req *dto.GetGroupMemberListRequest) (*dto.GetGroupMemberListResponse, error)
+	// SearchGroupMembers 搜索群成员。
+	SearchGroupMembers(ctx context.Context, req *dto.SearchGroupMembersRequest) (*dto.SearchGroupMembersResponse, error)
+	// UpdateMyGroupNickname 更新当前用户自己的群名片。
+	UpdateMyGroupNickname(ctx context.Context, req *dto.UpdateMyGroupNicknameRequest) error
+	// MuteGroupMember 设置或取消成员单人禁言。
+	MuteGroupMember(ctx context.Context, req *dto.MuteGroupMemberRequest) error
+	// UpdateGroupMuteSetting 更新全员禁言开关。
+	UpdateGroupMuteSetting(ctx context.Context, req *dto.UpdateGroupMuteSettingRequest) error
 	// GetGroupList 获取当前用户的群列表。
 	GetGroupList(ctx context.Context) (*dto.GetGroupListResponse, error)
 	// GetGroupMemberIDs 获取群成员 UUID 列表。
 	GetGroupMemberIDs(ctx context.Context, req *dto.GetGroupMemberIDsRequest) (*dto.GetGroupMemberIDsResponse, error)
+	// GetJoinRequestPendingCount 获取群待审批入群申请数量。
+	GetJoinRequestPendingCount(ctx context.Context, req *dto.GetJoinRequestPendingCountRequest) (*dto.GetJoinRequestPendingCountResponse, error)
 }

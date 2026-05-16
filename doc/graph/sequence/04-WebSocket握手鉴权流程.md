@@ -31,4 +31,3 @@ sequenceDiagram
     H->>M: Register(client)
     H-->>C: WS upgraded
 ```
-

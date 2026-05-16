@@ -117,7 +117,11 @@ func (s *groupServiceImpl) ListMyJoinGroupApplications(ctx context.Context, req 
 		return nil, apperr.New(consts.CodeParamError)
 	}
 	page, pageSize := normalizeJoinRequestPage(req.GetPage(), req.GetPageSize())
-	items, total, err := s.groupRepo.ListMyJoinGroupApplications(ctx, currentUserUUID, page, pageSize)
+	status, err := normalizeOptionalJoinRequestStatus(req.Status)
+	if err != nil {
+		return nil, err
+	}
+	items, total, err := s.groupRepo.ListMyJoinGroupApplications(ctx, currentUserUUID, status, page, pageSize)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取我的入群申请列表失败")
 	}
@@ -213,7 +217,11 @@ func (s *groupServiceImpl) ListReviewedJoinRequests(ctx context.Context, req *pb
 		return nil, apperr.New(consts.CodeParamError)
 	}
 	page, pageSize := normalizeJoinRequestPage(req.GetPage(), req.GetPageSize())
-	items, total, err := s.groupRepo.ListReviewedJoinRequests(ctx, groupUUID, currentUserUUID, page, pageSize)
+	status, err := normalizeOptionalReviewedJoinRequestStatus(req.Status)
+	if err != nil {
+		return nil, err
+	}
+	items, total, err := s.groupRepo.ListReviewedJoinRequests(ctx, groupUUID, currentUserUUID, status, page, pageSize)
 	if err != nil {
 		return nil, mapGroupWriteError(err, "获取审批记录列表失败")
 	}
@@ -248,6 +256,35 @@ func normalizeJoinRequestPage(page, pageSize int32) (int, int) {
 		pageSize = 100
 	}
 	return int(page), int(pageSize)
+}
+
+// normalizeOptionalJoinRequestStatus 校验“我的申请列表”的可选状态筛选。
+//
+// nil 表示不筛选，传值时允许覆盖申请流的四种终态：
+// 0=待审批、1=已通过、2=已拒绝、3=已撤销。
+func normalizeOptionalJoinRequestStatus(status *int32) (*int8, error) {
+	if status == nil {
+		return nil, nil
+	}
+	if *status < 0 || *status > 3 {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	value := int8(*status)
+	return &value, nil
+}
+
+// normalizeOptionalReviewedJoinRequestStatus 校验审批记录列表的可选状态筛选。
+//
+// 审批记录只包含管理员处理过的已通过/已拒绝，撤销属于申请人动作，不进入审批历史。
+func normalizeOptionalReviewedJoinRequestStatus(status *int32) (*int8, error) {
+	if status == nil {
+		return nil, nil
+	}
+	if *status != int32(joinRequestActionApprove) && *status != int32(joinRequestActionReject) {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	value := int8(*status)
+	return &value, nil
 }
 
 // collectJoinRequestApplicantUUIDs 提取申请人 UUID，供批量补齐资料。

@@ -16,4 +16,3 @@ stateDiagram-v2
     HalfOpen --> Closed: probe requests succeed
     HalfOpen --> Open: probe request fails
 ```
-
