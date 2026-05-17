@@ -1,5 +1,15 @@
 # LCChat Project Memory
 
+## Memory Navigation
+- `project-memory.md`: architecture, service boundaries, durable implementation truths.
+- `memory-roadmap.md`: plan for splitting this large memory into focused local runbooks.
+- Planned specialized files:
+  - `watchlist.md`: known risks and sharp edges
+  - `runbook.md`: startup, env, build, proto, and troubleshooting commands
+  - `api-map.md`: gateway HTTP route to downstream gRPC map
+  - `data-flow.md`: key product and event flows
+  - `testing-map.md`: test/build/generation matrix
+
 ## Source Of Truth
 - Treat code as source of truth; docs are useful but partially stale.
 - Read order that works best in this repo:
