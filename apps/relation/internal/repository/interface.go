@@ -17,7 +17,6 @@ type IFriendRepository interface {
 	CleanupAccountRelations(ctx context.Context, userUUID string) error
 	SetFriendRemark(ctx context.Context, userUUID, friendUUID, remark string) error
 	SetFriendTag(ctx context.Context, userUUID, friendUUID, groupTag string) error
-	GetTagList(ctx context.Context, userUUID string) ([]string, error)
 	IsFriend(ctx context.Context, userUUID, friendUUID string) (bool, error)
 	CheckIsFriendRelation(ctx context.Context, userUUID, peerUUID string) (bool, error)
 	BatchCheckIsFriend(ctx context.Context, userUUID string, peerUUIDs []string) (map[string]bool, error)

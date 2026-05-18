@@ -643,18 +643,6 @@ func (s *friendServiceImpl) SetFriendTag(ctx context.Context, req *pb.SetFriendT
 	return nil
 }
 
-// GetTagList 获取标签列表。
-//
-// 旧单体中的该接口尚未完整实现标签计数能力。为了保持现有行为一致，当前仍返回
-// MethodNotAllowed，避免给调用方制造“看似可用但统计不准确”的假象。
-//
-// 错误码映射：
-//   - codes.MethodNotAllowed: 功能暂未实现
-func (s *friendServiceImpl) GetTagList(ctx context.Context, req *pb.GetTagListRequest) (*pb.GetTagListResponse, error) {
-	// 这里显式拒绝而不是返回空列表，避免调用方误判为“当前没有标签”。
-	return nil, apperr.NewWithMessage(consts.CodeMethodNotAllowed, "获取标签列表功能暂未实现")
-}
-
 // CheckIsFriend 判断两个用户之间是否存在好友关系。
 //
 // 该接口主要面向其他服务或网关的关系判定，不依赖当前登录上下文。

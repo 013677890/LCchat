@@ -58,7 +58,6 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/friend/delete":       2 * time.Second,
 	"/api/v1/auth/friend/remark":       2 * time.Second,
 	"/api/v1/auth/friend/tag":          2 * time.Second,
-	"/api/v1/auth/friend/tags":         1 * time.Second,
 	"/api/v1/auth/friend/check":        1 * time.Second,
 	"/api/v1/auth/friend/relation":     1 * time.Second,
 	// auth blacklist
@@ -217,7 +216,6 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				friend.POST("/delete", friendHandler.DeleteFriend)
 				friend.POST("/remark", friendHandler.SetFriendRemark)
 				friend.POST("/tag", friendHandler.SetFriendTag)
-				friend.GET("/tags", friendHandler.GetTagList)
 				friend.POST("/check", friendHandler.CheckIsFriend)
 				friend.POST("/relation", friendHandler.GetRelationStatus)
 			}

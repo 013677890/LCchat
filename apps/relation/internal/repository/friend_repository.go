@@ -241,22 +241,6 @@ func (r *friendRepositoryImpl) SetFriendTag(ctx context.Context, userUUID, frien
 	return nil
 }
 
-// GetTagList 查询当前用户已使用的好友标签列表。
-//
-// 当前最小闭环版本只返回标签名去重结果，不统计每个标签下的好友数量；如果上层需要
-// count，可在下一步将仓储接口扩展为聚合查询。
-func (r *friendRepositoryImpl) GetTagList(ctx context.Context, userUUID string) ([]string, error) {
-	var tags []string
-	if err := r.db.WithContext(ctx).
-		Model(&model.UserRelation{}).
-		Where("user_uuid = ? AND status = ? AND deleted_at IS NULL AND group_tag <> ''", userUUID, 0).
-		Distinct().
-		Pluck("group_tag", &tags).Error; err != nil {
-		return nil, WrapDBError(err)
-	}
-	return tags, nil
-}
-
 // IsFriend 判断两人是否为好友。
 //
 // 对外语义仍保持不变，但内部会优先命中 Redis Hash，只有缓存未命中时才回源 MySQL。

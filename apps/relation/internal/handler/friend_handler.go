@@ -76,11 +76,6 @@ func (h *FriendHandler) SetFriendTag(ctx context.Context, req *pb.SetFriendTagRe
 	return &pb.SetFriendTagResponse{}, h.friendService.SetFriendTag(ctx, req)
 }
 
-// GetTagList 获取标签列表
-func (h *FriendHandler) GetTagList(ctx context.Context, req *pb.GetTagListRequest) (*pb.GetTagListResponse, error) {
-	return h.friendService.GetTagList(ctx, req)
-}
-
 // CheckIsFriend 判断是否好友
 func (h *FriendHandler) CheckIsFriend(ctx context.Context, req *pb.CheckIsFriendRequest) (*pb.CheckIsFriendResponse, error) {
 	return h.friendService.CheckIsFriend(ctx, req)

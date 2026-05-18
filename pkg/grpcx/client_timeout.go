@@ -96,7 +96,6 @@ var defaultClientMethodTimeouts = map[string]time.Duration{
 	"/relation.FriendService/DeleteFriend":               500 * time.Millisecond,
 	"/relation.FriendService/SetFriendRemark":            500 * time.Millisecond,
 	"/relation.FriendService/SetFriendTag":               500 * time.Millisecond,
-	"/relation.FriendService/GetTagList":                 300 * time.Millisecond,
 	"/relation.FriendService/CheckIsFriend":              300 * time.Millisecond,
 	"/relation.FriendService/BatchCheckIsFriend":         800 * time.Millisecond,
 	"/relation.FriendService/GetRelationStatus":          300 * time.Millisecond,

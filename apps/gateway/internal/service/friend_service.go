@@ -360,20 +360,6 @@ func (s *FriendServiceImpl) SetFriendTag(ctx context.Context, req *dto.SetFriend
 	return dto.ConvertSetFriendTagResponseFromProto(nil), nil
 }
 
-// GetTagList 获取标签列表
-func (s *FriendServiceImpl) GetTagList(ctx context.Context, req *dto.GetTagListRequest) (*dto.GetTagListResponse, error) {
-	// 1. 调用用户服务获取标签列表(gRPC)
-	grpcResp, err := s.userClient.GetTagList(ctx, &relationpb.GetTagListRequest{})
-	if err != nil {
-		// gRPC 调用失败，提取业务错误码
-		// 返回业务错误（作为 Go error 返回，由 Handler 层处理）
-		return nil, err
-	}
-
-	// 2. gRPC 调用成功，返回结果
-	return dto.ConvertGetTagListResponseFromProto(grpcResp), nil
-}
-
 // CheckIsFriend 判断是否好友
 func (s *FriendServiceImpl) CheckIsFriend(ctx context.Context, req *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error) {
 	// 1. 转换 DTO 为 Protobuf 请求

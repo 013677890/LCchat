@@ -57,10 +57,6 @@ service FriendService {
 	// 建议调用超时：500ms。
 	rpc SetFriendTag(SetFriendTagRequest) returns (SetFriendTagResponse);
 
-	// GetTagList 获取标签列表
-	// 建议调用超时：300ms。
-	rpc GetTagList(GetTagListRequest) returns (GetTagListResponse);
-
 	// CheckIsFriend 判断是否好友
 	// 建议调用超时：300ms。
 	rpc CheckIsFriend(CheckIsFriendRequest) returns (CheckIsFriendResponse);
@@ -83,12 +79,6 @@ message SimpleUserInfo {
 	string avatar = 3;
 	int32 gender = 4;
 	string signature = 5;
-}
-
-// TagItem 标签项
-message TagItem {
-	string tag_name = 1;
-	int32 count = 2;
 }
 
 // ==================== 好友申请 ====================
@@ -262,14 +252,6 @@ message SetFriendTagRequest {
 
 // SetFriendTagResponse 设置好友标签响应
 message SetFriendTagResponse {}
-
-// GetTagListRequest 获取标签列表请求
-message GetTagListRequest {}
-
-// GetTagListResponse 获取标签列表响应
-message GetTagListResponse {
-	repeated TagItem tags = 1;
-}
 
 // ==================== 关系判断 ====================
 

@@ -198,20 +198,6 @@ type SetFriendTagRequest struct {
 // SetFriendTagResponse 设置好友标签响应 DTO
 type SetFriendTagResponse struct{}
 
-// GetTagListRequest 获取标签列表请求 DTO
-type GetTagListRequest struct{}
-
-// TagItem 标签项 DTO
-type TagItem struct {
-	TagName string `json:"tagName"` // 标签名
-	Count   int32  `json:"count"`   // 数量
-}
-
-// GetTagListResponse 获取标签列表响应 DTO
-type GetTagListResponse struct {
-	Tags []*TagItem `json:"tags"` // 标签列表
-}
-
 // CheckIsFriendRequest 判断是否好友请求 DTO
 type CheckIsFriendRequest struct {
 	UserUUID string `json:"userUuid" binding:"required"` // 当前用户UUID
@@ -579,33 +565,6 @@ func ConvertSetFriendTagResponseFromProto(pb *relationpb.SetFriendTagResponse) *
 		return nil
 	}
 	return &SetFriendTagResponse{}
-}
-
-// ConvertTagItemFromProto 将 Protobuf 标签项转换为 DTO
-func ConvertTagItemFromProto(pb *relationpb.TagItem) *TagItem {
-	if pb == nil {
-		return nil
-	}
-	return &TagItem{
-		TagName: pb.TagName,
-		Count:   pb.Count,
-	}
-}
-
-// ConvertGetTagListResponseFromProto 将 Protobuf 获取标签列表响应转换为 DTO
-func ConvertGetTagListResponseFromProto(pb *relationpb.GetTagListResponse) *GetTagListResponse {
-	if pb == nil {
-		return nil
-	}
-
-	tags := make([]*TagItem, 0, len(pb.Tags))
-	for _, tag := range pb.Tags {
-		tags = append(tags, ConvertTagItemFromProto(tag))
-	}
-
-	return &GetTagListResponse{
-		Tags: tags,
-	}
 }
 
 // ConvertCheckIsFriendResponseFromProto 将 Protobuf 判断是否好友响应转换为 DTO

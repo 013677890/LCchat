@@ -473,35 +473,6 @@ func (h *FriendHandler) SetFriendTag(c *gin.Context) {
 	result.Success(c, nil)
 }
 
-// GetTagList 获取标签列表接口
-// @Summary 获取标签列表
-// @Description 获取当前用户的好友标签列表
-// @Tags 好友接口
-// @Accept json
-// @Produce json
-// @Success 200 {object} dto.GetTagListResponse
-// @Router /api/v1/user/friend/tags [get]
-func (h *FriendHandler) GetTagList(c *gin.Context) {
-	ctx := middleware.NewContextWithGin(c)
-
-	// 1. 调用服务层处理业务逻辑（依赖注入）
-	tagListResp, err := h.friendService.GetTagList(ctx, &dto.GetTagListRequest{})
-	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
-		return
-	}
-
-	// 2. 返回成功响应
-	result.Success(c, tagListResp)
-}
-
 // CheckIsFriend 判断是否好友接口
 // @Summary 判断是否好友
 // @Description 判断两个用户是否为好友关系

@@ -64,11 +64,6 @@ func (c *userServiceClientImpl) SetFriendTag(ctx context.Context, req *relationp
 	return c.friendClient.SetFriendTag(ctx, req)
 }
 
-// GetTagList 获取标签列表。
-func (c *userServiceClientImpl) GetTagList(ctx context.Context, req *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error) {
-	return c.friendClient.GetTagList(ctx, req)
-}
-
 // CheckIsFriend 判断是否好友。
 func (c *userServiceClientImpl) CheckIsFriend(ctx context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
 	return c.friendClient.CheckIsFriend(ctx, req)

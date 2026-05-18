@@ -167,8 +167,6 @@ type UserServiceClient interface {
 	SetFriendRemark(ctx context.Context, req *relationpb.SetFriendRemarkRequest) (*relationpb.SetFriendRemarkResponse, error)
 	// SetFriendTag 设置好友标签
 	SetFriendTag(ctx context.Context, req *relationpb.SetFriendTagRequest) (*relationpb.SetFriendTagResponse, error)
-	// GetTagList 获取标签列表
-	GetTagList(ctx context.Context, req *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error)
 	// CheckIsFriend 判断是否好友
 	CheckIsFriend(ctx context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error)
 	// BatchCheckIsFriend 批量判断是否好友

@@ -80,8 +80,6 @@ type FriendService interface {
 	SetFriendRemark(ctx context.Context, req *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error)
 	// SetFriendTag 设置好友标签
 	SetFriendTag(ctx context.Context, req *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error)
-	// GetTagList 获取标签列表
-	GetTagList(ctx context.Context, req *dto.GetTagListRequest) (*dto.GetTagListResponse, error)
 	// CheckIsFriend 判断是否好友
 	CheckIsFriend(ctx context.Context, req *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error)
 	// GetRelationStatus 获取关系状态

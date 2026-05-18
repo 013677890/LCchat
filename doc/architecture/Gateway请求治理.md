@@ -1,5 +1,4 @@
 # Gateway 请求治理
-
 Gateway 是所有 HTTP API 的统一入口，当前基于 Gin 实现，路由事实来源是 [apps/gateway/internal/router/router.go](../../apps/gateway/internal/router/router.go)。
 
 ## 路由分层
@@ -17,7 +16,6 @@ Gateway 是所有 HTTP API 的统一入口，当前基于 Gin 实现，路由事
 | `/api/v1/auth/groups/*` | 是 | 群资料、成员、申请、角色、禁言。 |
 
 ## 中间件顺序
-
 Gateway 初始化时按以下顺序挂载中间件：
 
 1. Recovery：拦截 panic，避免进程崩溃。
@@ -32,13 +30,12 @@ Gateway 初始化时按以下顺序挂载中间件：
 10. UserRateLimit：仅已登录用户路由启用。
 
 ## 超时预算
-
 Gateway 维护显式路由预算，未命中新接口回退到默认 2 秒。
 
 | 预算 | 典型接口 |
 | --- | --- |
 | 0 | `/health`、`/metrics`，不启用业务超时包装。 |
-| 1 秒 | 二维码、在线状态、标签列表、申请未读数。 |
+| 1 秒 | 二维码、在线状态、申请未读数。 |
 | 2 秒 | 登录、关系写操作、会话设置、群资料读写。 |
 | 3 秒 | 搜索、批量资料、头像上传、发送消息。 |
 
@@ -56,7 +53,6 @@ Gateway 维护显式路由预算，未命中新接口回退到默认 2 秒。
 Redis 不可用时限流链路 Fail-Open，优先保证核心服务可用。
 
 ## 鉴权上下文
-
 认证路由通过 JWT 中间件解析用户身份，并向上下文写入：
 
 - `user_uuid`
@@ -67,7 +63,6 @@ Redis 不可用时限流链路 Fail-Open，优先保证核心服务可用。
 这些字段会继续透传到后端 gRPC 服务。消息发送、设备状态、Token 管理和多端同步都依赖 `device_id`。
 
 ## 响应与错误映射
-
 Gateway 统一使用 `pkg/result` 输出响应：
 
 | 类型 | HTTP 状态码 | Body `code` |
@@ -79,7 +74,6 @@ Gateway 统一使用 `pkg/result` 输出响应：
 业务错误直接返回标准业务码；上游系统错误通过 `result.FailServer` 挂入 Gin 错误链，由最终日志统一记录。
 
 ## 维护要求
-
 - 新增接口必须同时更新 [api](../api)、本文件的路由分层和超时预算描述。
 - 新增中间件必须说明顺序原因，尤其是日志、超时、鉴权、限流之间的先后关系。
 - 新增限流或安全策略必须同步更新 [data/Redis-Key设计.md](../data/Redis-Key设计.md) 与 [ops/监控指标.md](../ops/监控指标.md)。

@@ -36,7 +36,6 @@ type fakeRouterFriendService struct {
 	deleteFn        func(context.Context, *dto.DeleteFriendRequest) (*dto.DeleteFriendResponse, error)
 	remarkFn        func(context.Context, *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error)
 	tagFn           func(context.Context, *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error)
-	getTagListFn    func(context.Context, *dto.GetTagListRequest) (*dto.GetTagListResponse, error)
 	checkFn         func(context.Context, *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error)
 	getRelationFn   func(context.Context, *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error)
 }
@@ -118,13 +117,6 @@ func (f *fakeRouterFriendService) SetFriendTag(ctx context.Context, req *dto.Set
 		return &dto.SetFriendTagResponse{}, nil
 	}
 	return f.tagFn(ctx, req)
-}
-
-func (f *fakeRouterFriendService) GetTagList(ctx context.Context, req *dto.GetTagListRequest) (*dto.GetTagListResponse, error) {
-	if f.getTagListFn == nil {
-		return &dto.GetTagListResponse{}, nil
-	}
-	return f.getTagListFn(ctx, req)
 }
 
 func (f *fakeRouterFriendService) CheckIsFriend(ctx context.Context, req *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error) {
@@ -362,17 +354,6 @@ func TestRouterFriendRoutesAndSuccess(t *testing.T) {
 					*called = true
 					require.Equal(t, "work", req.GroupTag)
 					return &dto.SetFriendTagResponse{}, nil
-				}
-			},
-		},
-		{
-			name:   "get_tags",
-			method: http.MethodGet,
-			target: "/api/v1/auth/friend/tags",
-			setup: func(s *fakeRouterFriendService, called *bool) {
-				s.getTagListFn = func(_ context.Context, _ *dto.GetTagListRequest) (*dto.GetTagListResponse, error) {
-					*called = true
-					return &dto.GetTagListResponse{}, nil
 				}
 			},
 		},

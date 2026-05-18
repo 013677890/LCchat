@@ -50,7 +50,6 @@ type fakeFriendRepoForService struct {
 	cleanupRelationFn    func(context.Context, string) error
 	setRemarkFn          func(context.Context, string, string, string) error
 	setTagFn             func(context.Context, string, string, string) error
-	getTagListFn         func(context.Context, string) ([]string, error)
 	isFriendFn           func(context.Context, string, string) (bool, error)
 	checkIsFriendFn      func(context.Context, string, string) (bool, error)
 	batchCheckIsFriendFn func(context.Context, string, []string) (map[string]bool, error)
@@ -105,13 +104,6 @@ func (f *fakeFriendRepoForService) SetFriendTag(ctx context.Context, userUUID, f
 		return nil
 	}
 	return f.setTagFn(ctx, userUUID, friendUUID, groupTag)
-}
-
-func (f *fakeFriendRepoForService) GetTagList(ctx context.Context, userUUID string) ([]string, error) {
-	if f.getTagListFn == nil {
-		return nil, nil
-	}
-	return f.getTagListFn(ctx, userUUID)
 }
 
 func (f *fakeFriendRepoForService) IsFriend(ctx context.Context, userUUID, friendUUID string) (bool, error) {
@@ -470,13 +462,4 @@ func TestRelationFriendServiceGetUnreadApplyCountDegrade(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, int32(0), resp.UnreadCount)
-}
-
-func TestRelationFriendServiceGetTagListUnimplemented(t *testing.T) {
-	initRelationServiceTestLogger()
-
-	svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{})
-	resp, err := svc.GetTagList(withRelationUserUUID("u1"), &pb.GetTagListRequest{})
-	require.Nil(t, resp)
-	requireRelationBizCode(t, err, consts.CodeMethodNotAllowed)
 }

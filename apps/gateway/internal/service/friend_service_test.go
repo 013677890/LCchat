@@ -42,7 +42,6 @@ type fakeGatewayFriendClient struct {
 	deleteFriendFn       func(context.Context, *relationpb.DeleteFriendRequest) (*relationpb.DeleteFriendResponse, error)
 	setFriendRemarkFn    func(context.Context, *relationpb.SetFriendRemarkRequest) (*relationpb.SetFriendRemarkResponse, error)
 	setFriendTagFn       func(context.Context, *relationpb.SetFriendTagRequest) (*relationpb.SetFriendTagResponse, error)
-	getTagListFn         func(context.Context, *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error)
 	checkIsFriendFn      func(context.Context, *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error)
 	getRelationStatusFn  func(context.Context, *relationpb.GetRelationStatusRequest) (*relationpb.GetRelationStatusResponse, error)
 	batchGetProfileFn    func(context.Context, *userpb.BatchGetProfileRequest) (*userpb.BatchGetProfileResponse, error)
@@ -123,13 +122,6 @@ func (f *fakeGatewayFriendClient) SetFriendTag(ctx context.Context, req *relatio
 		return nil, errors.New("unexpected SetFriendTag call")
 	}
 	return f.setFriendTagFn(ctx, req)
-}
-
-func (f *fakeGatewayFriendClient) GetTagList(ctx context.Context, req *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error) {
-	if f.getTagListFn == nil {
-		return nil, errors.New("unexpected GetTagList call")
-	}
-	return f.getTagListFn(ctx, req)
 }
 
 func (f *fakeGatewayFriendClient) CheckIsFriend(ctx context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
@@ -441,9 +433,6 @@ func TestGatewayFriendServiceSimpleMethods(t *testing.T) {
 				}
 				return &relationpb.SetFriendTagResponse{}, nil
 			},
-			getTagListFn: func(_ context.Context, _ *relationpb.GetTagListRequest) (*relationpb.GetTagListResponse, error) {
-				return &relationpb.GetTagListResponse{Tags: []*relationpb.TagItem{{TagName: "work"}}}, nil
-			},
 			checkIsFriendFn: func(_ context.Context, req *relationpb.CheckIsFriendRequest) (*relationpb.CheckIsFriendResponse, error) {
 				if req.PeerUuid == "bad" {
 					return nil, wantErr
@@ -486,11 +475,6 @@ func TestGatewayFriendServiceSimpleMethods(t *testing.T) {
 		require.Nil(t, tagResp)
 		_, tagErrBad := svc.SetFriendTag(context.Background(), &dto.SetFriendTagRequest{UserUUID: "bad", GroupTag: "g"})
 		require.ErrorIs(t, tagErrBad, wantErr)
-
-		listResp, listErr := svc.GetTagList(context.Background(), &dto.GetTagListRequest{})
-		require.NoError(t, listErr)
-		require.NotNil(t, listResp)
-		require.Len(t, listResp.Tags, 1)
 
 		checkResp, checkErr := svc.CheckIsFriend(context.Background(), &dto.CheckIsFriendRequest{UserUUID: "u1", PeerUUID: "u2"})
 		require.NoError(t, checkErr)

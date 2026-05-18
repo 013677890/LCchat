@@ -32,7 +32,6 @@ type fakeFriendHTTPService struct {
 	deleteFn        func(context.Context, *dto.DeleteFriendRequest) (*dto.DeleteFriendResponse, error)
 	remarkFn        func(context.Context, *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error)
 	tagFn           func(context.Context, *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error)
-	getTagListFn    func(context.Context, *dto.GetTagListRequest) (*dto.GetTagListResponse, error)
 	checkFn         func(context.Context, *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error)
 	getRelationFn   func(context.Context, *dto.GetRelationStatusRequest) (*dto.GetRelationStatusResponse, error)
 }
@@ -114,13 +113,6 @@ func (f *fakeFriendHTTPService) SetFriendTag(ctx context.Context, req *dto.SetFr
 		return &dto.SetFriendTagResponse{}, nil
 	}
 	return f.tagFn(ctx, req)
-}
-
-func (f *fakeFriendHTTPService) GetTagList(ctx context.Context, req *dto.GetTagListRequest) (*dto.GetTagListResponse, error) {
-	if f.getTagListFn == nil {
-		return &dto.GetTagListResponse{}, nil
-	}
-	return f.getTagListFn(ctx, req)
 }
 
 func (f *fakeFriendHTTPService) CheckIsFriend(ctx context.Context, req *dto.CheckIsFriendRequest) (*dto.CheckIsFriendResponse, error) {
@@ -502,19 +494,6 @@ func TestFriendHandlerSimpleMethods(t *testing.T) {
 			},
 			wantStatus: http.StatusOK,
 			wantCode:   consts.CodeSuccess,
-		},
-		{
-			name:   "get_tag_list_business_error",
-			method: http.MethodGet,
-			path:   "/api/v1/auth/friend/tags",
-			invoke: func(h *FriendHandler, c *gin.Context) { h.GetTagList(c) },
-			setupSvc: func(s *fakeFriendHTTPService) {
-				s.getTagListFn = func(_ context.Context, _ *dto.GetTagListRequest) (*dto.GetTagListResponse, error) {
-					return nil, apperr.New(consts.CodeNoPermission)
-				}
-			},
-			wantStatus: http.StatusOK,
-			wantCode:   consts.CodeNoPermission,
 		},
 		{
 			name:   "delete_friend_internal_error",

@@ -31,8 +31,6 @@ type IFriendService interface {
 	SetFriendRemark(ctx context.Context, req *pb.SetFriendRemarkRequest) error
 	// SetFriendTag 设置好友标签
 	SetFriendTag(ctx context.Context, req *pb.SetFriendTagRequest) error
-	// GetTagList 获取标签列表
-	GetTagList(ctx context.Context, req *pb.GetTagListRequest) (*pb.GetTagListResponse, error)
 	// CheckIsFriend 判断是否好友
 	CheckIsFriend(ctx context.Context, req *pb.CheckIsFriendRequest) (*pb.CheckIsFriendResponse, error)
 	// BatchCheckIsFriend 批量判断是否好友
