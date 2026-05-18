@@ -2,9 +2,8 @@ package grpcx
 
 import (
 	"context"
-	"time"
-
 	"google.golang.org/grpc"
+	"time"
 )
 
 // ClientTimeoutConfig 定义 gRPC 客户端按方法收紧 deadline 的策略。
@@ -22,10 +21,8 @@ func ClientTimeoutUnaryInterceptor(cfg ClientTimeoutConfig) grpc.UnaryClientInte
 		if timeout <= 0 {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}
-
 		callCtx, cancel, _ := newGRPCTimeoutContext(ctx, timeout)
 		defer cancel()
-
 		return invoker(callCtx, method, req, reply, cc, opts...)
 	}
 }
@@ -130,10 +127,12 @@ var defaultClientMethodTimeouts = map[string]time.Duration{
 	"/group.GroupService/MuteGroupMember":                500 * time.Millisecond,
 	"/group.GroupService/UpdateGroupMuteSetting":         500 * time.Millisecond,
 	"/group.GroupService/GetGroupList":                   500 * time.Millisecond,
+	"/group.GroupService/SearchGroups":                   800 * time.Millisecond,
 	"/group.GroupService/GetGroupMemberIds":              500 * time.Millisecond,
 	"/group.GroupService/CheckGroupMember":               300 * time.Millisecond,
 	"/group.GroupService/CheckGroupSendPermission":       300 * time.Millisecond,
 	"/group.GroupService/GetJoinRequestPendingCount":     300 * time.Millisecond,
+	"/group.GroupService/UpdateGroupMemberNickname":      500 * time.Millisecond,
 	"/user.GroupService/GetGroupMembers":                 800 * time.Millisecond,
 	"/msg.MsgService/SendMessage":                        1000 * time.Millisecond,
 	"/msg.MsgService/PullMessages":                       500 * time.Millisecond,

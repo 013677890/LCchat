@@ -207,12 +207,16 @@ type GroupService interface {
 	SearchGroupMembers(ctx context.Context, req *dto.SearchGroupMembersRequest) (*dto.SearchGroupMembersResponse, error)
 	// UpdateMyGroupNickname 更新当前用户自己的群名片。
 	UpdateMyGroupNickname(ctx context.Context, req *dto.UpdateMyGroupNicknameRequest) error
+	// UpdateGroupMemberNickname 管理员或群主修改指定成员群名片。
+	UpdateGroupMemberNickname(ctx context.Context, req *dto.UpdateGroupMemberNicknameRequest) error
 	// MuteGroupMember 设置或取消成员单人禁言。
 	MuteGroupMember(ctx context.Context, req *dto.MuteGroupMemberRequest) error
 	// UpdateGroupMuteSetting 更新全员禁言开关。
 	UpdateGroupMuteSetting(ctx context.Context, req *dto.UpdateGroupMuteSettingRequest) error
 	// GetGroupList 获取当前用户的群列表。
 	GetGroupList(ctx context.Context) (*dto.GetGroupListResponse, error)
+	// SearchGroups 按群名或完整群号搜索正常群。
+	SearchGroups(ctx context.Context, req *dto.SearchGroupsRequest) (*dto.SearchGroupsResponse, error)
 	// GetGroupMemberIDs 获取群成员 UUID 列表。
 	GetGroupMemberIDs(ctx context.Context, req *dto.GetGroupMemberIDsRequest) (*dto.GetGroupMemberIDsResponse, error)
 	// GetJoinRequestPendingCount 获取群待审批入群申请数量。

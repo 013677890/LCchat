@@ -181,6 +181,10 @@ const (
 	CodeAdminLimitExceeded = 14015 // 管理员数量已达上限
 	// 已存在待处理入群申请
 	CodeGroupApplyAlreadyExists = 14016 // 已存在待处理入群申请
+	// 群聊已开启全员禁言
+	CodeGroupMuted = 14017 // 群聊已开启全员禁言
+	// 当前成员已被禁言
+	CodeGroupMemberMuted = 14018 // 当前成员已被禁言
 )
 
 // 设备会话错误 (15xxx)
@@ -327,6 +331,8 @@ var CodeMessage = map[int]string{
 	CodeCannotQuitAsOwner:       "群主不能退群",
 	CodeAdminLimitExceeded:      "管理员数量已达上限",
 	CodeGroupApplyAlreadyExists: "已存在待处理入群申请",
+	CodeGroupMuted:              "群聊已开启全员禁言",
+	CodeGroupMemberMuted:        "当前成员已被禁言",
 	// 设备会话
 	CodeDeviceCreateFail:    "设备会话创建失败",
 	CodeDeviceAlreadyExist:  "设备会话已存在",

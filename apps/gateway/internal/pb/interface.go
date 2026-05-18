@@ -77,12 +77,16 @@ type GroupServiceClient interface {
 	SearchGroupMembers(ctx context.Context, req *grouppb.SearchGroupMembersRequest) (*grouppb.SearchGroupMembersResponse, error)
 	// UpdateMyGroupNickname 更新当前用户自己的群名片。
 	UpdateMyGroupNickname(ctx context.Context, req *grouppb.UpdateMyGroupNicknameRequest) (*grouppb.UpdateMyGroupNicknameResponse, error)
+	// UpdateGroupMemberNickname 管理员或群主修改指定成员群名片。
+	UpdateGroupMemberNickname(ctx context.Context, req *grouppb.UpdateGroupMemberNicknameRequest) (*grouppb.UpdateGroupMemberNicknameResponse, error)
 	// MuteGroupMember 设置或取消指定成员单人禁言。
 	MuteGroupMember(ctx context.Context, req *grouppb.MuteGroupMemberRequest) (*grouppb.MuteGroupMemberResponse, error)
 	// UpdateGroupMuteSetting 更新全员禁言开关。
 	UpdateGroupMuteSetting(ctx context.Context, req *grouppb.UpdateGroupMuteSettingRequest) (*grouppb.UpdateGroupMuteSettingResponse, error)
 	// GetGroupList 获取当前用户群列表。
 	GetGroupList(ctx context.Context, req *grouppb.GetGroupListRequest) (*grouppb.GetGroupListResponse, error)
+	// SearchGroups 按群名或完整群号搜索正常群。
+	SearchGroups(ctx context.Context, req *grouppb.SearchGroupsRequest) (*grouppb.SearchGroupsResponse, error)
 	// GetGroupMemberIds 获取群成员 UUID 列表。
 	GetGroupMemberIds(ctx context.Context, req *grouppb.GetGroupMemberIdsRequest) (*grouppb.GetGroupMemberIdsResponse, error)
 	// CheckGroupMember 检查群成员关系与角色。

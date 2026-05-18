@@ -21,6 +21,8 @@ type fakeGatewayGroupClient struct {
 	reviewJoinGroupFn   func(context.Context, *grouppb.ReviewJoinGroupRequest) (*grouppb.ReviewJoinGroupResponse, error)
 	listJoinRequestsFn  func(context.Context, *grouppb.ListJoinRequestsRequest) (*grouppb.ListJoinRequestsResponse, error)
 	listReviewedFn      func(context.Context, *grouppb.ListReviewedJoinRequestsRequest) (*grouppb.ListReviewedJoinRequestsResponse, error)
+	searchGroupsFn      func(context.Context, *grouppb.SearchGroupsRequest) (*grouppb.SearchGroupsResponse, error)
+	updateMemberNickFn  func(context.Context, *grouppb.UpdateGroupMemberNicknameRequest) (*grouppb.UpdateGroupMemberNicknameResponse, error)
 }
 
 func (f *fakeGatewayGroupClient) CreateGroup(context.Context, *grouppb.CreateGroupRequest) (*grouppb.CreateGroupResponse, error) {
@@ -113,8 +115,20 @@ func (f *fakeGatewayGroupClient) LeaveGroup(context.Context, *grouppb.LeaveGroup
 func (f *fakeGatewayGroupClient) SearchGroupMembers(context.Context, *grouppb.SearchGroupMembersRequest) (*grouppb.SearchGroupMembersResponse, error) {
 	return &grouppb.SearchGroupMembersResponse{}, nil
 }
+func (f *fakeGatewayGroupClient) SearchGroups(ctx context.Context, req *grouppb.SearchGroupsRequest) (*grouppb.SearchGroupsResponse, error) {
+	if f.searchGroupsFn == nil {
+		return &grouppb.SearchGroupsResponse{}, nil
+	}
+	return f.searchGroupsFn(ctx, req)
+}
 func (f *fakeGatewayGroupClient) UpdateMyGroupNickname(context.Context, *grouppb.UpdateMyGroupNicknameRequest) (*grouppb.UpdateMyGroupNicknameResponse, error) {
 	return &grouppb.UpdateMyGroupNicknameResponse{}, nil
+}
+func (f *fakeGatewayGroupClient) UpdateGroupMemberNickname(ctx context.Context, req *grouppb.UpdateGroupMemberNicknameRequest) (*grouppb.UpdateGroupMemberNicknameResponse, error) {
+	if f.updateMemberNickFn == nil {
+		return &grouppb.UpdateGroupMemberNicknameResponse{}, nil
+	}
+	return f.updateMemberNickFn(ctx, req)
 }
 func (f *fakeGatewayGroupClient) MuteGroupMember(context.Context, *grouppb.MuteGroupMemberRequest) (*grouppb.MuteGroupMemberResponse, error) {
 	return &grouppb.MuteGroupMemberResponse{}, nil

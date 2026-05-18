@@ -45,8 +45,12 @@ service GroupService {
 	// 该接口用于大群成员管理页，分页上限固定为 100，避免单次扫描返回过大结果集。
 	rpc SearchGroupMembers(SearchGroupMembersRequest) returns (SearchGroupMembersResponse);
 	// UpdateMyGroupNickname 更新当前登录用户自己的群名片。
-	// 只允许修改自己的群内展示名，管理员修改他人名片需要后续独立管理接口承载。
+	// 只允许修改自己的群内展示名；管理员代改他人群名片由 UpdateGroupMemberNickname 承载。
 	rpc UpdateMyGroupNickname(UpdateMyGroupNicknameRequest) returns (UpdateMyGroupNicknameResponse);
+	// UpdateGroupMemberNickname 更新指定成员的群名片。
+	// 该接口面向群管理场景：群主可修改管理员/普通成员，管理员只能修改普通成员；
+	// 群主或管理员修改自己的群名片时仍应使用 UpdateMyGroupNickname，避免管理权限和自助资料入口混用。
+	rpc UpdateGroupMemberNickname(UpdateGroupMemberNicknameRequest) returns (UpdateGroupMemberNicknameResponse);
 	// MuteGroupMember 设置或取消指定成员的单人禁言。
 	// mute_until=0 表示解除禁言；大于 0 表示禁言截止 Unix 毫秒时间戳。
 	rpc MuteGroupMember(MuteGroupMemberRequest) returns (MuteGroupMemberResponse);
@@ -54,6 +58,10 @@ service GroupService {
 	// 开启后普通成员不能发送群消息，群主和管理员仍保留管理沟通能力。
 	rpc UpdateGroupMuteSetting(UpdateGroupMuteSettingRequest) returns (UpdateGroupMuteSettingResponse);
 	rpc GetGroupList(GetGroupListRequest) returns (GetGroupListResponse);
+	// SearchGroups 按群名或完整群号搜索正常群。
+	// keyword 命中群号时要求完整 group_uuid 精确相等；命中群名时使用模糊匹配。
+	// 空 keyword 直接返回空列表，避免该接口退化成全量群枚举。
+	rpc SearchGroups(SearchGroupsRequest) returns (SearchGroupsResponse);
 	rpc GetGroupMemberIds(GetGroupMemberIdsRequest) returns (GetGroupMemberIdsResponse);
 	rpc CheckGroupMember(CheckGroupMemberRequest) returns (CheckGroupMemberResponse);
 	// CheckGroupSendPermission 检查指定用户在群内是否允许发送消息。
@@ -278,6 +286,14 @@ message UpdateMyGroupNicknameRequest {
 	string group_nickname = 2 [(validate.rules).string.max_len = 64];
 }
 message UpdateMyGroupNicknameResponse {}
+// UpdateGroupMemberNicknameRequest 描述管理员代改成员群名片的请求。
+// user_uuid 是目标成员 UUID，不从 body 之外推断，便于 gRPC 调用方明确表达被修改对象。
+message UpdateGroupMemberNicknameRequest {
+	string group_uuid = 1 [(validate.rules).string.min_len = 1];
+	string user_uuid = 2 [(validate.rules).string.min_len = 1];
+	string group_nickname = 3 [(validate.rules).string.max_len = 64];
+}
+message UpdateGroupMemberNicknameResponse {}
 message MuteGroupMemberRequest {
 	string group_uuid = 1 [(validate.rules).string.min_len = 1];
 	string user_uuid = 2 [(validate.rules).string.min_len = 1];
@@ -292,6 +308,28 @@ message UpdateGroupMuteSettingResponse {}
 message GetGroupListRequest {}
 message GetGroupListResponse {
 	repeated GetGroupInfoResponse groups = 1;
+}
+// GroupSearchItem 是群搜索列表项。
+// 搜索结果只暴露申请入群前必要的公开资料，不包含公告、群主、禁言等管理字段。
+message GroupSearchItem {
+	string group_uuid = 1;
+	string name = 2;
+	string avatar = 3;
+	int32 member_count = 4;
+	int32 add_mode = 5;
+}
+// SearchGroupsRequest 按群名或完整群号搜索正常群。
+// keyword 为空时返回空结果；page/page_size 用于限制大结果集的单次返回量。
+message SearchGroupsRequest {
+	string keyword = 1 [(validate.rules).string.max_len = 64];
+	int32 page = 2 [(validate.rules).int32 = {gte: 1}];
+	int32 page_size = 3 [(validate.rules).int32 = {gte: 1, lte: 100}];
+}
+message SearchGroupsResponse {
+	repeated GroupSearchItem groups = 1;
+	int64 total = 2;
+	int32 page = 3;
+	int32 page_size = 4;
 }
 message GetGroupMemberIdsRequest { string group_uuid = 1 [(validate.rules).string.min_len = 1]; }
 message GetGroupMemberIdsResponse { repeated string user_uuids = 1; }

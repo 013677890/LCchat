@@ -2,13 +2,12 @@ package service
 
 import (
 	"context"
-	"strings"
-	"time"
-
 	pb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
+	"strings"
+	"time"
 )
 
 // LeaveGroup 处理当前登录用户主动退群。
@@ -71,6 +70,43 @@ func (s *groupServiceImpl) SearchGroupMembers(ctx context.Context, req *pb.Searc
 	return &pb.SearchGroupMembersResponse{Members: items, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
 }
 
+// SearchGroups 按群名或完整群号搜索正常群。
+//
+// 该接口服务于用户主动找群场景，仍要求登录态，避免匿名请求批量枚举群信息；
+// 空 keyword 返回空分页结果，不把搜索接口降级成全量群列表。
+func (s *groupServiceImpl) SearchGroups(ctx context.Context, req *pb.SearchGroupsRequest) (*pb.SearchGroupsResponse, error) {
+	currentUserUUID := util.GetUserUUIDFromContext(ctx)
+	if currentUserUUID == "" {
+		return nil, apperr.New(consts.CodeUnauthorized)
+	}
+	if req == nil {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	keyword := strings.TrimSpace(req.GetKeyword())
+	if len([]rune(keyword)) > 64 {
+		return nil, apperr.New(consts.CodeParamError)
+	}
+	page, pageSize := normalizeJoinRequestPage(req.GetPage(), req.GetPageSize())
+	groups, total, err := s.groupRepo.SearchGroups(ctx, keyword, page, pageSize)
+	if err != nil {
+		return nil, mapGroupWriteError(err, "搜索群聊失败")
+	}
+	items := make([]*pb.GroupSearchItem, 0, len(groups))
+	for _, group := range groups {
+		if group == nil || group.Uuid == "" {
+			continue
+		}
+		items = append(items, &pb.GroupSearchItem{
+			GroupUuid:   group.Uuid,
+			Name:        group.Name,
+			Avatar:      group.Avatar,
+			MemberCount: int32(group.MemberCnt),
+			AddMode:     int32(group.AddMode),
+		})
+	}
+	return &pb.SearchGroupsResponse{Groups: items, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
+}
+
 // UpdateMyGroupNickname 更新当前登录用户自己的群名片。
 //
 // 群名片允许显式传空字符串来清空；这里仅做长度约束，具体成员是否存在、
@@ -91,6 +127,30 @@ func (s *groupServiceImpl) UpdateMyGroupNickname(ctx context.Context, req *pb.Up
 	return mapGroupWriteError(
 		s.groupRepo.UpdateMyGroupNickname(ctx, groupUUID, currentUserUUID, groupNickname),
 		"更新群名片失败",
+	)
+}
+
+// UpdateGroupMemberNickname 管理员或群主修改指定成员群名片。
+//
+// 操作者身份只取认证上下文，目标成员来自请求参数；权限矩阵在 repository 事务中
+// 基于最新成员角色裁决，防止并发角色变化导致越权代改名片。
+func (s *groupServiceImpl) UpdateGroupMemberNickname(ctx context.Context, req *pb.UpdateGroupMemberNicknameRequest) error {
+	currentUserUUID := util.GetUserUUIDFromContext(ctx)
+	if currentUserUUID == "" {
+		return apperr.New(consts.CodeUnauthorized)
+	}
+	if req == nil {
+		return apperr.New(consts.CodeParamError)
+	}
+	groupUUID := strings.TrimSpace(req.GetGroupUuid())
+	targetUserUUID := strings.TrimSpace(req.GetUserUuid())
+	groupNickname := strings.TrimSpace(req.GetGroupNickname())
+	if groupUUID == "" || targetUserUUID == "" || len([]rune(groupNickname)) > 64 {
+		return apperr.New(consts.CodeParamError)
+	}
+	return mapGroupWriteError(
+		s.groupRepo.UpdateGroupMemberNickname(ctx, groupUUID, currentUserUUID, targetUserUUID, groupNickname),
+		"更新成员群名片失败",
 	)
 }
 

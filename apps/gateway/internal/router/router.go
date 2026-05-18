@@ -77,6 +77,7 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/conversations/settings":  2 * time.Second,
 	// auth groups
 	"/api/v1/auth/groups":                                          2 * time.Second,
+	"/api/v1/auth/groups/search":                                   3 * time.Second,
 	"/api/v1/auth/groups/:groupUuid":                               2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/notice":                        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/apply":                         2 * time.Second,
@@ -93,6 +94,7 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/auth/groups/:groupUuid/members":                       2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/members/search":                3 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/members/:userUuid":             2 * time.Second,
+	"/api/v1/auth/groups/:groupUuid/members/:userUuid/nickname":    2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/members/:userUuid/mute":        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/members/:userUuid/role":        2 * time.Second,
 	"/api/v1/auth/groups/:groupUuid/member-ids":                    1 * time.Second,
@@ -247,6 +249,8 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				{
 					groups.POST("", groupHandler.CreateGroup)
 					groups.GET("", groupHandler.GetGroupList)
+					// /search 必须放在 /:groupUuid 之前，避免被动态路由吞掉。
+					groups.GET("/search", groupHandler.SearchGroups)
 					groups.GET("/join-applications", groupHandler.ListMyJoinGroupApplications)
 					groups.GET("/:groupUuid", groupHandler.GetGroupInfo)
 					groups.PATCH("/:groupUuid", groupHandler.UpdateGroupInfo)
@@ -267,6 +271,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 					groups.GET("/:groupUuid/members/search", groupHandler.SearchGroupMembers)
 					groups.GET("/:groupUuid/members", groupHandler.GetMemberList)
 					groups.DELETE("/:groupUuid/members/:userUuid", groupHandler.RemoveMember)
+					groups.PATCH("/:groupUuid/members/:userUuid/nickname", groupHandler.UpdateGroupMemberNickname)
 					groups.PATCH("/:groupUuid/members/:userUuid/mute", groupHandler.MuteGroupMember)
 					groups.PATCH("/:groupUuid/members/:userUuid/role", groupHandler.UpdateMemberRole)
 					groups.GET("/:groupUuid/member-ids", groupHandler.GetGroupMemberIDs)

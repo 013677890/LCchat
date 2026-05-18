@@ -45,6 +45,7 @@ func grpcCodeForBizCode(code int) codes.Code {
 		consts.CodeMessageDeleted, consts.CodeRecallTimeout,
 		consts.CodeGroupFull, consts.CodeGroupNameTooLong,
 		consts.CodeGroupNoticeTooLong, consts.CodeGroupAlreadyDismiss,
+		consts.CodeGroupMuted, consts.CodeGroupMemberMuted,
 		consts.CodeCannotKickOwner, consts.CodeCannotKickAdmin,
 		consts.CodeGroupApplyNotFound, consts.CodeGroupInviteLimit,
 		consts.CodeCannotQuitAsOwner, consts.CodeAdminLimitExceeded,

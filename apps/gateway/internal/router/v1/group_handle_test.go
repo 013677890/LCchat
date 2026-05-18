@@ -25,6 +25,8 @@ type fakeGroupHTTPService struct {
 	reviewJoinGroupFn   func(context.Context, *dto.ReviewJoinGroupRequest) error
 	listJoinRequestsFn  func(context.Context, *dto.ListJoinRequestsRequest) (*dto.ListJoinRequestsResponse, error)
 	listReviewedFn      func(context.Context, *dto.ListReviewedJoinRequestsRequest) (*dto.ListReviewedJoinRequestsResponse, error)
+	searchGroupsFn      func(context.Context, *dto.SearchGroupsRequest) (*dto.SearchGroupsResponse, error)
+	updateMemberNickFn  func(context.Context, *dto.UpdateGroupMemberNicknameRequest) error
 }
 
 var _ service.GroupService = (*fakeGroupHTTPService)(nil)
@@ -116,8 +118,20 @@ func (f *fakeGroupHTTPService) LeaveGroup(context.Context, *dto.LeaveGroupReques
 func (f *fakeGroupHTTPService) SearchGroupMembers(context.Context, *dto.SearchGroupMembersRequest) (*dto.SearchGroupMembersResponse, error) {
 	return &dto.SearchGroupMembersResponse{}, nil
 }
+func (f *fakeGroupHTTPService) SearchGroups(ctx context.Context, req *dto.SearchGroupsRequest) (*dto.SearchGroupsResponse, error) {
+	if f.searchGroupsFn == nil {
+		return &dto.SearchGroupsResponse{}, nil
+	}
+	return f.searchGroupsFn(ctx, req)
+}
 func (f *fakeGroupHTTPService) UpdateMyGroupNickname(context.Context, *dto.UpdateMyGroupNicknameRequest) error {
 	return nil
+}
+func (f *fakeGroupHTTPService) UpdateGroupMemberNickname(ctx context.Context, req *dto.UpdateGroupMemberNicknameRequest) error {
+	if f.updateMemberNickFn == nil {
+		return nil
+	}
+	return f.updateMemberNickFn(ctx, req)
 }
 func (f *fakeGroupHTTPService) MuteGroupMember(context.Context, *dto.MuteGroupMemberRequest) error {
 	return nil

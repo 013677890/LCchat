@@ -3,7 +3,6 @@ package usercli
 import (
 	"context"
 	"fmt"
-
 	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
@@ -43,7 +42,6 @@ func (c *PermissionChecker) CheckCanSend(ctx context.Context, req *msgpb.SendMes
 	if req == nil || req.FromUuid == "" || req.TargetUuid == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-
 	switch req.ConvType {
 	case msgpb.ConvType_CONV_TYPE_P2P:
 		return c.checkP2P(ctx, req.FromUuid, req.TargetUuid)
@@ -61,7 +59,6 @@ func (c *PermissionChecker) checkP2P(ctx context.Context, fromUUID, targetUUID s
 	if c == nil || c.friendClient == nil || c.blacklistClient == nil {
 		return apperr.NewWithMessage(consts.CodeInternalError, "消息权限校验器未初始化")
 	}
-
 	blockedBySelf, err := c.blacklistClient.CheckIsBlacklist(ctx, &relationpb.CheckIsBlacklistRequest{
 		UserUuid:   fromUUID,
 		TargetUuid: targetUUID,
@@ -72,7 +69,6 @@ func (c *PermissionChecker) checkP2P(ctx context.Context, fromUUID, targetUUID s
 	if blockedBySelf.GetIsBlacklist() {
 		return apperr.New(consts.CodeYouBlacklistPeer)
 	}
-
 	blockedByPeer, err := c.blacklistClient.CheckIsBlacklist(ctx, &relationpb.CheckIsBlacklistRequest{
 		UserUuid:   targetUUID,
 		TargetUuid: fromUUID,
@@ -83,7 +79,6 @@ func (c *PermissionChecker) checkP2P(ctx context.Context, fromUUID, targetUUID s
 	if blockedByPeer.GetIsBlacklist() {
 		return apperr.New(consts.CodePeerBlacklistYou)
 	}
-
 	friendResp, err := c.friendClient.CheckIsFriend(ctx, &relationpb.CheckIsFriendRequest{
 		UserUuid: fromUUID,
 		PeerUuid: targetUUID,
@@ -94,7 +89,6 @@ func (c *PermissionChecker) checkP2P(ctx context.Context, fromUUID, targetUUID s
 	if !friendResp.GetIsFriend() {
 		return apperr.New(consts.CodeNotFriend)
 	}
-
 	return nil
 }
 
@@ -102,18 +96,26 @@ func (c *PermissionChecker) checkGroup(ctx context.Context, fromUUID, groupUUID 
 	if c == nil || c.groupClient == nil {
 		return apperr.NewWithMessage(consts.CodeInternalError, "群组权限校验器未初始化")
 	}
-
-	resp, err := c.groupClient.CheckGroupMember(ctx, &grouppb.CheckGroupMemberRequest{
+	resp, err := c.groupClient.CheckGroupSendPermission(ctx, &grouppb.CheckGroupSendPermissionRequest{
 		GroupUuid: groupUUID,
 		UserUuid:  fromUUID,
 	})
 	if err != nil {
-		return normalizeRemoteError(err, "检查群成员关系失败")
+		return normalizeRemoteError(err, "检查群发言权限失败")
 	}
-	if resp.GetIsMember() {
+	if resp.GetCanSend() {
 		return nil
 	}
-	return apperr.New(consts.CodeNotGroupMember)
+	switch resp.GetReason() {
+	case "not_group_member":
+		return apperr.New(consts.CodeNotGroupMember)
+	case "group_muted":
+		return apperr.New(consts.CodeGroupMuted)
+	case "member_muted":
+		return apperr.New(consts.CodeGroupMemberMuted)
+	default:
+		return apperr.New(consts.CodeNoPermission)
+	}
 }
 
 func normalizeRemoteError(err error, fallbackMsg string) error {

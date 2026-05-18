@@ -557,6 +557,68 @@ type GetGroupListResponse struct {
 	Groups []*GroupInfoDTO `json:"groups"`
 }
 
+// SearchGroupsRequest 按群名或完整群号搜索群请求。
+type SearchGroupsRequest struct {
+	Keyword  string `form:"keyword" json:"keyword" binding:"omitempty,max=64"`
+	Page     int32  `form:"page" json:"page" binding:"omitempty,min=1"`
+	PageSize int32  `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"`
+}
+
+// GroupSearchItemDTO 群搜索结果项。
+type GroupSearchItemDTO struct {
+	GroupUUID   string `json:"groupUuid"`
+	Name        string `json:"name"`
+	Avatar      string `json:"avatar"`
+	MemberCount int32  `json:"memberCount"`
+	AddMode     int32  `json:"addMode"`
+}
+
+// SearchGroupsResponse 群搜索分页响应。
+type SearchGroupsResponse struct {
+	Groups   []*GroupSearchItemDTO `json:"groups"`
+	Total    int64                 `json:"total"`
+	Page     int32                 `json:"page"`
+	PageSize int32                 `json:"pageSize"`
+}
+
+// ConvertToProtoSearchGroupsRequest 把群搜索 DTO 转成 proto 请求。
+func ConvertToProtoSearchGroupsRequest(dto *SearchGroupsRequest) *grouppb.SearchGroupsRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.SearchGroupsRequest{
+		Keyword:  dto.Keyword,
+		Page:     dto.Page,
+		PageSize: dto.PageSize,
+	}
+}
+
+// ConvertSearchGroupsResponseFromProto 把群搜索 proto 响应转成 HTTP DTO。
+func ConvertSearchGroupsResponseFromProto(pb *grouppb.SearchGroupsResponse) *SearchGroupsResponse {
+	if pb == nil {
+		return nil
+	}
+	groups := make([]*GroupSearchItemDTO, 0, len(pb.GetGroups()))
+	for _, group := range pb.GetGroups() {
+		if group == nil {
+			continue
+		}
+		groups = append(groups, &GroupSearchItemDTO{
+			GroupUUID:   group.GetGroupUuid(),
+			Name:        group.GetName(),
+			Avatar:      group.GetAvatar(),
+			MemberCount: group.GetMemberCount(),
+			AddMode:     group.GetAddMode(),
+		})
+	}
+	return &SearchGroupsResponse{
+		Groups:   groups,
+		Total:    pb.GetTotal(),
+		Page:     pb.GetPage(),
+		PageSize: pb.GetPageSize(),
+	}
+}
+
 // ConvertGroupListResponseFromProto 把群列表 proto 响应转成 HTTP DTO。
 func ConvertGroupListResponseFromProto(pb *grouppb.GetGroupListResponse) *GetGroupListResponse {
 	if pb == nil {
@@ -667,6 +729,13 @@ type UpdateMyGroupNicknameRequest struct {
 	GroupNickname string `json:"groupNickname" binding:"max=64"`
 }
 
+// UpdateGroupMemberNicknameRequest 管理员代改群成员名片请求。
+type UpdateGroupMemberNicknameRequest struct {
+	GroupUUID     string `json:"groupUuid"`
+	UserUUID      string `json:"userUuid"`
+	GroupNickname string `json:"groupNickname" binding:"max=64"`
+}
+
 // ConvertToProtoUpdateMyGroupNicknameRequest 把群名片 DTO 转成 proto 请求。
 func ConvertToProtoUpdateMyGroupNicknameRequest(dto *UpdateMyGroupNicknameRequest) *grouppb.UpdateMyGroupNicknameRequest {
 	if dto == nil {
@@ -674,6 +743,18 @@ func ConvertToProtoUpdateMyGroupNicknameRequest(dto *UpdateMyGroupNicknameReques
 	}
 	return &grouppb.UpdateMyGroupNicknameRequest{
 		GroupUuid:     dto.GroupUUID,
+		GroupNickname: dto.GroupNickname,
+	}
+}
+
+// ConvertToProtoUpdateGroupMemberNicknameRequest 把管理员代改成员群名片 DTO 转成 proto 请求。
+func ConvertToProtoUpdateGroupMemberNicknameRequest(dto *UpdateGroupMemberNicknameRequest) *grouppb.UpdateGroupMemberNicknameRequest {
+	if dto == nil {
+		return nil
+	}
+	return &grouppb.UpdateGroupMemberNicknameRequest{
+		GroupUuid:     dto.GroupUUID,
+		UserUuid:      dto.UserUUID,
 		GroupNickname: dto.GroupNickname,
 	}
 }

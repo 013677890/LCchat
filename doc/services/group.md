@@ -1,9 +1,7 @@
 # group 服务
-
 group 服务拥有群资料、群成员、入群申请和群权限事实，负责群生命周期和群缓存投影事件生产。
 
 ## 职责
-
 - 创建、解散、查询和更新群资料。
 - 维护群公告、加群方式、全员禁言等群级设置。
 - 管理群成员：邀请/添加成员、移除成员、主动退群、转让群主、更新管理员角色。
@@ -12,7 +10,6 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 - 在群写操作事务中写入 `group.cache` Outbox 事件，驱动 Redis 群缓存投影最终一致更新。
 
 ## 启动与核心目录
-
 | 路径 | 说明 |
 | --- | --- |
 | `apps/group/cmd` | 服务启动、gRPC 服务、依赖注入和缓存投影消费者装配。 |
@@ -22,9 +19,7 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 | `apps/group/internal/consumer` | `group.cache` 投影消费者。 |
 | `proto/group` | GroupService gRPC 契约。 |
 | `pkg/groupevent` | 群缓存事件 payload 编解码和 action 常量。 |
-
 ## 数据所有权
-
 | 数据 | 存储 | 说明 |
 | --- | --- | --- |
 | 群资料 | MySQL 群资料表 | 群名称、头像、公告、群主、加群方式、全员禁言。 |
@@ -36,30 +31,23 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 | 群待审批申请缓存 | Redis `group:join_requests:{group_uuid}` | 管理员审批列表读侧加速。 |
 | Outbox 事件 | MySQL `outbox_events` | 事务内写事件，由 Debezium 路由到 `group.cache`。 |
 | 幂等消费记录 | MySQL `idempotent_events` | 缓存投影消费者防重复。 |
-
 ## 暴露的 gRPC 服务
-
 | 服务 | 能力 |
 | --- | --- |
 | `GroupService` | 群资料、群成员、入群申请、权限校验和成员 ID 查询。 |
-
 关键 RPC 能力包括：
-
 - `CreateGroup` / `DismissGroup` / `GetGroupInfo` / `UpdateGroupInfo` / `UpdateGroupNotice`。
 - `ApplyJoinGroup` / `CancelJoinGroupApplication` / `ReviewJoinGroup` / `ListJoinRequests`。
-- `AddMember` / `LeaveGroup` / `RemoveMember` / `GetMemberList` / `SearchGroupMembers`。
-- `TransferGroupOwner` / `UpdateMemberRole` / `MuteGroupMember` / `UpdateGroupMuteSetting`。
+- `AddMember` / `LeaveGroup` / `RemoveMember` / `GetMemberList` / `SearchGroupMembers` / `SearchGroups`。
+- `UpdateMyGroupNickname` / `UpdateGroupMemberNickname` / `TransferGroupOwner` / `UpdateMemberRole` / `MuteGroupMember` / `UpdateGroupMuteSetting`。
 - `GetGroupList` / `GetGroupMemberIds` / `CheckGroupMember` / `CheckGroupSendPermission`。
 
 ## 事件
-
 | 事件 | 方向 | Topic | 说明 |
 | --- | --- | --- | --- |
 | `group.cache` | 生产 | `group.cache` | 群资料、成员、申请等写操作产生缓存投影事件。 |
 | `group.cache` | 消费 | `group.cache` | 本服务内投影消费者应用 Redis 缓存更新。 |
-
 常见 `group.cache` action：
-
 | action | 触发场景 | 影响缓存 |
 | --- | --- | --- |
 | `group_created` | 创建群 | 群资料、成员、用户群列表。 |
@@ -75,16 +63,13 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 | `join_request_created` | 创建入群申请 | 待审批申请缓存。 |
 | `join_request_reviewed` | 审批入群申请 | 申请缓存、成员缓存。 |
 | `join_request_canceled` | 撤销申请 | 待审批申请缓存。 |
-
 ## 协作关系
-
 - Gateway 通过 GroupService 暴露 HTTP 群接口。
-- msg 发送群消息前调用 group 权限能力校验成员身份、禁言和群状态。
+- msg 发送群消息前调用 group 权限能力校验成员身份、单人禁言、全员禁言和群状态。
 - message-push 群聊下行时依赖 `group:members:{group_uuid}` 或 group 成员能力拆分群成员。
 - user 资料变更后，如需要更新成员展示字段，应通过事件或内部能力更新群成员投影。
 
 ## 缓存投影链路
-
 1. group 写操作在 MySQL 事务中修改业务表。
 2. 同一事务调用 `outbox.InsertEvent` 写入 `outbox_events`，`event_type=group.cache`。
 3. Debezium Outbox EventRouter 监听 `outbox_events`，按 `event_type` 路由到 Kafka `group.cache`。
@@ -93,13 +78,11 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 6. 投影成功后写 `idempotent_events`，保证重复消费不重复应用。
 
 ## 降级策略
-
 - 群写操作以 MySQL 事务为准；缓存投影失败不会回滚已提交业务数据。
 - Redis 可重试错误应返回消费者重试，非法 payload 应记录后跳过，避免毒消息阻塞队列。
 - 读路径如果缓存未命中或缓存短暂不一致，应回源 MySQL 或等待投影自愈。
 
 ## 不变量
-
 - 群事实以 MySQL 为准，Redis 只是投影缓存。
 - 群写操作必须在事务内写业务表和 Outbox 事件，不能先写缓存再写库。
 - 群主不能直接退群；必须转让群主或解散群。

@@ -3,11 +3,10 @@ package repository
 import (
 	"context"
 	"errors"
-	"strings"
-	"time"
-
 	"github.com/013677890/LCchat-Backend/model"
 	"gorm.io/gorm"
+	"strings"
+	"time"
 )
 
 const (
@@ -66,6 +65,41 @@ func (r *groupRepositoryImpl) SearchGroupMembers(ctx context.Context, groupUUID,
 	return members, total, nil
 }
 
+// SearchGroups 按群名模糊匹配或完整群号精确匹配正常群。
+//
+// 空关键字直接返回空结果，避免搜索接口退化成全量群枚举；
+// 查询只暴露正常群，已解散或软删除群不会进入公开搜索结果。
+func (r *groupRepositoryImpl) SearchGroups(ctx context.Context, keyword string, page, pageSize int) ([]*model.GroupInfo, int64, error) {
+	if r == nil || r.db == nil {
+		return []*model.GroupInfo{}, 0, nil
+	}
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return []*model.GroupInfo{}, 0, nil
+	}
+	likeKeyword := "%" + keyword + "%"
+	baseQuery := r.db.WithContext(ctx).
+		Model(&model.GroupInfo{}).
+		Where("status = ? AND deleted_at IS NULL", groupStatusNormal).
+		Where("uuid = ? OR name LIKE ?", keyword, likeKeyword)
+	var total int64
+	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, WrapDBError(err)
+	}
+	if total == 0 {
+		return []*model.GroupInfo{}, 0, nil
+	}
+	groups := make([]*model.GroupInfo, 0, pageSize)
+	if err := baseQuery.Session(&gorm.Session{}).
+		Order("updated_at DESC, id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&groups).Error; err != nil {
+		return nil, 0, WrapDBError(err)
+	}
+	return groups, total, nil
+}
+
 // UpdateMyGroupNickname 更新当前用户自己的群名片。
 //
 // 群名片是成员维度资料，写入 group_members.remark，并通过成员快照事件同步缓存；
@@ -110,6 +144,70 @@ func (r *groupRepositoryImpl) UpdateMyGroupNickname(ctx context.Context, groupUU
 		changedMember = &updatedMember
 		group.UpdatedAt = updatedAt
 		return r.insertMemberProfileUpdatedEvent(tx, group, userUUID, []*model.GroupMember{changedMember})
+	})
+	if err != nil {
+		return err
+	}
+	if changedMember != nil {
+		r.upsertGroupMemberCacheAsync(ctx, groupUUID, changedMember)
+	}
+	return nil
+}
+
+// UpdateGroupMemberNickname 管理员或群主修改指定成员群名片。
+//
+// 该接口承载管理场景：群主可修改管理员/普通成员，管理员只能修改普通成员；
+// 操作者修改自己的名片应走自助接口，避免管理入口和个人资料入口语义混用。
+func (r *groupRepositoryImpl) UpdateGroupMemberNickname(ctx context.Context, groupUUID, operatorUUID, targetUserUUID, nickname string) error {
+	if r == nil || r.db == nil || groupUUID == "" || operatorUUID == "" || targetUserUUID == "" {
+		return nil
+	}
+	if operatorUUID == targetUserUUID {
+		return ErrNoPermission
+	}
+	var changedMember *model.GroupMember
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		group, err := r.loadWritableGroupForUpdate(ctx, tx, groupUUID)
+		if err != nil {
+			return err
+		}
+		operator, err := r.ensureOperatorRoleAtLeast(ctx, tx, groupUUID, operatorUUID, memberRoleAdmin)
+		if err != nil {
+			return err
+		}
+		target, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, targetUserUUID)
+		if err != nil {
+			if errors.Is(err, ErrRecordNotFound) {
+				return ErrGroupMemberNotFound
+			}
+			return err
+		}
+		if !canUpdateGroupMemberNickname(operator.Role, target.Role) {
+			return ErrNoPermission
+		}
+		if target.Remark == nickname {
+			return nil
+		}
+		updatedAt := time.Now()
+		if err := tx.Model(&model.GroupMember{}).
+			Where("id = ?", target.Id).
+			Updates(map[string]interface{}{
+				"remark":     nickname,
+				"updated_at": updatedAt,
+			}).Error; err != nil {
+			return WrapDBError(err)
+		}
+		if err := tx.Model(&model.GroupInfo{}).
+			Where("id = ?", group.Id).
+			Update("updated_at", updatedAt).Error; err != nil {
+			return WrapDBError(err)
+		}
+		updatedMember := *target
+		updatedMember.Remark = nickname
+		updatedMember.UpdatedAt = updatedAt
+		changedMember = &updatedMember
+		group.UpdatedAt = updatedAt
+		return r.insertMemberProfileUpdatedEvent(tx, group, operatorUUID, []*model.GroupMember{changedMember})
 	})
 	if err != nil {
 		return err
@@ -359,6 +457,18 @@ func (r *groupRepositoryImpl) loadActiveMemberForRead(ctx context.Context, group
 
 // canMuteGroupMember 判断操作者是否可以调整目标成员禁言状态。
 func canMuteGroupMember(operatorRole, targetRole int8) bool {
+	switch operatorRole {
+	case memberRoleOwner:
+		return targetRole == memberRoleAdmin || targetRole == memberRoleMember
+	case memberRoleAdmin:
+		return targetRole == memberRoleMember
+	default:
+		return false
+	}
+}
+
+// canUpdateGroupMemberNickname 判断操作者是否可以代改目标成员群名片。
+func canUpdateGroupMemberNickname(operatorRole, targetRole int8) bool {
 	switch operatorRole {
 	case memberRoleOwner:
 		return targetRole == memberRoleAdmin || targetRole == memberRoleMember

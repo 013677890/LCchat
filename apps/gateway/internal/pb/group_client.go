@@ -119,6 +119,11 @@ func (c *groupServiceClientImpl) UpdateMyGroupNickname(ctx context.Context, req 
 	return c.groupClient.UpdateMyGroupNickname(ctx, req)
 }
 
+// UpdateGroupMemberNickname 转发管理员代改成员群名片请求。
+func (c *groupServiceClientImpl) UpdateGroupMemberNickname(ctx context.Context, req *grouppb.UpdateGroupMemberNicknameRequest) (*grouppb.UpdateGroupMemberNicknameResponse, error) {
+	return c.groupClient.UpdateGroupMemberNickname(ctx, req)
+}
+
 // MuteGroupMember 转发成员单人禁言设置请求。
 func (c *groupServiceClientImpl) MuteGroupMember(ctx context.Context, req *grouppb.MuteGroupMemberRequest) (*grouppb.MuteGroupMemberResponse, error) {
 	return c.groupClient.MuteGroupMember(ctx, req)
@@ -132,6 +137,11 @@ func (c *groupServiceClientImpl) UpdateGroupMuteSetting(ctx context.Context, req
 // GetGroupList 转发当前用户群列表请求。
 func (c *groupServiceClientImpl) GetGroupList(ctx context.Context, req *grouppb.GetGroupListRequest) (*grouppb.GetGroupListResponse, error) {
 	return c.groupClient.GetGroupList(ctx, req)
+}
+
+// SearchGroups 转发群搜索请求。
+func (c *groupServiceClientImpl) SearchGroups(ctx context.Context, req *grouppb.SearchGroupsRequest) (*grouppb.SearchGroupsResponse, error) {
+	return c.groupClient.SearchGroups(ctx, req)
 }
 
 // GetGroupMemberIds 转发群成员 ID 列表请求。

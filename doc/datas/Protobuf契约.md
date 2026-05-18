@@ -106,11 +106,13 @@ Gateway 对外暴露 HTTP JSON，不直接暴露 Protobuf 字段名。
 | --- | --- |
 | 群资料 | `CreateGroup`、`DismissGroup`、`GetGroupInfo`、`UpdateGroupInfo`、`UpdateGroupNotice`、`GetGroupList` |
 | 入群申请 | `ApplyJoinGroup`、`CancelJoinGroupApplication`、`GetMyJoinGroupApplication`、`ListMyJoinGroupApplications`、`ReviewJoinGroup`、`ListJoinRequests`、`ListReviewedJoinRequests`、`GetJoinRequestPendingCount` |
-| 成员管理 | `AddMember`、`LeaveGroup`、`RemoveMember`、`GetMemberList`、`SearchGroupMembers`、`UpdateMyGroupNickname` |
+| 成员管理 | `AddMember`、`LeaveGroup`、`RemoveMember`、`GetMemberList`、`SearchGroupMembers`、`SearchGroups`、`UpdateMyGroupNickname`、`UpdateGroupMemberNickname` |
 | 权限设置 | `TransferGroupOwner`、`UpdateMemberRole`、`MuteGroupMember`、`UpdateGroupMuteSetting` |
 | 内部校验 | `GetGroupMemberIds`、`CheckGroupMember`、`CheckGroupSendPermission` |
 
 HTTP 返回的 `GroupInfoDTO` 与 proto 群资料响应字段对应：`group_uuid`、`name`、`avatar`、`owner_uuid`、`member_count`、`notice`、`add_mode`、`mute_all`。
+
+新增群搜索结果 `GroupSearchItem` 对应 HTTP `GroupSearchItemDTO`，包含 `group_uuid`、`name`、`avatar`、`member_count`、`add_mode`。其中 `SearchGroups` 约束为空关键字直接返回空列表，避免契约语义退化成“公开枚举全部群”。
 
 ## 7. msg 契约
 
