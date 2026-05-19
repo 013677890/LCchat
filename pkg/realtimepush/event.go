@@ -1,11 +1,12 @@
 package realtimepush
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/013677890/LCchat-Backend/pkg/realtimepb"
+	"google.golang.org/protobuf/proto"
 )
 
 // DefaultTopic 是非消息类实时提醒统一使用的默认 Kafka Topic。
@@ -167,16 +168,12 @@ type Event struct {
 }
 
 // GroupStateChangedPayload 是 GROUP_STATE_CHANGED 的推荐负载。
-type GroupStateChangedPayload struct {
-	GroupUUID string   `json:"group_uuid"`
-	Changed   []string `json:"changed"`
-	Version   int64    `json:"version,omitempty"`
-}
+type GroupStateChangedPayload = realtimepb.GroupStateChangedPayload
 
 // NewGroupStateChangedPayload 创建群状态刷新负载，并对 changed 做清理去重。
-func NewGroupStateChangedPayload(groupUUID string, changed []string, version int64) GroupStateChangedPayload {
-	return GroupStateChangedPayload{
-		GroupUUID: strings.TrimSpace(groupUUID),
+func NewGroupStateChangedPayload(groupUUID string, changed []string, version int64) *GroupStateChangedPayload {
+	return &realtimepb.GroupStateChangedPayload{
+		GroupUuid: strings.TrimSpace(groupUUID),
 		Changed:   normalizeStrings(changed),
 		Version:   version,
 	}
@@ -231,18 +228,19 @@ func (e Event) Marshal() ([]byte, error) {
 	if err := e.Validate(); err != nil {
 		return nil, err
 	}
-	return json.Marshal(e)
+	return proto.Marshal(toProtoEvent(e))
 }
 
 // Decode 解析 Kafka 中的实时提醒事件。
 func Decode(message []byte) (Event, error) {
-	if len(bytes.TrimSpace(message)) == 0 {
+	if len(message) == 0 {
 		return Event{}, errors.New("realtimepush: message 不能为空")
 	}
-	var event Event
-	if err := json.Unmarshal(message, &event); err != nil {
+	var pbEvent realtimepb.RealtimePushEvent
+	if err := proto.Unmarshal(message, &pbEvent); err != nil {
 		return Event{}, err
 	}
+	event := fromProtoEvent(&pbEvent)
 	event.Normalize()
 	if err := event.Validate(); err != nil {
 		return Event{}, err
@@ -257,12 +255,66 @@ func EncodePayload(payload any) ([]byte, error) {
 		return nil, nil
 	case []byte:
 		return cloneBytes(value), nil
-	case json.RawMessage:
-		return cloneBytes(value), nil
 	case string:
 		return []byte(value), nil
+	case proto.Message:
+		return proto.Marshal(value)
 	default:
-		return json.Marshal(payload)
+		return nil, fmt.Errorf("realtimepush: payload 必须为 proto.Message、[]byte 或 string，当前为 %T", payload)
+	}
+}
+
+// toProtoEvent 将领域事件转换为 protobuf 事件。
+func toProtoEvent(event Event) *realtimepb.RealtimePushEvent {
+	return &realtimepb.RealtimePushEvent{
+		Type:        event.Type,
+		Target:      toProtoTarget(event.Target),
+		Data:        cloneBytes(event.Data),
+		TraceId:     event.TraceID,
+		ServerTs:    event.ServerTs,
+		AckRequired: event.AckRequired,
+		Seq:         event.Seq,
+	}
+}
+
+// toProtoTarget 将投递目标转换为 protobuf 结构。
+func toProtoTarget(target Target) *realtimepb.RealtimeTarget {
+	return &realtimepb.RealtimeTarget{
+		Kind:      string(target.Kind),
+		UserUuid:  target.UserUUID,
+		DeviceId:  target.DeviceID,
+		UserUuids: append([]string(nil), target.UserUUIDs...),
+		GroupUuid: target.GroupUUID,
+	}
+}
+
+// fromProtoEvent 将 protobuf 事件转换回领域事件。
+func fromProtoEvent(event *realtimepb.RealtimePushEvent) Event {
+	if event == nil {
+		return Event{}
+	}
+	return Event{
+		Type:        event.GetType(),
+		Target:      fromProtoTarget(event.GetTarget()),
+		Data:        cloneBytes(event.GetData()),
+		TraceID:     event.GetTraceId(),
+		ServerTs:    event.GetServerTs(),
+		AckRequired: event.GetAckRequired(),
+		Seq:         event.GetSeq(),
+	}
+}
+
+// fromProtoTarget 将 protobuf 目标转换回领域目标。
+func fromProtoTarget(target *realtimepb.RealtimeTarget) Target {
+	if target == nil {
+		return Target{}
+	}
+	return Target{
+		Kind:      TargetKind(target.GetKind()),
+		UserUUID:  target.GetUserUuid(),
+		DeviceID:  target.GetDeviceId(),
+		UserUUIDs: append([]string(nil), target.GetUserUuids()...),
+		GroupUUID: target.GetGroupUuid(),
 	}
 }
 

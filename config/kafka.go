@@ -18,6 +18,8 @@ type KafkaConfig struct {
 	ProfileDisplayChangedTopic string `json:"profileDisplayChangedTopic" yaml:"profileDisplayChangedTopic"` // 资料展示字段变更事件 topic
 	AccountDeletedTopic        string `json:"accountDeletedTopic" yaml:"accountDeletedTopic"`               // 账号注销事件 topic
 	MsgPushTopic               string `json:"msgPushTopic" yaml:"msgPushTopic"`                             // 消息推送 topic（msg-service → Push-Job）
+	RealtimePushTopic          string `json:"realtimePushTopic" yaml:"realtimePushTopic"`                   // 非消息类实时提醒 topic
+	RealtimePushGroupID        string `json:"realtimePushGroupId" yaml:"realtimePushGroupId"`               // 非消息类实时提醒消费者组 ID
 	GroupCacheTopic            string `json:"groupCacheTopic" yaml:"groupCacheTopic"`                       // 群缓存投影 topic
 	GroupCacheGroupID          string `json:"groupCacheGroupId" yaml:"groupCacheGroupId"`                   // 群缓存投影消费者组 ID
 }
@@ -57,6 +59,8 @@ func DefaultKafkaConfig() KafkaConfig {
 		ProfileDisplayChangedTopic: getenvString("KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC", "profile_display_changed"),
 		AccountDeletedTopic:        getenvString("KAFKA_ACCOUNT_DELETED_TOPIC", "account.deleted"),
 		MsgPushTopic:               getenvString("KAFKA_MSG_PUSH_TOPIC", "msg.push"),
+		RealtimePushTopic:          getenvString("KAFKA_REALTIME_PUSH_TOPIC", "realtime.push"),
+		RealtimePushGroupID:        getenvString("KAFKA_REALTIME_PUSH_GROUP_ID", "realtime-push-consumer-group"),
 		GroupCacheTopic:            getenvString("KAFKA_GROUP_CACHE_TOPIC", "group.cache"),
 		GroupCacheGroupID:          getenvString("KAFKA_GROUP_CACHE_GROUP_ID", "group-cache-projector-group"),
 

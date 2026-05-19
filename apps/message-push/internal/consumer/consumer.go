@@ -46,6 +46,11 @@ type groupMemberFetcher interface {
 	GetGroupMembers(ctx context.Context, groupUUID string) ([]string, error)
 }
 
+// Handler 定义 Kafka 消息处理器的最小能力。
+type Handler interface {
+	Handle(ctx context.Context, value []byte) error
+}
+
 // EventHandler 处理 Kafka 中的 MsgPushEvent。
 type EventHandler struct {
 	routes routeRepository
@@ -296,16 +301,16 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 	return nil
 }
 
-// Consumer 自研 msg.push 消费循环。
+// Consumer 自研 Kafka 消费循环。
 type Consumer struct {
 	brokers []string
 	topic   string
 	groupID string
-	handler *EventHandler
+	handler Handler
 }
 
 // NewConsumer 创建消费者。
-func NewConsumer(brokers []string, topic, groupID string, handler *EventHandler) *Consumer {
+func NewConsumer(brokers []string, topic, groupID string, handler Handler) *Consumer {
 	return &Consumer{brokers: brokers, topic: topic, groupID: groupID, handler: handler}
 }
 

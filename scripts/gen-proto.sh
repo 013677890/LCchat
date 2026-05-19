@@ -53,6 +53,7 @@ PROTO_FILES=(
 	proto/msg/msg_common.proto
 	proto/msg/msg_push_event.proto
 	proto/msg/msg_service.proto
+	proto/realtime/realtime_event.proto
 )
 
 PROTOC_ARGS=(

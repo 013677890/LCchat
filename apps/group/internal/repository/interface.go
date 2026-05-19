@@ -81,6 +81,8 @@ type IGroupRepository interface {
 	CancelJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) error
 	// GetMyJoinGroupApplication 获取当前用户在指定群的最新申请状态。
 	GetMyJoinGroupApplication(ctx context.Context, groupUUID, applicantUUID string) (*model.GroupJoinRequest, error)
+	// GetJoinRequestApplicant 获取指定申请对应的申请人 UUID。
+	GetJoinRequestApplicant(ctx context.Context, groupUUID string, applyID int64) (string, error)
 	// ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
 	ListMyJoinGroupApplications(ctx context.Context, applicantUUID string, status *int8, page, pageSize int) ([]*model.GroupJoinRequest, int64, error)
 	// ReviewJoinGroup 审批入群申请。

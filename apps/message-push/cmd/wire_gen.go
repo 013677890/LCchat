@@ -35,10 +35,13 @@ func initializeMessagePushApp() (*MessagePushApp, error) {
 	}
 	groupcliClient := provideGroupClient(clientConn)
 	eventHandler := provideEventHandler(redisRepository, sender, groupcliClient)
-	consumer := providePushConsumer(kafkaConfig, string2, eventHandler)
+	msgPushConsumer := providePushConsumer(kafkaConfig, string2, eventHandler)
+	realtimeHandler := provideRealtimeHandler(redisRepository, sender, groupcliClient)
+	realtimePushConsumer := provideRealtimePushConsumer(kafkaConfig, realtimeHandler)
+	pushConsumers := providePushConsumers(msgPushConsumer, realtimePushConsumer)
 	config := provideMessagePushHTTPConfig()
 	server := provideMessagePushHTTPServer(config)
-	messagePushApp, err := NewMessagePushApp(logger, consumer, client, clientManager, clientConn, server)
+	messagePushApp, err := NewMessagePushApp(logger, pushConsumers, client, clientManager, clientConn, server)
 	if err != nil {
 		return nil, err
 	}

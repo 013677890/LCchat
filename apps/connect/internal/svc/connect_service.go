@@ -2,9 +2,6 @@ package svc
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"strings"
 	"sync"
 
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
@@ -20,21 +17,6 @@ type Session struct {
 	UserUUID string
 	DeviceID string
 	ClientIP string
-}
-
-// Envelope 定义 WebSocket 通用消息包格式。
-// 约定：
-// - Type: 消息类型（如 heartbeat/message）；
-// - Data: 消息体（由上层按 Type 再解析）。
-type Envelope struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
-}
-
-// ErrorData 定义 type=error 时的 data 结构。
-type ErrorData struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
 }
 
 // ConnectService 承载 connect 的核心业务逻辑。
@@ -135,30 +117,4 @@ func (s *ConnectService) ShutdownStatusWorkers() {
 	if s.activeSyncer != nil {
 		s.activeSyncer.Stop()
 	}
-}
-
-// ParseEnvelope 解析客户端上行帧。
-// 若 type 缺失或 JSON 不合法，会返回错误交由 handler 返回 error 帧。
-func (s *ConnectService) ParseEnvelope(raw []byte) (*Envelope, error) {
-	var envelope Envelope
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return nil, err
-	}
-
-	envelope.Type = strings.TrimSpace(envelope.Type)
-	if envelope.Type == "" {
-		return nil, errors.New("type is required")
-	}
-
-	return &envelope, nil
-}
-
-// MarshalEnvelope 组装并序列化下行帧。
-// 约定：data=nil 时省略 data 字段，避免无意义空对象。
-func (s *ConnectService) MarshalEnvelope(msgType string, data any) ([]byte, error) {
-	envelope := map[string]any{"type": msgType}
-	if data != nil {
-		envelope["data"] = data
-	}
-	return json.Marshal(envelope)
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"github.com/google/wire"
 	"github.com/panjf2000/ants/v2"
@@ -93,6 +94,11 @@ func provideRelationGRPCShutdownTimeout() relationGRPCShutdownTimeout {
 	return relationGRPCShutdownTimeout(10 * time.Second)
 }
 
+// provideRelationRealtimePushProducer 构造 relation-service 的实时提醒生产者。
+func provideRelationRealtimePushProducer(cfg config.KafkaConfig) *realtimepush.Producer {
+	return realtimepush.NewKafkaTopicProducer(cfg.Brokers, cfg.RealtimePushTopic)
+}
+
 // provideRelationAccountDeletedConsumer 构造 relation-service 的 account.deleted 消费者。
 func provideRelationAccountDeletedConsumer(
 	cfg config.KafkaConfig,
@@ -153,6 +159,7 @@ var relationInfraProviderSet = wire.NewSet(
 	provideRelationRegistration,
 	provideRelationGRPCServer,
 	provideRelationGRPCListener,
+	provideRelationRealtimePushProducer,
 )
 
 var relationRepositoryProviderSet = wire.NewSet(

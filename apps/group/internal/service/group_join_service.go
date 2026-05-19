@@ -6,6 +6,7 @@ import (
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"strings"
 )
@@ -32,10 +33,14 @@ func (s *groupServiceImpl) UpdateGroupNotice(ctx context.Context, req *pb.Update
 	if len([]rune(notice)) > 500 {
 		return apperr.New(consts.CodeGroupNoticeTooLong)
 	}
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.UpdateGroupNotice(ctx, groupUUID, currentUserUUID, notice),
 		"更新群公告失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedNotice})
+	return nil
 }
 
 // ApplyJoinGroup 根据 add_mode 执行直加入群或创建申请。
@@ -58,6 +63,12 @@ func (s *groupServiceImpl) ApplyJoinGroup(ctx context.Context, req *pb.ApplyJoin
 	result, err := s.groupRepo.ApplyJoinGroup(ctx, groupUUID, currentUserUUID, reason)
 	if err != nil {
 		return nil, mapGroupWriteError(err, "申请加入群聊失败")
+	}
+	if result.ApplyID > 0 && !result.JoinedDirectly {
+		s.publishGroupJoinRequestCreated(ctx, groupUUID, currentUserUUID, result.ApplyID)
+	}
+	if result.JoinedDirectly {
+		s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMembers})
 	}
 	return &pb.ApplyJoinGroupResponse{ApplyId: result.ApplyID, JoinedDirectly: result.JoinedDirectly}, nil
 }
@@ -163,10 +174,22 @@ func (s *groupServiceImpl) ReviewJoinGroup(ctx context.Context, req *pb.ReviewJo
 	if len([]rune(remark)) > 255 {
 		return apperr.New(consts.CodeRemarkTooLong)
 	}
-	return mapGroupWriteError(
+	applicantUUID := s.loadJoinRequestApplicantForRealtime(ctx, groupUUID, req.GetApplyId())
+	if err := mapGroupWriteError(
 		s.groupRepo.ReviewJoinGroup(ctx, groupUUID, currentUserUUID, req.GetApplyId(), action, remark),
 		"审批入群申请失败",
-	)
+	); err != nil {
+		return err
+	}
+
+	// 审批后通知申请人刷新状态；同意时再通知群成员刷新成员列表。
+	if applicantUUID != "" {
+		s.publishGroupJoinRequestReviewed(ctx, groupUUID, applicantUUID, currentUserUUID, req.GetApplyId(), action)
+	}
+	if action == joinRequestActionApprove {
+		s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMembers})
+	}
+	return nil
 }
 
 // ListJoinRequests 获取群待审批申请列表。

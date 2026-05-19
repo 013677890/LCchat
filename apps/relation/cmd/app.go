@@ -14,6 +14,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
@@ -32,6 +33,7 @@ type RelationApp struct {
 	asyncPool              *ants.Pool
 	asyncReleaseTimeout    relationAsyncReleaseTimeout
 	accountDeletedConsumer *consumer.AccountDeletedConsumer
+	realtimeProducer       *realtimepush.Producer
 	db                     *gorm.DB
 	redisClient            *goredis.Client
 }
@@ -46,6 +48,7 @@ func NewRelationApp(
 	asyncPool *ants.Pool,
 	asyncReleaseTimeout relationAsyncReleaseTimeout,
 	accountDeletedConsumer *consumer.AccountDeletedConsumer,
+	realtimeProducer *realtimepush.Producer,
 	db *gorm.DB,
 	redisClient *goredis.Client,
 ) (*RelationApp, error) {
@@ -64,6 +67,7 @@ func NewRelationApp(
 		asyncPool:              asyncPool,
 		asyncReleaseTimeout:    asyncReleaseTimeout,
 		accountDeletedConsumer: accountDeletedConsumer,
+		realtimeProducer:       realtimeProducer,
 		db:                     db,
 		redisClient:            redisClient,
 	}, nil
@@ -130,6 +134,11 @@ func (a *RelationApp) Shutdown(ctx context.Context) error {
 	if a.accountDeletedConsumer != nil {
 		if err := a.accountDeletedConsumer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Relation account.deleted 消费者失败: %w", err))
+		}
+	}
+	if a.realtimeProducer != nil {
+		if err := a.realtimeProducer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Relation realtime.push 生产者失败: %w", err))
 		}
 	}
 	if a.redisClient != nil {

@@ -49,6 +49,8 @@ GET /ws?token=<access_token>&device_id=<device_id>
 
 ## WebSocket 帧
 
+当前 connect 已移除旧的 JSON / Text Frame 兼容实现，只保留 Binary Protobuf 协议主路径。
+
 | 方向 | type | payload | 说明 |
 | --- | --- | --- | --- |
 | 上行 | `heartbeat` | 空 | 刷新路由活跃时间，响应 `heartbeat_ack`。 |

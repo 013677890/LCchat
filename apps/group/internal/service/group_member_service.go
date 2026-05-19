@@ -5,6 +5,7 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"strings"
 	"time"
@@ -26,10 +27,15 @@ func (s *groupServiceImpl) LeaveGroup(ctx context.Context, req *pb.LeaveGroupReq
 	if groupUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.LeaveGroup(ctx, groupUUID, currentUserUUID),
 		"退出群聊失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupMemberRemoved(ctx, groupUUID, currentUserUUID, currentUserUUID)
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMembers})
+	return nil
 }
 
 // SearchGroupMembers 搜索群成员并返回分页读模型。
@@ -124,10 +130,14 @@ func (s *groupServiceImpl) UpdateMyGroupNickname(ctx context.Context, req *pb.Up
 	if groupUUID == "" || len([]rune(groupNickname)) > 64 {
 		return apperr.New(consts.CodeParamError)
 	}
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.UpdateMyGroupNickname(ctx, groupUUID, currentUserUUID, groupNickname),
 		"更新群名片失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMembers})
+	return nil
 }
 
 // UpdateGroupMemberNickname 管理员或群主修改指定成员群名片。
@@ -148,10 +158,14 @@ func (s *groupServiceImpl) UpdateGroupMemberNickname(ctx context.Context, req *p
 	if groupUUID == "" || targetUserUUID == "" || len([]rune(groupNickname)) > 64 {
 		return apperr.New(consts.CodeParamError)
 	}
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.UpdateGroupMemberNickname(ctx, groupUUID, currentUserUUID, targetUserUUID, groupNickname),
 		"更新成员群名片失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMembers})
+	return nil
 }
 
 // MuteGroupMember 设置或取消指定成员单人禁言。
@@ -172,10 +186,15 @@ func (s *groupServiceImpl) MuteGroupMember(ctx context.Context, req *pb.MuteGrou
 	if err != nil || groupUUID == "" || targetUserUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.MuteGroupMember(ctx, groupUUID, currentUserUUID, targetUserUUID, muteUntil),
 		"更新成员禁言状态失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupMemberMuted(ctx, groupUUID, targetUserUUID, req.GetMuteUntil())
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMemberMute})
+	return nil
 }
 
 // UpdateGroupMuteSetting 更新群全员禁言开关。
@@ -194,10 +213,14 @@ func (s *groupServiceImpl) UpdateGroupMuteSetting(ctx context.Context, req *pb.U
 	if groupUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.UpdateGroupMuteSetting(ctx, groupUUID, currentUserUUID, req.GetMuteAll()),
 		"更新全员禁言设置失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMuteAll})
+	return nil
 }
 
 // CheckGroupSendPermission 检查指定用户是否允许发送群消息。

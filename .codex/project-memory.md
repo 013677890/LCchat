@@ -198,7 +198,7 @@
   - Current live WebSocket wire format is Binary protobuf, not JSON:
     - frame payload is `connect.MessageEnvelope`
     - `MessageEnvelope.data` holds type-specific protobuf bytes
-    - old JSON `Envelope` helpers still exist in `connect_service.go`, but handler does not use them for live frames
+    - old JSON `Envelope` helpers have been removed; live frames only keep the Binary protobuf path
   - Supported client upstream envelope types today:
     - `heartbeat` -> server replies `heartbeat_ack`
     - `message` -> TODO placeholder, server only replies `message_ack`

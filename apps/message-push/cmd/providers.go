@@ -31,6 +31,12 @@ type messagePushConnectUserTimeout time.Duration
 
 type messagePushGroupGRPCAddress string
 
+// msgPushConsumer 标识 msg.push 专用消费者，避免 Wire 注入多个相同类型时歧义。
+type msgPushConsumer struct{ *consumer.Consumer }
+
+// realtimePushConsumer 标识 realtime.push 专用消费者，避免 Wire 注入多个相同类型时歧义。
+type realtimePushConsumer struct{ *consumer.Consumer }
+
 // provideMessagePushLoggerConfig 提供 message-push 专用日志配置。
 func provideMessagePushLoggerConfig() config.LoggerConfig {
 	return config.DefaultLoggerConfig()
@@ -161,9 +167,25 @@ func provideEventHandler(routes *route.RedisRepository, sender *connectcli.Sende
 	return consumer.NewEventHandler(routes, sender, groups)
 }
 
+// provideRealtimeHandler 创建 realtime.push 事件处理器。
+// 它负责把非消息类提醒按目标类型扩散到在线设备并复用 connect 下行链路。
+func provideRealtimeHandler(routes *route.RedisRepository, sender *connectcli.Sender, groups *groupcli.Client) *consumer.RealtimeHandler {
+	return consumer.NewRealtimeHandler(routes, sender, groups)
+}
+
 // providePushConsumer 创建 msg.push topic 消费者。
-func providePushConsumer(cfg config.KafkaConfig, groupID string, handler *consumer.EventHandler) *consumer.Consumer {
-	return consumer.NewConsumer(cfg.Brokers, cfg.MsgPushTopic, groupID, handler)
+func providePushConsumer(cfg config.KafkaConfig, groupID string, handler *consumer.EventHandler) msgPushConsumer {
+	return msgPushConsumer{Consumer: consumer.NewConsumer(cfg.Brokers, cfg.MsgPushTopic, groupID, handler)}
+}
+
+// provideRealtimePushConsumer 创建 realtime.push topic 消费者。
+func provideRealtimePushConsumer(cfg config.KafkaConfig, handler *consumer.RealtimeHandler) realtimePushConsumer {
+	return realtimePushConsumer{Consumer: consumer.NewConsumer(cfg.Brokers, cfg.RealtimePushTopic, cfg.RealtimePushGroupID, handler)}
+}
+
+// providePushConsumers 聚合 message-push 启动所需的所有 Kafka 消费者。
+func providePushConsumers(msg msgPushConsumer, realtime realtimePushConsumer) pushConsumers {
+	return pushConsumers{msg: msg.Consumer, realtime: realtime.Consumer}
 }
 
 // provideMessagePushHTTPConfig 提供 message-push 指标 HTTP 服务配置。
@@ -195,6 +217,9 @@ var messagePushProviderSet = wire.NewSet(
 	provideConnectClientManager,
 	provideConnectSender,
 	provideEventHandler,
+	provideRealtimeHandler,
 	providePushConsumer,
+	provideRealtimePushConsumer,
+	providePushConsumers,
 	NewMessagePushApp,
 )

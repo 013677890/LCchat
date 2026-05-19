@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package realtime;
+
+option go_package = "github.com/013677890/LCchat-Backend/pkg/realtimepb";
+
+// RealtimePushEvent 是非消息类实时提醒统一事件。
+//
+// Kafka Topic: realtime.push
+// Kafka Key:   user_uuid / group_uuid 等分区键（由上游业务服务按 Target 计算）
+// Kafka Value: RealtimePushEvent 序列化后的 bytes
+//
+// 消费者：message-push
+// message-push 的职责：
+//   1. 从 Kafka 拉取 RealtimePushEvent
+//   2. 按 target.kind 解析在线设备目标
+//   3. 封装为 connect.MessageEnvelope
+//   4. 通过 connect gRPC 下发到在线设备
+message RealtimePushEvent {
+  // type: 事件类型路由键，与 connect.MessageEnvelope.type 保持一致。
+  string type = 1;
+  // target: 实时提醒投递目标。
+  RealtimeTarget target = 2;
+  // data: 按 type 序列化后的业务 payload proto bytes。
+  bytes data = 3;
+  // trace_id: 链路追踪 ID。
+  string trace_id = 4;
+  // server_ts: 服务端事件时间戳（unix 毫秒）。
+  int64 server_ts = 5;
+  // ack_required: 是否要求客户端回执。
+  bool ack_required = 6;
+  // seq: 事件顺序键；当前非消息提醒默认可为 0。
+  int64 seq = 7;
+}
+
+// RealtimeTarget 描述实时提醒目标。
+message RealtimeTarget {
+  // kind: 目标类型，取值示例：user / device / user_list / group_members / group_admins。
+  string kind = 1;
+  // user_uuid: 单用户或单设备目标的用户 UUID。
+  string user_uuid = 2;
+  // device_id: 单设备目标的设备 ID。
+  string device_id = 3;
+  // user_uuids: 多用户目标列表。
+  repeated string user_uuids = 4;
+  // group_uuid: 群聚合目标对应的群 UUID。
+  string group_uuid = 5;
+}
+
+// FriendApplyCreatedPayload 表示收到新的好友申请。
+message FriendApplyCreatedPayload {
+  int64 apply_id = 1;
+  string applicant_uuid = 2;
+  string target_uuid = 3;
+}
+
+// FriendApplyHandledPayload 表示好友申请已被处理。
+message FriendApplyHandledPayload {
+  int64 apply_id = 1;
+  string applicant_uuid = 2;
+  string target_uuid = 3;
+  int32 action = 4;
+}
+
+// FriendRelationChangedPayload 表示好友、备注、标签、黑名单等关系状态变化。
+message FriendRelationChangedPayload {
+  string user_uuid = 1;
+  string peer_uuid = 2;
+  repeated string user_uuids = 3;
+  string change_type = 4;
+}
+
+// GroupJoinRequestCreatedPayload 表示创建了新的入群申请。
+message GroupJoinRequestCreatedPayload {
+  string group_uuid = 1;
+  string applicant_uuid = 2;
+  int64 apply_id = 3;
+}
+
+// GroupJoinRequestReviewedPayload 表示入群申请已审批。
+message GroupJoinRequestReviewedPayload {
+  string group_uuid = 1;
+  string applicant_uuid = 2;
+  string reviewer_uuid = 3;
+  int64 apply_id = 4;
+  int32 action = 5;
+}
+
+// GroupMemberRemovedPayload 表示成员被移除或主动退出群聊。
+message GroupMemberRemovedPayload {
+  string group_uuid = 1;
+  string operator_uuid = 2;
+  string user_uuid = 3;
+}
+
+// GroupDismissedPayload 表示群聊已解散。
+message GroupDismissedPayload {
+  string group_uuid = 1;
+  string operator_uuid = 2;
+}
+
+// GroupMemberMutedPayload 表示成员禁言状态变化。
+message GroupMemberMutedPayload {
+  string group_uuid = 1;
+  string user_uuid = 2;
+  int64 mute_until = 3;
+}
+
+// GroupStateChangedPayload 表示群聚合状态变化。
+message GroupStateChangedPayload {
+  string group_uuid = 1;
+  repeated string changed = 2;
+  int64 version = 3;
+}

@@ -10,6 +10,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gozap "go.uber.org/zap"
@@ -20,6 +21,13 @@ func init() { logger.ReplaceGlobal(gozap.NewNop()) }
 
 func marshalEvent(e *msgpb.MsgPushEvent) []byte {
 	data, _ := proto.Marshal(e)
+	return data
+}
+
+func marshalRealtimeEvent(t *testing.T, event realtimepush.Event) []byte {
+	t.Helper()
+	data, err := event.Marshal()
+	require.NoError(t, err)
 	return data
 }
 
@@ -72,6 +80,7 @@ func (m *mockSender) PushToDevice(ctx context.Context, connectAddr, userUUID, de
 
 type mockGroupFetcher struct {
 	members []string
+	admins  []string
 	err     error
 }
 
@@ -80,6 +89,13 @@ func (m *mockGroupFetcher) GetGroupMembers(ctx context.Context, groupUUID string
 		return nil, m.err
 	}
 	return append([]string(nil), m.members...), nil
+}
+
+func (m *mockGroupFetcher) GetGroupAdmins(ctx context.Context, groupUUID string) ([]string, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return append([]string(nil), m.admins...), nil
 }
 
 func TestHandle_InvalidProto_SkipsNonRetriable(t *testing.T) {

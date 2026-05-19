@@ -122,14 +122,6 @@ func (c *Client) MaxDeliveredSeq(convID string) int64 {
 	return seq
 }
 
-// Enqueue 将文本帧投递到写队列。
-// 返回值语义：
-// - true：已成功入队；
-// - false：连接已关闭或队列已满。
-func (c *Client) Enqueue(msg []byte) bool {
-	return c.enqueue(websocket.TextMessage, msg, DeliveryMetadata{})
-}
-
 // EnqueueBinary 将二进制帧投递到写队列。
 func (c *Client) EnqueueBinary(msg []byte) bool {
 	return c.enqueue(websocket.BinaryMessage, msg, DeliveryMetadata{})

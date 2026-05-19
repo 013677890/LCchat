@@ -8,6 +8,7 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -15,10 +16,11 @@ import (
 )
 
 type blacklistServiceImpl struct {
-	db            *gorm.DB
-	redisClient   *goredis.Client
-	blacklistRepo repository.IBlacklistRepository
-	friendRepo    repository.IFriendRepository
+	db                *gorm.DB
+	redisClient       *goredis.Client
+	blacklistRepo     repository.IBlacklistRepository
+	friendRepo        repository.IFriendRepository
+	realtimePublisher realtimepush.Publisher
 }
 
 // NewBlacklistService 创建黑名单服务实例。
@@ -30,12 +32,14 @@ func NewBlacklistService(
 	redisClient *goredis.Client,
 	blacklistRepo repository.IBlacklistRepository,
 	friendRepo repository.IFriendRepository,
+	publishers ...realtimepush.Publisher,
 ) IBlacklistService {
 	return &blacklistServiceImpl{
-		db:            db,
-		redisClient:   redisClient,
-		blacklistRepo: blacklistRepo,
-		friendRepo:    friendRepo,
+		db:                db,
+		redisClient:       redisClient,
+		blacklistRepo:     blacklistRepo,
+		friendRepo:        friendRepo,
+		realtimePublisher: selectRelationRealtimePublisher(publishers),
 	}
 }
 
@@ -75,6 +79,7 @@ func (s *blacklistServiceImpl) AddBlacklist(ctx context.Context, req *pb.AddBlac
 	if err := s.blacklistRepo.AddBlacklist(ctx, currentUserUUID, req.TargetUuid); err != nil {
 		return apperr.Wrap(err, consts.CodeInternalError, "拉黑用户失败")
 	}
+	s.publishBlacklistRelationChanged(ctx, currentUserUUID, req.TargetUuid, friendChangeBlacklistAdded)
 	return nil
 }
 
@@ -111,6 +116,7 @@ func (s *blacklistServiceImpl) RemoveBlacklist(ctx context.Context, req *pb.Remo
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "取消拉黑失败")
 	}
+	s.publishBlacklistRelationChanged(ctx, currentUserUUID, req.UserUuid, friendChangeBlacklistRemoved)
 	return nil
 }
 

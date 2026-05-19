@@ -18,20 +18,30 @@ import (
 // MessagePushApp 统一管理 message-push 生命周期。
 type MessagePushApp struct {
 	logger        *zap.Logger
-	consumer      *consumer.Consumer
+	msgConsumer   *consumer.Consumer
+	realConsumer  *consumer.Consumer
 	redis         *goredis.Client
 	connectCli    *connectcli.ClientManager
 	groupGRPCConn *grpc.ClientConn
 	httpServer    *mpserver.Server
 }
 
+// pushConsumers 聚合 message-push 需要同时启动的 Kafka 消费者。
+type pushConsumers struct {
+	msg      *consumer.Consumer
+	realtime *consumer.Consumer
+}
+
 // NewMessagePushApp 创建 app。
-func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *goredis.Client, connectCli *connectcli.ClientManager, groupGRPCConn *grpc.ClientConn, httpServer *mpserver.Server) (*MessagePushApp, error) {
+func NewMessagePushApp(log *zap.Logger, consumers pushConsumers, redis *goredis.Client, connectCli *connectcli.ClientManager, groupGRPCConn *grpc.ClientConn, httpServer *mpserver.Server) (*MessagePushApp, error) {
 	if log == nil {
 		return nil, errors.New("logger 未初始化")
 	}
-	if consumer == nil {
-		return nil, errors.New("consumer 未初始化")
+	if consumers.msg == nil {
+		return nil, errors.New("msg.push consumer 未初始化")
+	}
+	if consumers.realtime == nil {
+		return nil, errors.New("realtime.push consumer 未初始化")
 	}
 	if connectCli == nil {
 		return nil, errors.New("connect client manager 未初始化")
@@ -42,7 +52,7 @@ func NewMessagePushApp(log *zap.Logger, consumer *consumer.Consumer, redis *gore
 	if httpServer == nil {
 		return nil, errors.New("http server 未初始化")
 	}
-	return &MessagePushApp{logger: log, consumer: consumer, redis: redis, connectCli: connectCli, groupGRPCConn: groupGRPCConn, httpServer: httpServer}, nil
+	return &MessagePushApp{logger: log, msgConsumer: consumers.msg, realConsumer: consumers.realtime, redis: redis, connectCli: connectCli, groupGRPCConn: groupGRPCConn, httpServer: httpServer}, nil
 }
 
 // Run 启动服务。
@@ -59,9 +69,14 @@ func (a *MessagePushApp) Run(ctx context.Context) error {
 		logger.String("addr", a.httpServer.Addr()),
 	)
 
-	consumerErrCh := make(chan error, 1)
+	msgConsumerErrCh := make(chan error, 1)
 	go func() {
-		consumerErrCh <- a.consumer.Start(ctx)
+		msgConsumerErrCh <- a.msgConsumer.Start(ctx)
+	}()
+
+	realtimeConsumerErrCh := make(chan error, 1)
+	go func() {
+		realtimeConsumerErrCh <- a.realConsumer.Start(ctx)
 	}()
 
 	select {
@@ -70,9 +85,14 @@ func (a *MessagePushApp) Run(ctx context.Context) error {
 			return fmt.Errorf("运行 message-push http server 失败: %w", err)
 		}
 		return nil
-	case err := <-consumerErrCh:
+	case err := <-msgConsumerErrCh:
 		if err != nil {
-			return fmt.Errorf("运行 message-push consumer 失败: %w", err)
+			return fmt.Errorf("运行 msg.push consumer 失败: %w", err)
+		}
+		return nil
+	case err := <-realtimeConsumerErrCh:
+		if err != nil {
+			return fmt.Errorf("运行 realtime.push consumer 失败: %w", err)
 		}
 		return nil
 	case <-ctx.Done():

@@ -8,6 +8,7 @@ import (
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"strings"
 	"time"
@@ -20,15 +21,19 @@ import (
 //  2. 组装最小业务实体并调用 repository 落库；
 //  3. 把仓储层语义错误映射为稳定业务错误码。
 type groupServiceImpl struct {
-	groupRepo repository.IGroupRepository
+	groupRepo          repository.IGroupRepository
+	realtimePublisher realtimepush.Publisher
 }
 
 // defaultGroupAvatarURL 是未显式传头像时的默认群头像。
 const defaultGroupAvatarURL = "https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png"
 
 // NewGroupService 创建 group 服务实例。
-func NewGroupService(groupRepo repository.IGroupRepository) IGroupService {
-	return &groupServiceImpl{groupRepo: groupRepo}
+func NewGroupService(groupRepo repository.IGroupRepository, publishers ...realtimepush.Publisher) IGroupService {
+	return &groupServiceImpl{
+		groupRepo:          groupRepo,
+		realtimePublisher: selectGroupRealtimePublisher(publishers),
+	}
 }
 
 // CreateGroup 创建群。
@@ -74,6 +79,11 @@ func (s *groupServiceImpl) CreateGroup(ctx context.Context, req *pb.CreateGroupR
 		// 系统错误统一包中文上下文，具体日志留给边界拦截器输出。
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建群失败")
 	}
+	s.publishGroupStateChangedToMembers(ctx, group.Uuid, []string{
+		realtimepush.GroupChangedInfo,
+		realtimepush.GroupChangedMembers,
+		realtimepush.GroupChangedRoles,
+	})
 	return &pb.CreateGroupResponse{GroupUuid: group.Uuid}, nil
 }
 
@@ -91,11 +101,16 @@ func (s *groupServiceImpl) DismissGroup(ctx context.Context, req *pb.DismissGrou
 	if groupUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
+	memberUUIDs := s.loadGroupMemberUUIDsForRealtime(ctx, groupUUID)
 	// 群主权限、重复解散幂等和缓存强失效都下沉到 repository 事务内处理。
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.DismissGroup(ctx, groupUUID, currentUserUUID),
 		"解散群失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupDismissed(ctx, groupUUID, currentUserUUID, memberUUIDs)
+	return nil
 }
 
 // GetGroupInfo 获取群资料。
@@ -141,10 +156,14 @@ func (s *groupServiceImpl) UpdateGroupInfo(ctx context.Context, req *pb.UpdateGr
 		return nil
 	}
 	// 管理员/群主权限与群状态在 repository 内再次校验，防止并发状态变化。
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.UpdateGroupInfo(ctx, groupUUID, currentUserUUID, updates),
 		"更新群资料失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedInfo})
+	return nil
 }
 
 // TransferGroupOwner 转让群主。
@@ -162,10 +181,14 @@ func (s *groupServiceImpl) TransferGroupOwner(ctx context.Context, req *pb.Trans
 	if groupUUID == "" || targetUserUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.TransferGroupOwner(ctx, groupUUID, currentUserUUID, targetUserUUID),
 		"转让群主失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedRoles})
+	return nil
 }
 
 // UpdateMemberRole 更新群成员角色。
@@ -187,10 +210,14 @@ func (s *groupServiceImpl) UpdateMemberRole(ctx context.Context, req *pb.UpdateM
 	if err != nil {
 		return err
 	}
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.UpdateMemberRole(ctx, groupUUID, currentUserUUID, targetUserUUID, role),
 		"更新群成员角色失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedRoles})
+	return nil
 }
 
 // AddMember 添加群成员。
@@ -213,10 +240,14 @@ func (s *groupServiceImpl) AddMember(ctx context.Context, req *pb.AddMemberReque
 	}
 	// 这里只构造最小成员意图，角色、邀请人和入群时间以 repository 事务结果为准。
 	members := buildAddGroupMembers(groupUUID, memberUUIDs)
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.AddMembers(ctx, groupUUID, currentUserUUID, members),
 		"添加群成员失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMembers})
+	return nil
 }
 
 // RemoveMember 移除群成员。
@@ -235,10 +266,15 @@ func (s *groupServiceImpl) RemoveMember(ctx context.Context, req *pb.RemoveMembe
 		return apperr.New(consts.CodeParamError)
 	}
 	// 退群、踢人、不能踢群主等角色规则由 repository 在事务锁内统一裁决。
-	return mapGroupWriteError(
+	if err := mapGroupWriteError(
 		s.groupRepo.RemoveMember(ctx, groupUUID, currentUserUUID, targetUUID),
 		"移除群成员失败",
-	)
+	); err != nil {
+		return err
+	}
+	s.publishGroupMemberRemoved(ctx, groupUUID, currentUserUUID, targetUUID)
+	s.publishGroupStateChangedToMembers(ctx, groupUUID, []string{realtimepush.GroupChangedMembers})
+	return nil
 }
 
 // GetMemberList 获取群成员列表。

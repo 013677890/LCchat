@@ -11,6 +11,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -18,11 +19,12 @@ import (
 )
 
 type friendServiceImpl struct {
-	db            *gorm.DB
-	redisClient   *goredis.Client
-	friendRepo    repository.IFriendRepository
-	applyRepo     repository.IApplyRepository
-	blacklistRepo repository.IBlacklistRepository
+	db                *gorm.DB
+	redisClient       *goredis.Client
+	friendRepo        repository.IFriendRepository
+	applyRepo         repository.IApplyRepository
+	blacklistRepo     repository.IBlacklistRepository
+	realtimePublisher realtimepush.Publisher
 }
 
 // NewFriendService 创建好友服务实例。
@@ -38,13 +40,15 @@ func NewFriendService(
 	friendRepo repository.IFriendRepository,
 	applyRepo repository.IApplyRepository,
 	blacklistRepo repository.IBlacklistRepository,
+	publishers ...realtimepush.Publisher,
 ) IFriendService {
 	return &friendServiceImpl{
-		db:            db,
-		redisClient:   redisClient,
-		friendRepo:    friendRepo,
-		applyRepo:     applyRepo,
-		blacklistRepo: blacklistRepo,
+		db:                db,
+		redisClient:       redisClient,
+		friendRepo:        friendRepo,
+		applyRepo:         applyRepo,
+		blacklistRepo:     blacklistRepo,
+		realtimePublisher: selectRelationRealtimePublisher(publishers),
 	}
 }
 
@@ -128,6 +132,7 @@ func (s *friendServiceImpl) SendFriendApply(ctx context.Context, req *pb.SendFri
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建好友申请失败")
 	}
+	s.publishFriendApplyCreated(ctx, createdApply.Id, currentUserUUID, req.TargetUuid)
 
 	return &pb.SendFriendApplyResponse{ApplyId: createdApply.Id}, nil
 }
@@ -308,9 +313,13 @@ func (s *friendServiceImpl) HandleFriendApply(ctx context.Context, req *pb.Handl
 
 	if req.Action == 1 {
 		// 同意时走事务路径：修改申请状态并创建双向好友关系。
-		_, err := s.applyRepo.AcceptApplyAndCreateRelation(ctx, req.ApplyId, currentUserUUID, apply.ApplicantUuid, req.Remark)
+		alreadyProcessed, err := s.applyRepo.AcceptApplyAndCreateRelation(ctx, req.ApplyId, currentUserUUID, apply.ApplicantUuid, req.Remark)
 		if err != nil {
 			return apperr.Wrap(err, consts.CodeInternalError, "同意好友申请失败")
+		}
+		if !alreadyProcessed {
+			s.publishFriendApplyHandled(ctx, req.ApplyId, apply.ApplicantUuid, currentUserUUID, req.Action)
+			s.publishFriendRelationChangedToUsers(ctx, []string{currentUserUUID, apply.ApplicantUuid}, friendChangeAdded)
 		}
 		return nil
 	}
@@ -324,6 +333,7 @@ func (s *friendServiceImpl) HandleFriendApply(ctx context.Context, req *pb.Handl
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "拒绝好友申请失败")
 	}
+	s.publishFriendApplyHandled(ctx, req.ApplyId, apply.ApplicantUuid, currentUserUUID, req.Action)
 	return nil
 }
 
@@ -580,6 +590,7 @@ func (s *friendServiceImpl) DeleteFriend(ctx context.Context, req *pb.DeleteFrie
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "删除好友关系失败")
 	}
+	s.publishFriendRelationChangedToUser(ctx, currentUserUUID, req.UserUuid, friendChangeDeleted)
 	return nil
 }
 
@@ -610,6 +621,7 @@ func (s *friendServiceImpl) SetFriendRemark(ctx context.Context, req *pb.SetFrie
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "设置好友备注失败")
 	}
+	s.publishFriendRelationChangedToUser(ctx, currentUserUUID, req.UserUuid, friendChangeRemarkUpdated)
 	return nil
 }
 
@@ -640,6 +652,7 @@ func (s *friendServiceImpl) SetFriendTag(ctx context.Context, req *pb.SetFriendT
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "设置好友标签失败")
 	}
+	s.publishFriendRelationChangedToUser(ctx, currentUserUUID, req.UserUuid, friendChangeTagUpdated)
 	return nil
 }
 

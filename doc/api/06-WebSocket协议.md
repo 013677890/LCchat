@@ -91,6 +91,8 @@ Connect 会按环境变量 `CONNECT_ALLOWED_ORIGINS` 校验浏览器 `Origin`：
 
 当前 Connect 入站协议只接受 WebSocket Binary Frame。Text Frame 会返回 `error` 帧，错误码为 `17003`。
 
+旧的 JSON / Text Frame 兼容实现已移除，当前服务端只保留 Binary Protobuf 一条协议主路径。
+
 ### 3.2 MessageEnvelope
 
 所有上行和下行二进制帧外层均使用 `proto/connect/connect.proto` 中的 `MessageEnvelope`：
