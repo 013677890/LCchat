@@ -12,7 +12,6 @@
 | `proto/auth/internal_auth_service.proto` | `InternalAuthService` | auth 内部账号能力。 |
 | `proto/user/user_service.proto` | `UserService` | 用户资料、搜索、头像、二维码、批量资料。 |
 | `proto/user/internal_profile_service.proto` | `InternalProfileService` | 内部资料聚合和初始化。 |
-| `proto/user/group_service.proto` | user 内部群相关契约 | 用户域对群展示的辅助能力。 |
 | `proto/relation/friend_service.proto` | `FriendService` | 好友申请、好友列表、同步、关系判断。 |
 | `proto/relation/blacklist_service.proto` | `BlacklistService` | 黑名单增删查和判断。 |
 | `proto/group/group_service.proto` | `GroupService` | 群资料、成员、入群申请、权限校验。 |

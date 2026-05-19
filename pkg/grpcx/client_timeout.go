@@ -132,7 +132,6 @@ var defaultClientMethodTimeouts = map[string]time.Duration{
 	"/group.GroupService/CheckGroupSendPermission":       300 * time.Millisecond,
 	"/group.GroupService/GetJoinRequestPendingCount":     300 * time.Millisecond,
 	"/group.GroupService/UpdateGroupMemberNickname":      500 * time.Millisecond,
-	"/user.GroupService/GetGroupMembers":                 800 * time.Millisecond,
 	"/msg.MsgService/SendMessage":                        1000 * time.Millisecond,
 	"/msg.MsgService/PullMessages":                       500 * time.Millisecond,
 	"/msg.MsgService/GetMessagesByIds":                   500 * time.Millisecond,

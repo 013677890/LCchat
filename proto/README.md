@@ -6,7 +6,7 @@
   - `proto/common/common.proto` — 跨服务共享类型（PaginationInfo）
   - `proto/auth/*.proto` — 认证、设备、账号安全、内部认证接口
   - `proto/relation/*.proto` — 好友、黑名单
-  - `proto/user/*.proto` — 用户资料、内部资料接口
+  - `proto/user/*.proto` — 用户资料与内部资料接口
   - `proto/group/*.proto` — 群组
   - `proto/connect/connect.proto`
   - `proto/msg/*.proto`
@@ -53,7 +53,6 @@ protoc `
   proto/relation/blacklist_service.proto `
   proto/user/user_service.proto `
   proto/user/internal_profile_service.proto `
-  proto/user/group_service.proto `
   proto/group/group_service.proto `
   proto/connect/connect.proto `
   proto/connect/ws_control.proto `
@@ -80,7 +79,6 @@ protoc `
   proto/relation/blacklist_service.proto `
   proto/user/user_service.proto `
   proto/user/internal_profile_service.proto `
-  proto/user/group_service.proto `
   proto/group/group_service.proto `
   proto/connect/connect.proto `
   proto/connect/ws_control.proto `

@@ -154,12 +154,10 @@ func userInternalMethodWhitelist() map[string][]string {
 func provideUserRegistration(
 	userHandler *handler.UserHandler,
 	internalProfileHandler *handler.InternalProfileHandler,
-	groupHandler *handler.GroupHandler,
 ) grpcx.RegistrationFunc {
 	return func(s *grpc.Server) {
 		userpb.RegisterUserServiceServer(s, userHandler)
 		userpb.RegisterInternalProfileServiceServer(s, internalProfileHandler)
-		userpb.RegisterGroupServiceServer(s, groupHandler)
 	}
 }
 
@@ -204,19 +202,16 @@ var userInfraProviderSet = wire.NewSet(
 
 var userRepositoryProviderSet = wire.NewSet(
 	repository.NewUserRepository,
-	repository.NewGroupRepository,
 )
 
 var userServiceProviderSet = wire.NewSet(
 	service.NewProfileUserService,
 	service.NewInternalProfileService,
-	service.NewGroupService,
 )
 
 var userHandlerProviderSet = wire.NewSet(
 	handler.NewUserHandler,
 	handler.NewInternalProfileHandler,
-	handler.NewGroupHandler,
 )
 
 var userAppProviderSet = wire.NewSet(

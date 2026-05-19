@@ -98,15 +98,3 @@ func buildPublicProfileProto(profile *model.UserProfile) *pb.PublicProfile {
 		Signature: profile.Signature,
 	}
 }
-
-// buildGroupMemberItemProto 将群成员模型转换为只读群成员 proto。
-func buildGroupMemberItemProto(member *model.GroupMember) *pb.GroupMemberItem {
-	if member == nil || member.UserUuid == "" {
-		return nil
-	}
-
-	return &pb.GroupMemberItem{
-		UserUuid: member.UserUuid,
-		Role:     int32(member.Role),
-	}
-}

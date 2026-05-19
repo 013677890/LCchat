@@ -42,9 +42,3 @@ type IUserRepository interface {
 	// SearchUser 按昵称前缀或 user_uuid 前缀搜索资料。
 	SearchUser(ctx context.Context, keyword string, page, pageSize int) ([]*model.UserProfile, int64, error)
 }
-
-// IGroupRepository 群组数据访问接口。
-type IGroupRepository interface {
-	// GetGroupMembers 获取群组有效成员列表。
-	GetGroupMembers(ctx context.Context, groupUUID string) ([]*model.GroupMember, error)
-}

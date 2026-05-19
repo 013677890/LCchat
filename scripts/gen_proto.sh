@@ -31,7 +31,6 @@ protoc \
   proto/relation/blacklist_service.proto \
   proto/user/user_service.proto \
   proto/user/internal_profile_service.proto \
-  proto/user/group_service.proto \
   proto/group/group_service.proto \
   proto/connect/connect.proto \
   proto/connect/ws_control.proto \
@@ -57,7 +56,6 @@ protoc \
   proto/relation/blacklist_service.proto \
   proto/user/user_service.proto \
   proto/user/internal_profile_service.proto \
-  proto/user/group_service.proto \
   proto/group/group_service.proto \
   proto/connect/connect.proto \
   proto/connect/ws_control.proto \

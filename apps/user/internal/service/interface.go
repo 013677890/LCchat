@@ -44,9 +44,3 @@ type InternalProfileService interface {
 	// BatchGetPublicProfile 批量获取公开资料信息。
 	BatchGetPublicProfile(ctx context.Context, req *pb.BatchGetPublicProfileRequest) (*pb.BatchGetPublicProfileResponse, error)
 }
-
-// GroupService 提供 message / message-push 依赖的群成员查询能力。
-type GroupService interface {
-	// GetGroupMembers 获取群组有效成员列表。
-	GetGroupMembers(ctx context.Context, req *pb.GetGroupMembersRequest) (*pb.GetGroupMembersResponse, error)
-}

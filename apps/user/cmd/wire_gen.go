@@ -36,10 +36,7 @@ func initializeUserApp() (*UserApp, error) {
 	userHandler := handler.NewUserHandler(userService)
 	internalProfileService := service.NewInternalProfileService(iUserRepository)
 	internalProfileHandler := handler.NewInternalProfileHandler(internalProfileService)
-	iGroupRepository := repository.NewGroupRepository(db)
-	groupService := service.NewGroupService(iGroupRepository)
-	groupHandler := handler.NewGroupHandler(groupService)
-	registrationFunc := provideUserRegistration(userHandler, internalProfileHandler, groupHandler)
+	registrationFunc := provideUserRegistration(userHandler, internalProfileHandler)
 	mainUserGRPCAddress := provideUserGRPCAddress()
 	builtServer, err := provideUserGRPCServer(registrationFunc, mainUserGRPCAddress)
 	if err != nil {

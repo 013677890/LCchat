@@ -40,7 +40,7 @@ type ClientOptions struct {
 
 // ClientRetryConfig 定义 gRPC ServiceConfig 中的重试策略。
 //
-// 注意：ServiceNames 必须是精确的 protobuf service 名称（如 user.GroupService），
+// 注意：ServiceNames 必须是精确的 protobuf service 名称（如 group.GroupService），
 // 不能偷懒写成某个固定模板，否则不同服务会共用错误的重试规则。
 type ClientRetryConfig struct {
 	ServiceNames         []string
