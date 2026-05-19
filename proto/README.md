@@ -10,6 +10,7 @@
   - `proto/group/*.proto` — 群组
   - `proto/connect/connect.proto`
   - `proto/msg/*.proto`
+  - `proto/realtime/realtime_event.proto` — 非消息类实时提醒 Kafka 事件与业务 payload
 - 生成代码输出到各服务目录：
   - `pkg/commonpb/*.pb.go`
   - `apps/auth/pb/*.pb.go`
@@ -18,6 +19,7 @@
   - `apps/group/pb/*.pb.go`
   - `apps/connect/pb/*.pb.go`
   - `apps/msg/pb/*.pb.go`
+  - `pkg/realtimepb/*.pb.go`
 
 ## 2. 前置依赖
 
@@ -51,11 +53,14 @@ protoc `
   proto/relation/blacklist_service.proto `
   proto/user/user_service.proto `
   proto/user/internal_profile_service.proto `
+  proto/user/group_service.proto `
   proto/group/group_service.proto `
   proto/connect/connect.proto `
+  proto/connect/ws_control.proto `
   proto/msg/msg_common.proto `
   proto/msg/msg_push_event.proto `
-  proto/msg/msg_service.proto
+  proto/msg/msg_service.proto `
+  proto/realtime/realtime_event.proto
 ```
 
 ## 4. 生成 validate 代码（可选）
@@ -75,11 +80,14 @@ protoc `
   proto/relation/blacklist_service.proto `
   proto/user/user_service.proto `
   proto/user/internal_profile_service.proto `
+  proto/user/group_service.proto `
   proto/group/group_service.proto `
   proto/connect/connect.proto `
+  proto/connect/ws_control.proto `
   proto/msg/msg_common.proto `
   proto/msg/msg_push_event.proto `
-  proto/msg/msg_service.proto
+  proto/msg/msg_service.proto `
+  proto/realtime/realtime_event.proto
 ```
 
 ## 5. Proto Package 映射
@@ -93,6 +101,7 @@ protoc `
 | `proto/group/` | `group` | `apps/group/pb` | group-service |
 | `proto/connect/` | `connect` | `apps/connect/pb` | connect-service |
 | `proto/msg/` | `msg` | `apps/msg/pb` | msg-service |
+| `proto/realtime/` | `realtime` | `pkg/realtimepb` | realtime.push 事件 |
 
 ## 6. 注意事项
 

@@ -29,6 +29,25 @@ func (r *groupRepositoryImpl) loadLatestJoinRequestByApplicant(ctx context.Conte
 	return &joinRequest, nil
 }
 
+// GetJoinRequestApplicant 获取指定申请对应的申请人 UUID。
+func (r *groupRepositoryImpl) GetJoinRequestApplicant(ctx context.Context, groupUUID string, applyID int64) (string, error) {
+	if r == nil || r.db == nil || groupUUID == "" || applyID <= 0 {
+		return "", nil
+	}
+	var joinRequest model.GroupJoinRequest
+	err := r.db.WithContext(ctx).
+		Select("applicant_uuid").
+		Where("id = ? AND group_uuid = ? AND deleted_at IS NULL", applyID, groupUUID).
+		Take(&joinRequest).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", WrapDBError(err)
+	}
+	return joinRequest.ApplicantUuid, nil
+}
+
 // ListMyJoinGroupApplications 获取当前用户发起的入群申请列表。
 //
 // 这里保留全部终态而不是只看待审批记录，原因是：

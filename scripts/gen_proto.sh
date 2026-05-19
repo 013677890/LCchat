@@ -31,7 +31,14 @@ protoc \
   proto/relation/blacklist_service.proto \
   proto/user/user_service.proto \
   proto/user/internal_profile_service.proto \
-  proto/group/group_service.proto
+  proto/user/group_service.proto \
+  proto/group/group_service.proto \
+  proto/connect/connect.proto \
+  proto/connect/ws_control.proto \
+  proto/msg/msg_common.proto \
+  proto/msg/msg_push_event.proto \
+  proto/msg/msg_service.proto \
+  proto/realtime/realtime_event.proto
 
 echo "=== protoc go+grpc done ==="
 
@@ -50,7 +57,14 @@ protoc \
   proto/relation/blacklist_service.proto \
   proto/user/user_service.proto \
   proto/user/internal_profile_service.proto \
-  proto/group/group_service.proto
+  proto/user/group_service.proto \
+  proto/group/group_service.proto \
+  proto/connect/connect.proto \
+  proto/connect/ws_control.proto \
+  proto/msg/msg_common.proto \
+  proto/msg/msg_push_event.proto \
+  proto/msg/msg_service.proto \
+  proto/realtime/realtime_event.proto
 
 echo "=== protoc validate done ==="
 
@@ -61,3 +75,6 @@ ls -la apps/auth/pb/ 2>/dev/null || echo "(apps/auth/pb not found)"
 ls -la apps/relation/pb/ 2>/dev/null || echo "(apps/relation/pb not found)"
 ls -la apps/user/pb/ 2>/dev/null || echo "(apps/user/pb not found - may need new files only)"
 ls -la apps/group/pb/ 2>/dev/null || echo "(apps/group/pb not found)"
+ls -la apps/connect/pb/ 2>/dev/null || echo "(apps/connect/pb not found)"
+ls -la apps/msg/pb/ 2>/dev/null || echo "(apps/msg/pb not found)"
+ls -la pkg/realtimepb/ 2>/dev/null || echo "(pkg/realtimepb not found)"

@@ -2,10 +2,11 @@ package realtimepush
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepb"
+	"google.golang.org/protobuf/proto"
 )
 
 type fakeWriter struct {
@@ -20,7 +21,7 @@ func (w *fakeWriter) SendWithKey(_ context.Context, key, data []byte) error {
 }
 
 func TestEventMarshalDecodeNormalizesTargetAndPayload(t *testing.T) {
-	payload, err := EncodePayload(map[string]string{"apply_id": "apply-1"})
+	payload, err := EncodePayload(&realtimepb.FriendApplyCreatedPayload{ApplyId: 1, ApplicantUuid: "user-a", TargetUuid: "user-b"})
 	if err != nil {
 		t.Fatalf("EncodePayload() error = %v", err)
 	}
@@ -93,10 +94,10 @@ func TestGroupAggregateTargetUsesGroupPartitionKey(t *testing.T) {
 	}
 
 	var decodedPayload GroupStateChangedPayload
-	if err := json.Unmarshal(decoded.Data, &decodedPayload); err != nil {
-		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	if err := proto.Unmarshal(decoded.Data, &decodedPayload); err != nil {
+		t.Fatalf("proto.Unmarshal(payload) error = %v", err)
 	}
-	if decodedPayload.GroupUUID != "group-1" || decodedPayload.Version != 9 {
+	if decodedPayload.GroupUuid != "group-1" || decodedPayload.Version != 9 {
 		t.Fatalf("payload = %#v, want group_uuid=group-1 version=9", decodedPayload)
 	}
 	if got := decodedPayload.Changed; len(got) != 2 || got[0] != GroupChangedInfo || got[1] != GroupChangedNotice {
@@ -125,9 +126,9 @@ func TestProducerPublishFillsDefaultsAndUsesPartitionKey(t *testing.T) {
 		t.Fatalf("key = %q, want user-1", writer.key)
 	}
 
-	var event Event
-	if err := json.Unmarshal(writer.data, &event); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
+	event, err := Decode(writer.data)
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
 	}
 	if event.TraceID != "trace-1" {
 		t.Fatalf("TraceID = %q, want trace-1", event.TraceID)

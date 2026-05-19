@@ -1,6 +1,6 @@
 # WebSocket 协议
 
-本文描述 Connect 服务对前端暴露的 WebSocket 接入协议。实时消息下行、撤回通知、已读同步和设备级 ACK 均通过该协议完成。HTTP 消息写入与查询接口见 [消息与会话接口](05-消息与会话接口.md)。
+本文描述 Connect 服务对前端暴露的 WebSocket 接入协议。实时消息下行、撤回通知、已读同步、非消息类实时提醒和设备级 ACK 均通过该协议完成。HTTP 消息写入与查询接口见 [消息与会话接口](05-消息与会话接口.md)。
 
 ## 1. 接入概览
 
@@ -129,6 +129,7 @@ message MessageEnvelope {
 | `proto/connect/ws_control.proto` | ACK 与错误帧 payload。 |
 | `proto/msg/msg_common.proto` | 新消息 `MsgItem`。 |
 | `proto/msg/msg_push_event.proto` | 撤回、已读等通知 payload。 |
+| `proto/realtime/realtime_event.proto` | 好友、关系、群申请、群状态等实时提醒 payload。 |
 
 前端伪代码：
 
@@ -279,7 +280,25 @@ message MessageAck {
 
 对端已读回执。当前 `message-push` 支持该类型下发，前端可按业务约定解析 payload 并更新发送方消息的已读展示。若当前客户端版本未实现，可先忽略未知 payload，但必须保留不崩溃的兜底逻辑。
 
-### 5.6 MSG_ACK_ACK
+### 5.6 非消息类实时提醒
+
+非消息类提醒与消息类下行共用 `MessageEnvelope` 外层。外层 `type` 使用业务事件类型，外层 `data` 是 `proto/realtime/realtime_event.proto` 中对应 payload 的 Protobuf bytes。
+
+| 外层 `type` | data payload | 前端建议动作 |
+| --- | --- | --- |
+| `FRIEND_APPLY_CREATED` | `FriendApplyCreatedPayload` | 刷新收到的好友申请和未读提示。 |
+| `FRIEND_APPLY_HANDLED` | `FriendApplyHandledPayload` | 刷新发出的申请状态。 |
+| `FRIEND_RELATION_CHANGED` | `FriendRelationChangedPayload` | 刷新好友、备注、标签或黑名单视图。 |
+| `GROUP_JOIN_REQUEST_CREATED` | `GroupJoinRequestCreatedPayload` | 管理端刷新入群申请列表和未处理数。 |
+| `GROUP_JOIN_REQUEST_REVIEWED` | `GroupJoinRequestReviewedPayload` | 申请人刷新入群申请状态。 |
+| `GROUP_MEMBER_REMOVED` | `GroupMemberRemovedPayload` | 目标用户清理本地群状态。 |
+| `GROUP_DISMISSED` | `GroupDismissedPayload` | 群成员清理本地群状态。 |
+| `GROUP_MEMBER_MUTED` | `GroupMemberMutedPayload` | 目标成员刷新禁言状态。 |
+| `GROUP_STATE_CHANGED` | `GroupStateChangedPayload` | 按 `changed` 字段刷新群资料、公告、成员、角色或禁言状态。 |
+
+客户端应对未知 `type` 做兼容忽略；需要最新权威状态时回源 HTTP/gRPC 对应接口刷新。
+
+### 5.7 MSG_ACK_ACK
 
 服务端确认客户端 ACK 已处理。外层 `data` 是 `MessageAckAck` Protobuf bytes。
 
@@ -290,7 +309,7 @@ message MessageAck {
 
 前端可用该帧清理本地 ACK 重试队列。
 
-### 5.7 error
+### 5.8 error
 
 协议层错误帧。外层 `data` 是 `ErrorFrame` Protobuf bytes。
 

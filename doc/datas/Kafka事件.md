@@ -11,6 +11,7 @@
 | `profile_display_changed` | `KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC` | user | auth | 昵称/头像变化后回写登录展示冗余。 |
 | `account.deleted` | `KAFKA_ACCOUNT_DELETED_TOPIC` | auth Outbox | user/relation/group 等 | 账号注销后的下游清理。 |
 | `msg.push` | `KAFKA_MSG_PUSH_TOPIC` | msg | message-push | 消息下行、撤回、已读同步。 |
+| `realtime.push` | `KAFKA_REALTIME_PUSH_TOPIC` | relation、group | message-push | 好友、关系、群申请和群状态等非消息类实时提醒。 |
 | `group.cache` | `KAFKA_GROUP_CACHE_TOPIC` | group Outbox | group cache projector | 群缓存投影事件。 |
 
 ## 2. Kafka 默认配置
@@ -142,7 +143,29 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | `MSG_MARK_READ` | `MarkReadNotice` | 已读多端同步。 |
 | `MSG_READ_RECEIPT` | 业务约定 | 已读回执。 |
 
-## 9. 错误处理策略
+## 9. `realtime.push`
+
+| 项 | 说明 |
+| --- | --- |
+| 生产者 | relation、group 等业务服务。 |
+| 消费者 | message-push。 |
+| Key | 单用户用 `user_uuid`，群聚合用 `group_uuid`，多用户列表用首个用户 UUID。 |
+| Value | `realtime.RealtimePushEvent` Protobuf bytes。 |
+| 语义 | 将好友、关系、群申请、群成员和群状态变化转为在线 WebSocket 实时提醒。 |
+
+`RealtimePushEvent.target.kind` 支持：
+
+| kind | 说明 |
+| --- | --- |
+| `user` | 投递给单个用户所有在线设备。 |
+| `device` | 投递给单个用户的指定设备。 |
+| `user_list` | 投递给多个用户所有在线设备。 |
+| `group_members` | message-push 查询 group 后扩散给群成员。 |
+| `group_admins` | message-push 查询 group 后扩散给群主和管理员。 |
+
+常见 type：`FRIEND_APPLY_CREATED`、`FRIEND_APPLY_HANDLED`、`FRIEND_RELATION_CHANGED`、`GROUP_JOIN_REQUEST_CREATED`、`GROUP_JOIN_REQUEST_REVIEWED`、`GROUP_MEMBER_REMOVED`、`GROUP_DISMISSED`、`GROUP_MEMBER_MUTED`、`GROUP_STATE_CHANGED`。业务 payload 使用 `pkg/realtimepb` 中对应 protobuf message 编码到 `data`。
+
+## 10. 错误处理策略
 
 | 场景 | 策略 |
 | --- | --- |
@@ -152,9 +175,9 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | Connect gRPC 临时失败 | message-push 本地有限重试，最终失败由客户端补拉自愈。 |
 | msg Kafka 投递失败 | msg 记录 Warn，不回滚消息落库。 |
 
-## 10. 维护规则
+## 11. 维护规则
 
 1. 新增 Topic 必须同步更新 `config/kafka.go`、环境变量示例和本文。
 2. Outbox 事件 payload 必须包含可幂等处理的事件 ID。
 3. 消费者必须明确区分“永久错误”和“可重试错误”。
-4. `msg.push` 新增 type 时必须同步更新 `message-push`、WebSocket 协议和前端处理逻辑。
+4. `msg.push` 或 `realtime.push` 新增 type 时必须同步更新对应 proto、`message-push`、WebSocket 协议和前端处理逻辑。

@@ -38,7 +38,9 @@ func initializeGroupApp() (*GroupApp, error) {
 		return nil, err
 	}
 	iGroupRepository := repository.NewGroupRepository(db, client)
-	iGroupService := service.NewGroupService(iGroupRepository)
+	kafkaConfig := provideGroupKafkaConfig()
+	realtimePushProducer := provideGroupRealtimePushProducer(kafkaConfig)
+	iGroupService := service.NewGroupService(iGroupRepository, realtimePushProducer)
 	groupHandler := handler.NewGroupHandler(iGroupService)
 	registrationFunc := provideGroupRegistration(groupHandler)
 	mainGroupGRPCAddress := provideGroupGRPCAddress()
@@ -58,10 +60,9 @@ func initializeGroupApp() (*GroupApp, error) {
 		return nil, err
 	}
 	mainGroupAsyncReleaseTimeout := provideGroupAsyncReleaseTimeout(asyncConfig)
-	kafkaConfig := provideGroupKafkaConfig()
 	iGroupCacheProjectorRepository := repository.NewGroupCacheProjectorRepository(db, client)
 	cacheProjector := provideGroupCacheProjector(kafkaConfig, iGroupCacheProjectorRepository, db)
-	groupApp, err := NewGroupApp(logger, server, builtServer, listener, mainGroupGRPCShutdownTimeout, pool, mainGroupAsyncReleaseTimeout, cacheProjector, db, client)
+	groupApp, err := NewGroupApp(logger, server, builtServer, listener, mainGroupGRPCShutdownTimeout, pool, mainGroupAsyncReleaseTimeout, cacheProjector, realtimePushProducer, db, client)
 	if err != nil {
 		return nil, err
 	}

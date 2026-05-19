@@ -17,6 +17,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"github.com/google/wire"
 	"github.com/panjf2000/ants/v2"
@@ -101,6 +102,11 @@ func provideGroupGRPCShutdownTimeout() groupGRPCShutdownTimeout {
 	return groupGRPCShutdownTimeout(10 * time.Second)
 }
 
+// provideGroupRealtimePushProducer 构造 group-service 的实时提醒生产者。
+func provideGroupRealtimePushProducer(cfg config.KafkaConfig) *realtimepush.Producer {
+	return realtimepush.NewKafkaTopicProducer(cfg.Brokers, cfg.RealtimePushTopic)
+}
+
 // provideGroupCacheProjector 构造 group.cache 投影消费者。
 //
 // 这里把消费者的 topic / groupID 解析放在 provider，而不是 consumer 内部，原因是：
@@ -165,6 +171,7 @@ var groupInfraProviderSet = wire.NewSet(
 	provideGroupGRPCAddress,
 	provideGroupMetricsAddress,
 	provideGroupGRPCShutdownTimeout,
+	provideGroupRealtimePushProducer,
 	provideGroupMetricsServer,
 	provideGroupRegistration,
 	provideGroupGRPCServer,

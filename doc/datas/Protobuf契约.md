@@ -19,6 +19,7 @@
 | `proto/msg/msg_service.proto` | `MsgService` | 消息发送、拉取、撤回、会话管理。 |
 | `proto/msg/msg_common.proto` | `MsgItem`、`ConversationItem` | 消息和会话通用模型。 |
 | `proto/msg/msg_push_event.proto` | `MsgPushEvent` | Kafka `msg.push` 下行事件。 |
+| `proto/realtime/realtime_event.proto` | `RealtimePushEvent` 与实时提醒 payload | Kafka `realtime.push` 非消息类实时提醒事件。 |
 | `proto/connect/connect.proto` | `ConnectService`、`MessageEnvelope` | Connect gRPC 和 WebSocket 外层帧。 |
 | `proto/connect/ws_control.proto` | `MessageAck`、`ErrorFrame` | WebSocket 控制帧 payload。 |
 | `proto/common/common.proto` | 通用模型 | 多服务共享消息。 |
@@ -161,9 +162,17 @@ HTTP 返回的 `GroupInfoDTO` 与 proto 群资料响应字段对应：`group_uui
 
 详见 [WebSocket协议](../api/06-WebSocket协议.md)。
 
-## 9. 维护规则
+## 9. realtime 契约
+
+`proto/realtime/realtime_event.proto` 定义非消息类实时提醒链路的服务间事件。relation、group 等业务服务生产 `RealtimePushEvent` 写入 Kafka `realtime.push`，message-push 按 `target.kind` 解析目标并封装成 connect `MessageEnvelope` 下发。
+
+支持目标：`user`、`device`、`user_list`、`group_members`、`group_admins`。
+
+当前 payload 包括好友申请、好友关系变化、入群申请创建/审批、群成员移除、群解散、群禁言和 `GROUP_STATE_CHANGED` 等。payload 均应使用 `pkg/realtimepb` 中的 protobuf message 编码到 `RealtimePushEvent.data`。
+
+## 10. 维护规则
 
 1. Protobuf 字段一旦被前端或跨服务使用，修改必须同步更新 API、服务文档和转换函数。
 2. 删除字段前应同步删除所有 DTO 转换和前端文档，不保留无用兼容逻辑。
 3. 新增 gRPC 服务必须补齐服务文档、调用链路文档和错误码映射。
-4. WebSocket payload 新增 type 时必须同步 `msg_push_event.proto`、`message-push` 和 `06-WebSocket协议.md`。
+4. WebSocket payload 新增 type 时必须同步对应 proto（`msg_push_event.proto` 或 `realtime_event.proto`）、`message-push` 和 `06-WebSocket协议.md`。

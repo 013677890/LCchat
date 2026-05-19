@@ -9,8 +9,11 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepb"
+	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +38,7 @@ type fakeGroupRepoForService struct {
 	applyJoinGroupFn       func(context.Context, string, string, string) (repository.ApplyJoinGroupResult, error)
 	cancelJoinApplyFn      func(context.Context, string, string) error
 	getMyJoinApplyFn       func(context.Context, string, string) (*model.GroupJoinRequest, error)
+	getJoinApplicantFn     func(context.Context, string, int64) (string, error)
 	listMyJoinAppsFn       func(context.Context, string, *int8, int, int) ([]*model.GroupJoinRequest, int64, error)
 	reviewJoinGroupFn      func(context.Context, string, string, int64, int8, string) error
 	listJoinReqsFn         func(context.Context, string, string, int, int) ([]*model.GroupJoinRequest, int64, error)
@@ -175,6 +179,13 @@ func (f *fakeGroupRepoForService) GetMyJoinGroupApplication(ctx context.Context,
 	return f.getMyJoinApplyFn(ctx, groupUUID, applicantUUID)
 }
 
+func (f *fakeGroupRepoForService) GetJoinRequestApplicant(ctx context.Context, groupUUID string, applyID int64) (string, error) {
+	if f.getJoinApplicantFn == nil {
+		return "", nil
+	}
+	return f.getJoinApplicantFn(ctx, groupUUID, applyID)
+}
+
 func (f *fakeGroupRepoForService) ListMyJoinGroupApplications(ctx context.Context, applicantUUID string, status *int8, page, pageSize int) ([]*model.GroupJoinRequest, int64, error) {
 	if f.listMyJoinAppsFn == nil {
 		return []*model.GroupJoinRequest{}, 0, nil
@@ -257,6 +268,20 @@ func (f *fakeGroupRepoForService) GetUserProfiles(ctx context.Context, userUUIDs
 		return map[string]*model.UserProfile{}, nil
 	}
 	return f.getUserProfilesFn(ctx, userUUIDs)
+}
+
+type fakeRealtimePublisher struct {
+	events []realtimepush.Event
+	err    error
+}
+
+func (p *fakeRealtimePublisher) Publish(_ context.Context, event realtimepush.Event) error {
+	if p.err != nil {
+		return p.err
+	}
+	event.Normalize()
+	p.events = append(p.events, event)
+	return nil
 }
 
 func groupServiceTestContext(userUUID string) context.Context {
@@ -534,6 +559,47 @@ func TestReviewJoinGroupPassesNormalizedArgs(t *testing.T) {
 	assert.Equal(t, int64(99), gotApplyID)
 	assert.Equal(t, int8(1), gotAction)
 	assert.Equal(t, "同意", gotRemark)
+}
+
+func TestReviewJoinGroupPublishesApplicantRealtimeNotice(t *testing.T) {
+	publisher := &fakeRealtimePublisher{}
+	repo := &fakeGroupRepoForService{
+		getJoinApplicantFn: func(_ context.Context, groupUUID string, applyID int64) (string, error) {
+			assert.Equal(t, "group-uuid", groupUUID)
+			assert.Equal(t, int64(99), applyID)
+			return "applicant-uuid", nil
+		},
+		reviewJoinGroupFn: func(_ context.Context, groupUUID, operatorUUID string, applyID int64, action int8, remark string) error {
+			assert.Equal(t, "group-uuid", groupUUID)
+			assert.Equal(t, "admin-uuid", operatorUUID)
+			assert.Equal(t, int64(99), applyID)
+			assert.Equal(t, joinRequestActionReject, action)
+			assert.Equal(t, "资料不完整", remark)
+			return nil
+		},
+	}
+	svc := NewGroupService(repo, publisher)
+
+	err := svc.ReviewJoinGroup(groupServiceTestContext("admin-uuid"), &pb.ReviewJoinGroupRequest{
+		GroupUuid: " group-uuid ",
+		ApplyId:   99,
+		Action:    int32(joinRequestActionReject),
+		Remark:    "  资料不完整  ",
+	})
+	require.NoError(t, err)
+	require.Len(t, publisher.events, 1)
+	event := publisher.events[0]
+	assert.Equal(t, realtimepush.TypeGroupJoinRequestReviewed, event.Type)
+	assert.Equal(t, realtimepush.TargetKindUser, event.Target.Kind)
+	assert.Equal(t, "applicant-uuid", event.Target.UserUUID)
+
+	var payload realtimepb.GroupJoinRequestReviewedPayload
+	require.NoError(t, proto.Unmarshal(event.Data, &payload))
+	assert.Equal(t, "group-uuid", payload.GetGroupUuid())
+	assert.Equal(t, "applicant-uuid", payload.GetApplicantUuid())
+	assert.Equal(t, "admin-uuid", payload.GetReviewerUuid())
+	assert.Equal(t, int64(99), payload.GetApplyId())
+	assert.Equal(t, int32(joinRequestActionReject), payload.GetAction())
 }
 
 func TestListJoinRequestsBuildsApplicantProfiles(t *testing.T) {

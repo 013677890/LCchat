@@ -1,13 +1,13 @@
 # Connect 与下行推送架构
 
-Connect 和 message-push 共同组成消息下行链路。msg 负责产生 `msg.push` 事件，message-push 负责扩散和路由，connect 负责本节点 WebSocket 投递。
+Connect 和 message-push 共同组成实时下行链路。msg 负责产生 `msg.push` 消息类事件，relation/group 等业务服务负责产生 `realtime.push` 非消息类提醒事件，message-push 负责扩散和路由，connect 负责本节点 WebSocket 投递。
 
 ## 职责拆分
 
 | 组件 | 职责 | 不负责 |
 | --- | --- | --- |
 | msg | 消息落库、会话更新、产生下行事件 | 不维护在线连接，不直接推 WebSocket。 |
-| message-push | 消费 `msg.push`、查询群成员、查询在线路由、调用 connect | 不写消息库，不做发送权限判定。 |
+| message-push | 消费 `msg.push` / `realtime.push`、查询群成员或管理员、查询在线路由、调用 connect | 不写业务库，不做发送权限判定。 |
 | connect | WebSocket 握手、连接管理、路由写入、gRPC 投递、ACK 位点 | 不消费 Kafka，不判断业务权限。 |
 
 ## 在线路由
@@ -29,6 +29,17 @@ connect 在连接建立和心跳时写入 Redis：
 | `MSG_MARK_READ` | 标记已读 | 只同步发起用户其他设备 | 不要求 ACK。 |
 | `MSG_READ_RECEIPT` | P2P 已读回执 | 只投递给对端在线设备 | 不要求 ACK。 |
 
+非消息类提醒统一走 `realtime.push`，最终也封装成 `MessageEnvelope`：
+
+| 类型 | 来源 | 投递规则 | ACK |
+| --- | --- | --- | --- |
+| `FRIEND_APPLY_CREATED` | relation | 投给好友申请目标用户 | 默认不要求。 |
+| `FRIEND_APPLY_HANDLED` | relation | 投给申请发起人 | 默认不要求。 |
+| `FRIEND_RELATION_CHANGED` | relation | 投给单用户或多用户列表 | 默认不要求。 |
+| `GROUP_JOIN_REQUEST_CREATED` | group | 投给群主和管理员 | 默认不要求。 |
+| `GROUP_JOIN_REQUEST_REVIEWED` | group | 投给入群申请人 | 默认不要求。 |
+| `GROUP_STATE_CHANGED` 等群状态类 | group | 投给群成员或指定用户 | 默认不要求。 |
+
 ## message-push 处理流程
 
 1. 从 Kafka `msg.push` 读取 `MsgPushEvent`。
@@ -41,6 +52,8 @@ connect 在连接建立和心跳时写入 Redis：
 5. 组装 connect `MessageEnvelope`。
 6. 对每个设备调用目标 connect 节点 `PushToDevice`。
 7. 可重试错误最多本地重试 3 次，超过后记录告警并按当前策略推进消费。
+
+`realtime.push` 的处理流程类似，但 Kafka value 是 `RealtimePushEvent`：message-push 先按 `target.kind` 解析 `user`、`device`、`user_list`、`group_members`、`group_admins`，再批量查询在线路由，最后复用同一个 `MessageEnvelope` 下发。connect 不感知 payload 的业务含义。
 
 ## connect 连接生命周期
 
