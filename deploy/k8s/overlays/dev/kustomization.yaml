@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: lcchat-dev
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+images:
+  - name: lcchat
+    newName: lcchat
+    newTag: dev
+
+patches:
+  - path: patches/replicas.yaml
+  - path: patches/dev-configmap.yaml
+  - path: patches/dev-secret.yaml

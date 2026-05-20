@@ -41,7 +41,10 @@ func (m *ClientManager) Get(addr string) (connectpb.ConnectServiceClient, error)
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
-		Retry:   grpcx.DefaultClientRetryConfig("connect.ConnectService"),
+		InternalCaller: &grpcx.InternalCallerClientConfig{
+			Caller: "message-push",
+		},
+		Retry: grpcx.DefaultClientRetryConfig("connect.ConnectService"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("创建 connect gRPC 连接失败: %w", err)

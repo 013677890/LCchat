@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lcchat-common-config
+data:
+  # 基础设施不进 k3s，这些地址必须替换为 Pod 可访问的外部地址。
+  MYSQL_HOST: CHANGE_ME_MYSQL_HOST
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: chat_server
+
+  REDIS_ADDR: CHANGE_ME_REDIS_HOST:6379
+
+  # Kafka 的 advertised.listeners 也必须返回 k3s Pod 可访问的 broker 地址。
+  KAFKA_BROKERS: CHANGE_ME_KAFKA_HOST:9092
+
+  MINIO_ENDPOINT: CHANGE_ME_MINIO_HOST:9000
+  MINIO_BASE_URL: http://CHANGE_ME_MINIO_HOST:9000
