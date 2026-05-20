@@ -24,6 +24,21 @@ type authServiceImpl struct {
 	deviceRepo repository.IDeviceRepository
 }
 
+const passwordLoginSlowThreshold = time.Second
+
+// passwordLoginCostSnapshot 记录密码登录各关键步骤的耗时快照，用于定位真实瓶颈。
+type passwordLoginCostSnapshot struct {
+	totalCost              time.Duration
+	queryUserCost          time.Duration
+	comparePasswordCost    time.Duration
+	getDeviceIDCost        time.Duration
+	generateTokenCost      time.Duration
+	storeAccessTokenCost   time.Duration
+	storeRefreshTokenCost  time.Duration
+	upsertSessionCost      time.Duration
+	setActiveTimestampCost time.Duration
+}
+
 // NewAuthService 创建认证服务实例。
 //
 // 该服务聚焦 auth 域最核心的登录注册主链路：
@@ -35,6 +50,43 @@ func NewAuthService(authRepo repository.IAuthRepository, deviceRepo repository.I
 		authRepo:   authRepo,
 		deviceRepo: deviceRepo,
 	}
+}
+
+// logPasswordLoginFlow 在密码登录出现系统失败或整体偏慢时输出分段耗时，便于定位慢点。
+func logPasswordLoginFlow(ctx context.Context, stage string, err error, snapshot passwordLoginCostSnapshot) {
+	if err == nil && snapshot.totalCost < passwordLoginSlowThreshold {
+		return
+	}
+
+	if err != nil {
+		logger.Warn(ctx, "密码登录链路执行异常",
+			logger.String("stage", stage),
+			logger.Duration("total_cost", snapshot.totalCost),
+			logger.Duration("query_user_cost", snapshot.queryUserCost),
+			logger.Duration("compare_password_cost", snapshot.comparePasswordCost),
+			logger.Duration("get_device_id_cost", snapshot.getDeviceIDCost),
+			logger.Duration("generate_token_cost", snapshot.generateTokenCost),
+			logger.Duration("store_access_token_cost", snapshot.storeAccessTokenCost),
+			logger.Duration("store_refresh_token_cost", snapshot.storeRefreshTokenCost),
+			logger.Duration("upsert_session_cost", snapshot.upsertSessionCost),
+			logger.Duration("set_active_timestamp_cost", snapshot.setActiveTimestampCost),
+			logger.ErrorField("error", err),
+		)
+		return
+	}
+
+	logger.Warn(ctx, "密码登录链路耗时偏慢",
+		logger.String("stage", stage),
+		logger.Duration("total_cost", snapshot.totalCost),
+		logger.Duration("query_user_cost", snapshot.queryUserCost),
+		logger.Duration("compare_password_cost", snapshot.comparePasswordCost),
+		logger.Duration("get_device_id_cost", snapshot.getDeviceIDCost),
+		logger.Duration("generate_token_cost", snapshot.generateTokenCost),
+		logger.Duration("store_access_token_cost", snapshot.storeAccessTokenCost),
+		logger.Duration("store_refresh_token_cost", snapshot.storeRefreshTokenCost),
+		logger.Duration("upsert_session_cost", snapshot.upsertSessionCost),
+		logger.Duration("set_active_timestamp_cost", snapshot.setActiveTimestampCost),
+	)
 }
 
 // Register 用户注册。
@@ -117,17 +169,24 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 //   - codes.InvalidArgument: 设备 ID 缺失
 //   - codes.Internal: 系统内部错误
 func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (*authpb.LoginResponse, error) {
+	loginStartedAt := time.Now()
+	snapshot := passwordLoginCostSnapshot{}
+
 	// 设备信息允许缺省；这里补默认值，避免后续 GetXxx 调用遇到 nil 指针。
 	if req.DeviceInfo == nil {
 		req.DeviceInfo = &authpb.DeviceInfo{DeviceName: "Unknown", Platform: "Unknown"}
 	}
 
 	// 第一步先按账号读取 user_account，后续密码校验和状态判断都依赖这份快照。
+	queryUserStartedAt := time.Now()
 	user, err := s.authRepo.GetByEmail(ctx, req.Account)
+	snapshot.queryUserCost = time.Since(queryUserStartedAt)
 	if err != nil {
 		if errors.Is(err, repository.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeUserNotFound)
 		}
+		snapshot.totalCost = time.Since(loginStartedAt)
+		logPasswordLoginFlow(ctx, "get_user", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户失败")
 	}
 	if user.Status == 1 {
@@ -137,12 +196,17 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	// 把 user_uuid 写回上下文，便于后续降级日志和 repository 调用复用同一身份信息。
 	ctx = ctxmeta.WithUserUUID(ctx, user.UserUuid)
 	// 密码错误时直接返回业务错误，不继续生成 token。
+	comparePasswordStartedAt := time.Now()
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		snapshot.comparePasswordCost = time.Since(comparePasswordStartedAt)
 		return nil, apperr.New(consts.CodePasswordError)
 	}
+	snapshot.comparePasswordCost = time.Since(comparePasswordStartedAt)
 
 	// device_id 是设备级登录态隔离主键，缺失时直接拒绝登录。
+	getDeviceIDStartedAt := time.Now()
 	deviceID, err := getRequiredDeviceID(ctx)
+	snapshot.getDeviceIDCost = time.Since(getDeviceIDStartedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -150,21 +214,35 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	clientIP := util.GetClientIPFromContext(ctx)
 
 	// AccessToken 用于短期访问授权；RefreshToken 作为设备级长期续期凭据。
+	generateTokenStartedAt := time.Now()
 	accessToken, err := util.GenerateToken(user.UserUuid, deviceID)
+	snapshot.generateTokenCost = time.Since(generateTokenStartedAt)
 	if err != nil {
+		snapshot.totalCost = time.Since(loginStartedAt)
+		logPasswordLoginFlow(ctx, "generate_token", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成访问令牌失败")
 	}
 	refreshToken := util.GenIDString()
 
 	// 登录成功后优先写入 token，再尽力补充设备会话与在线态信息。
 	// AccessToken 写失败时不能放行，因为客户端将无法继续访问接口。
+	storeAccessTokenStartedAt := time.Now()
 	if err := s.deviceRepo.StoreAccessToken(ctx, user.UserUuid, deviceID, accessToken, util.AccessExpire); err != nil {
+		snapshot.storeAccessTokenCost = time.Since(storeAccessTokenStartedAt)
+		snapshot.totalCost = time.Since(loginStartedAt)
+		logPasswordLoginFlow(ctx, "store_access_token", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 AccessToken 失败")
 	}
+	snapshot.storeAccessTokenCost = time.Since(storeAccessTokenStartedAt)
 	// RefreshToken 与 AccessToken 一样属于主链路数据，失败时同样直接返回错误。
+	storeRefreshTokenStartedAt := time.Now()
 	if err := s.deviceRepo.StoreRefreshToken(ctx, user.UserUuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
+		snapshot.storeRefreshTokenCost = time.Since(storeRefreshTokenStartedAt)
+		snapshot.totalCost = time.Since(loginStartedAt)
+		logPasswordLoginFlow(ctx, "store_refresh_token", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 RefreshToken 失败")
 	}
+	snapshot.storeRefreshTokenCost = time.Since(storeRefreshTokenStartedAt)
 
 	// 设备会话只承载设备展示与在线态所需的最小字段。
 	deviceSession := &model.DeviceSession{
@@ -178,17 +256,25 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		Status:     model.DeviceStatusOnline,
 	}
 	// 设备会话落库失败只做告警，不回滚已经成功生成的登录态。
+	upsertSessionStartedAt := time.Now()
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
+		snapshot.upsertSessionCost = time.Since(upsertSessionStartedAt)
 		logger.Warn(ctx, "设备会话落库失败，按降级处理继续登录", logger.ErrorField("error", err))
 	}
+	snapshot.upsertSessionCost = time.Since(upsertSessionStartedAt)
 	// 活跃时间是在线态优化信息，失败时降级即可，由下一次心跳/读写再覆盖。
+	setActiveTimestampStartedAt := time.Now()
 	if err := s.deviceRepo.SetActiveTimestamp(ctx, user.UserUuid, deviceID, time.Now().Unix()); err != nil {
+		snapshot.setActiveTimestampCost = time.Since(setActiveTimestampStartedAt)
 		logger.Warn(ctx, "写入设备活跃时间失败",
 			logger.String("user_uuid", user.UserUuid),
 			logger.String("device_id", deviceID),
 			logger.ErrorField("error", err),
 		)
 	}
+	snapshot.setActiveTimestampCost = time.Since(setActiveTimestampStartedAt)
+	snapshot.totalCost = time.Since(loginStartedAt)
+	logPasswordLoginFlow(ctx, "completed", nil, snapshot)
 
 	return buildLoginResponse(accessToken, refreshToken, int64(util.AccessExpire.Seconds()), user), nil
 }

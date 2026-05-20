@@ -31,7 +31,8 @@ type authGRPCAddress string
 type authMetricsAddress string
 type authGRPCShutdownTimeout time.Duration
 
-const authGRPCDefaultTimeout = 300 * time.Millisecond
+// 认证主链路包含 bcrypt、事务与验证码等重操作，服务端兜底预算需要显著高于轻量查询。
+const authGRPCDefaultTimeout = 3 * time.Second
 
 func provideAuthLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideAuthMySQLConfig() config.MySQLConfig   { return config.DefaultMySQLConfig() }

@@ -52,18 +52,19 @@ func cloneDurationMap(src map[string]time.Duration) map[string]time.Duration {
 }
 
 var defaultClientMethodTimeouts = map[string]time.Duration{
-	"/auth.AuthService/Register":                         500 * time.Millisecond,
-	"/auth.AuthService/Login":                            500 * time.Millisecond,
-	"/auth.AuthService/LoginByCode":                      500 * time.Millisecond,
-	"/auth.AuthService/SendVerifyCode":                   500 * time.Millisecond,
+	// 认证链路包含 bcrypt 与 SMTP 等重操作，500ms 在本地/容器环境下容易误判超时。
+	"/auth.AuthService/Register":                         2 * time.Second,
+	"/auth.AuthService/Login":                            1500 * time.Millisecond,
+	"/auth.AuthService/LoginByCode":                      1500 * time.Millisecond,
+	"/auth.AuthService/SendVerifyCode":                   5 * time.Second,
 	"/auth.AuthService/VerifyCode":                       500 * time.Millisecond,
 	"/auth.AuthService/RefreshToken":                     300 * time.Millisecond,
 	"/auth.AuthService/Logout":                           1000 * time.Millisecond,
-	"/auth.AuthService/ResetPassword":                    500 * time.Millisecond,
-	"/auth.AccountService/ChangePassword":                500 * time.Millisecond,
-	"/auth.AccountService/ChangeEmail":                   500 * time.Millisecond,
+	"/auth.AuthService/ResetPassword":                    2 * time.Second,
+	"/auth.AccountService/ChangePassword":                2 * time.Second,
+	"/auth.AccountService/ChangeEmail":                   1500 * time.Millisecond,
 	"/auth.AccountService/ChangeTelephone":               500 * time.Millisecond,
-	"/auth.AccountService/DeleteAccount":                 1000 * time.Millisecond,
+	"/auth.AccountService/DeleteAccount":                 2 * time.Second,
 	"/auth.InternalAuthService/FindAccountByEmail":       300 * time.Millisecond,
 	"/auth.InternalAuthService/FindAccountByTelephone":   300 * time.Millisecond,
 	"/auth.InternalAuthService/UpdateLoginDisplay":       300 * time.Millisecond,

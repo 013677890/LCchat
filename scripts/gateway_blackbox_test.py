@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -10,8 +11,9 @@ from pathlib import Path
 import requests
 
 ROOT = Path(__file__).resolve().parent.parent
-BASE_URL = "http://localhost:8080"
-REQUEST_TIMEOUT = 10
+BASE_URL = os.getenv("LCCHAT_BASE_URL", "http://127.0.0.1:8088")
+HOST_HEADER = os.getenv("LCCHAT_HOST_HEADER", "lcchat.local")
+REQUEST_TIMEOUT = int(os.getenv("LCCHAT_REQUEST_TIMEOUT", "10"))
 
 EXPECTED_ENDPOINTS = {
     ("GET", "/health"),
@@ -134,6 +136,17 @@ def redis_set(key: str, value: str, expire_seconds: int = 600) -> None:
         ]
     )
 
+
+def build_headers(*, token: str | None = None, device_id: str | None = None) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if HOST_HEADER:
+        headers["Host"] = HOST_HEADER
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if device_id:
+        headers["X-Device-ID"] = device_id
+    return headers
+
 def request_json(
     method: str,
     path: str,
@@ -147,11 +160,7 @@ def request_json(
 ) -> tuple[requests.Response, dict]:
     mark_endpoint(method, route_path or path)
 
-    headers: dict[str, str] = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    if device_id:
-        headers["X-Device-ID"] = device_id
+    headers = build_headers(token=token, device_id=device_id)
 
     response = requests.request(
         method,
@@ -204,6 +213,9 @@ def main() -> int:
     nickname_a = f"A{suffix}"
     nickname_b = f"B{suffix}"
     nickname_a2 = f"AU{suffix[:4]}"
+    phone_seed = int(suffix, 16) % 1_000_000_000
+    telephone_a = f"13{phone_seed:09d}"
+    telephone_b = f"13{(phone_seed + 1) % 1_000_000_000:09d}"
     password_a = "Passw0rd1"
     password_b = "Passw0rd2"
     password_a2 = "Passw0rd3"
@@ -232,7 +244,11 @@ def main() -> int:
             raise TestFailure(f"health body unexpected: {body}")
 
         mark_endpoint("GET", "/metrics")
-        metrics_response = requests.get(f"{BASE_URL}/metrics", timeout=REQUEST_TIMEOUT)
+        metrics_response = requests.get(
+            f"{BASE_URL}/metrics",
+            headers=build_headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
         if metrics_response.status_code != 200 or not metrics_response.text.strip():
             raise TestFailure(
                 f"metrics unexpected: http={metrics_response.status_code}, body={metrics_response.text[:200]}"
@@ -271,6 +287,7 @@ def main() -> int:
                 "password": password_a,
                 "verifyCode": code_register,
                 "nickname": nickname_a,
+                "telephone": telephone_a,
             },
         )
         data = ensure_success("register-a", response, body)
@@ -286,6 +303,7 @@ def main() -> int:
                 "password": password_b,
                 "verifyCode": code_register,
                 "nickname": nickname_b,
+                "telephone": telephone_b,
             },
         )
         data = ensure_success("register-b", response, body)
@@ -466,7 +484,7 @@ def main() -> int:
         with open(avatar_path, "rb") as avatar_file:
             response = requests.post(
                 f"{BASE_URL}/api/v1/auth/user/avatar",
-                headers={"Authorization": f"Bearer {token_a1}"},
+                headers=build_headers(token=token_a1),
                 files={"avatar": ("avatar.png", avatar_file, "image/png")},
                 timeout=REQUEST_TIMEOUT,
             )

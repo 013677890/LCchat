@@ -11,7 +11,7 @@ resources:
 images:
   - name: lcchat
     newName: lcchat
-    newTag: dev-bin
+    newTag: dev-bin-4
 
 patches:
   - path: patches/replicas.yaml
