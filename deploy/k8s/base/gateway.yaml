@@ -37,8 +37,7 @@ spec:
         - name: gateway
           image: lcchat:dev
           imagePullPolicy: IfNotPresent
-          workingDir: /app/apps/gateway
-          command: ["go", "run", "./cmd"]
+          command: ["/app/bin/gateway"]
           envFrom:
             - configMapRef:
                 name: lcchat-common-config

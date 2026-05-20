@@ -40,8 +40,7 @@ spec:
         - name: relation
           image: lcchat:dev
           imagePullPolicy: IfNotPresent
-          workingDir: /app/apps/relation
-          command: ["go", "run", "./cmd"]
+          command: ["/app/bin/relation"]
           envFrom:
             - configMapRef:
                 name: lcchat-common-config

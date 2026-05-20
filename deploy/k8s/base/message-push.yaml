@@ -37,8 +37,7 @@ spec:
         - name: message-push
           image: lcchat:dev
           imagePullPolicy: IfNotPresent
-          workingDir: /app/apps/message-push
-          command: ["go", "run", "./cmd"]
+          command: ["/app/bin/message-push"]
           envFrom:
             - configMapRef:
                 name: lcchat-common-config

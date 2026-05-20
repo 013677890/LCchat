@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+spec:
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: mysql
+subsets:
+  - addresses:
+      - ip: 172.23.0.7
+    ports:
+      - name: mysql
+        port: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: redis
+subsets:
+  - addresses:
+      - ip: 172.23.0.4
+    ports:
+      - name: redis
+        port: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+spec:
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: kafka
+subsets:
+  - addresses:
+      - ip: 172.23.0.13
+    ports:
+      - name: kafka
+        port: 9092
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+spec:
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: minio
+subsets:
+  - addresses:
+      - ip: 172.23.0.12
+    ports:
+      - name: http
+        port: 9000

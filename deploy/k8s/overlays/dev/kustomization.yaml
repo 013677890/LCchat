@@ -5,12 +5,13 @@ namespace: lcchat-dev
 
 resources:
   - namespace.yaml
+  - external-infra.yaml
   - ../../base
 
 images:
   - name: lcchat
     newName: lcchat
-    newTag: dev
+    newTag: dev-bin
 
 patches:
   - path: patches/replicas.yaml

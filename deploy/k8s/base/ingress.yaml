@@ -5,6 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: lcchat
   annotations:
+    kubernetes.io/ingress.class: traefik
     traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
   ingressClassName: traefik
@@ -12,13 +13,6 @@ spec:
     - host: lcchat.local
       http:
         paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: gateway
-                port:
-                  name: http
           - path: /ws
             pathType: Prefix
             backend:
@@ -26,8 +20,22 @@ spec:
                 name: connect-ws
                 port:
                   name: http
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  name: http
           - path: /health
             pathType: Exact
+            backend:
+              service:
+                name: gateway
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
             backend:
               service:
                 name: gateway

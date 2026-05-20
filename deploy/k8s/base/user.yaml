@@ -40,8 +40,7 @@ spec:
         - name: user
           image: lcchat:dev
           imagePullPolicy: IfNotPresent
-          workingDir: /app/apps/user
-          command: ["go", "run", "./cmd"]
+          command: ["/app/bin/user"]
           envFrom:
             - configMapRef:
                 name: lcchat-common-config

@@ -147,7 +147,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     working_dir: /app/apps/auth
-    command: ["go", "run", "./cmd"]
+    command: ["/app/bin/auth"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
@@ -191,7 +191,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     working_dir: /app/apps/user
-    command: ["go", "run", "./cmd"]
+    command: ["/app/bin/user"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
@@ -235,7 +235,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     working_dir: /app/apps/relation
-    command: ["go", "run", "./cmd"]
+    command: ["/app/bin/relation"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
@@ -272,7 +272,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     working_dir: /app/apps/group
-    command: ["go", "run", "./cmd"]
+    command: ["/app/bin/group"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
@@ -310,7 +310,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     working_dir: /app/apps/msg
-    command: ["go", "run", "./cmd"]
+    command: ["/app/bin/msg"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
@@ -349,7 +349,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     working_dir: /app/apps/gateway
-    command: ["go", "run", "./cmd"]
+    command: ["/app/bin/gateway"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
@@ -389,7 +389,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     working_dir: /app/apps/connect
-    command: ["go", "run", "./cmd"]
+    command: ["/app/bin/connect"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
@@ -422,7 +422,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     working_dir: /app/apps/message-push
-    command: ["go", "run", "./cmd"]
+    command: ["/app/bin/message-push"]
     env_file:
       - ./deploy/env/chatserver.env
     environment:
