@@ -317,7 +317,7 @@ def main() -> int:
             json_body={
                 "account": email_a,
                 "password": password_a,
-                "deviceInfo": {"deviceName": "A1", "platform": "test", "appVersion": "1.0.0"},
+                "deviceInfo": {"deviceName": "A1", "platform": "Web", "appVersion": "1.0.0"},
             },
         )
         data = ensure_success("login-a1", response, body)
@@ -332,7 +332,7 @@ def main() -> int:
             json_body={
                 "account": email_a,
                 "password": password_a,
-                "deviceInfo": {"deviceName": "A2", "platform": "test", "appVersion": "1.0.0"},
+                "deviceInfo": {"deviceName": "A2", "platform": "Web", "appVersion": "1.0.0"},
             },
         )
         ensure_success("login-a2", response, body)
@@ -345,7 +345,7 @@ def main() -> int:
             json_body={
                 "account": email_b,
                 "password": password_b,
-                "deviceInfo": {"deviceName": "B1", "platform": "test", "appVersion": "1.0.0"},
+                "deviceInfo": {"deviceName": "B1", "platform": "Web", "appVersion": "1.0.0"},
             },
         )
         data = ensure_success("login-b1", response, body)
@@ -397,8 +397,9 @@ def main() -> int:
 
         response, body = request_json("GET", "/api/v1/auth/user/qrcode", token=token_a1)
         data = ensure_success("get-qrcode", response, body)
-        qr_token = data["qrCode"]
-        recorder.ok("get-qrcode", qr_token)
+        qr_code = data["qrCode"]
+        qr_token = qr_code.rstrip("/").rsplit("/", 1)[-1]
+        recorder.ok("get-qrcode", qr_code)
 
         response, body = request_json(
             "POST",
@@ -465,7 +466,7 @@ def main() -> int:
                 json_body={
                     "email": email_a,
                     "verifyCode": code_login,
-                    "deviceInfo": {"deviceName": "ACode", "platform": "test", "appVersion": "1.0.0"},
+                    "deviceInfo": {"deviceName": "ACode", "platform": "Web", "appVersion": "1.0.0"},
                 },
             )
             data = ensure_success("login-by-code", response, body)
@@ -501,7 +502,7 @@ def main() -> int:
                 json_body={
                     "account": email_a,
                     "password": password_a,
-                    "deviceInfo": {"deviceName": "A3", "platform": "test", "appVersion": "1.0.0"},
+                    "deviceInfo": {"deviceName": "A3", "platform": "Web", "appVersion": "1.0.0"},
                 },
             )
             data = ensure_success("login-after-avatar", response, body)
@@ -832,7 +833,7 @@ def main() -> int:
             json_body={
                 "account": email_a,
                 "password": password_a2,
-                "deviceInfo": {"deviceName": "A4", "platform": "test", "appVersion": "1.0.0"},
+                "deviceInfo": {"deviceName": "A4", "platform": "Web", "appVersion": "1.0.0"},
             },
         )
         data = ensure_success("login-after-change-password", response, body)
@@ -858,7 +859,7 @@ def main() -> int:
             json_body={
                 "account": new_email_a,
                 "password": password_a2,
-                "deviceInfo": {"deviceName": "A5", "platform": "test", "appVersion": "1.0.0"},
+                "deviceInfo": {"deviceName": "A5", "platform": "Web", "appVersion": "1.0.0"},
             },
         )
         data = ensure_success("login-after-change-email", response, body)
@@ -881,7 +882,7 @@ def main() -> int:
             json_body={
                 "account": email_b,
                 "password": password_b2,
-                "deviceInfo": {"deviceName": "B2", "platform": "test", "appVersion": "1.0.0"},
+                "deviceInfo": {"deviceName": "B2", "platform": "Web", "appVersion": "1.0.0"},
             },
         )
         data = ensure_success("login-after-reset-password", response, body)
@@ -920,7 +921,7 @@ def main() -> int:
             json_body={
                 "account": email_b,
                 "password": password_b2,
-                "deviceInfo": {"deviceName": "B3", "platform": "test", "appVersion": "1.0.0"},
+                "deviceInfo": {"deviceName": "B3", "platform": "Web", "appVersion": "1.0.0"},
             },
         )
         if response.status_code == 200 and body.get("code") != 0:

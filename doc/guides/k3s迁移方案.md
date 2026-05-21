@@ -1,13 +1,14 @@
 # LCChat k3s 应用层迁移方案
 
-本文面向学习与开发验证环境，目标是先把 LCChat 应用服务迁移到 k3s，基础设施继续复用外部 MySQL、Redis、Kafka、Kafka Connect 和 MinIO。
+本文面向本地开发验证环境，描述当前已经落地的 WSL2 原生 k3s 部署方案。LCChat 应用服务运行在 k3s 中，MySQL、Redis、Kafka、Kafka Connect、Debezium 和 MinIO 继续复用 Windows Docker Compose。
 
 ## 1. 当前边界
 
 - 迁移范围：`gateway`、`auth`、`user`、`relation`、`group`、`msg`、`connect`、`message-push`。
 - 不迁移范围：MySQL、Redis、Kafka、Kafka Connect、Debezium、MinIO。
-- 默认副本数：所有应用服务均为 2 个副本，用于验证多实例服务发现和下行推送。
+- 本地验证副本数：所有应用服务均为 1 个副本，降低本地资源占用并避免排查时引入额外重平衡噪声。
 - 部署组织方式：Kustomize。
+- 本地入口：不再使用 Ingress，使用 `kubectl port-forward svc/gateway 8088:8080`。
 
 ## 2. 目录结构
 
@@ -24,11 +25,11 @@ deploy/k8s/
     gateway.yaml
     connect.yaml
     message-push.yaml
-    ingress.yaml
     kustomization.yaml
   overlays/
     dev/
       namespace.yaml
+      external-infra.yaml
       kustomization.yaml
       patches/
         replicas.yaml
@@ -36,34 +37,58 @@ deploy/k8s/
         dev-secret.yaml
 ```
 
-## 3. 拓扑
+## 3. 当前拓扑
 
 ```mermaid
 flowchart LR
-    client["Client"] --> ingress["k3s Ingress"]
-    ingress -->|"/api"| gateway
-    ingress -->|"/ws"| connectWs
+    client["本机测试脚本"] --> pf["port-forward 127.0.0.1:8088"]
+    pf --> gateway["gateway Service"]
     gateway --> auth
     gateway --> user
     gateway --> relation
     gateway --> group
     gateway --> msg
-    connectWs --> connectSts["connect StatefulSet"]
-    msg --> kafka["External Kafka"]
-    messagePush --> kafka
-    messagePush --> redis["External Redis"]
+    messagePush["message-push"] --> kafkaSvc["Kafka Service"]
+    messagePush --> redisSvc["Redis Service"]
     messagePush --> connectHeadless["connect-headless"]
-    auth --> mysql["External MySQL"]
-    user --> mysql
-    relation --> mysql
-    group --> mysql
-    msg --> mysql
-    user --> minio["External MinIO"]
+    connectHeadless --> connect["connect StatefulSet"]
+    auth --> mysqlSvc["MySQL Service"]
+    user --> mysqlSvc
+    relation --> mysqlSvc
+    group --> mysqlSvc
+    msg --> mysqlSvc
+    user --> minioSvc["MinIO Service"]
+    mysqlSvc --> mysql["Docker MySQL 198.18.0.1:13306"]
+    redisSvc --> redis["Docker Redis 198.18.0.1:16379"]
+    kafkaSvc --> kafka["Docker Kafka 198.18.0.1:9092"]
+    minioSvc --> minio["Docker MinIO 198.18.0.1:9000"]
+    cdc["Kafka Connect + Debezium"] --> mysql
+    cdc --> kafka
 ```
 
 ## 4. 关键设计
 
-### 4.1 connect 使用 StatefulSet
+### 4.1 外部基础设施通过 Service + Endpoints 接入
+
+`deploy/k8s/overlays/dev/external-infra.yaml` 为 MySQL、Redis、Kafka、MinIO 创建同名 Service 与 Endpoints。Pod 仍按服务名访问基础设施，例如：
+
+```text
+MYSQL_HOST=mysql
+REDIS_ADDR=redis:6379
+KAFKA_BROKERS=kafka:9092
+MINIO_ENDPOINT=minio:9000
+```
+
+当前 WSL2 原生 k3s 通过 `198.18.0.1` 访问 Windows Docker 暴露端口：
+
+| 依赖 | Endpoint |
+| --- | --- |
+| MySQL | `198.18.0.1:13306` |
+| Redis | `198.18.0.1:16379` |
+| Kafka | `198.18.0.1:9092` |
+| MinIO | `198.18.0.1:9000` |
+
+### 4.2 connect 使用 StatefulSet
 
 `connect` 不是因为需要持久卷才使用 StatefulSet，而是因为在线路由中保存了具体 connect 节点的 gRPC 地址。
 
@@ -80,16 +105,9 @@ user:routing:{user_uuid}
 $(POD_NAME).connect-headless.$(POD_NAMESPACE).svc.cluster.local:9091
 ```
 
-例如：
+不要把 `CONNECT_SELF_GRPC_ADDR` 配成普通 Service 地址，否则请求可能被负载均衡到错误 Pod。
 
-```text
-connect-0.connect-headless.lcchat-dev.svc.cluster.local:9091
-connect-1.connect-headless.lcchat-dev.svc.cluster.local:9091
-```
-
-不要在多副本场景把 `CONNECT_SELF_GRPC_ADDR` 配成 `connect:9091`，否则请求会被普通 Service 负载均衡到错误 Pod。
-
-### 4.2 普通服务使用 Deployment
+### 4.3 普通服务使用 Deployment
 
 以下服务使用 `Deployment + ClusterIP Service`：
 
@@ -103,103 +121,79 @@ connect-1.connect-headless.lcchat-dev.svc.cluster.local:9091
 
 它们通过 Kubernetes Service 名称互相访问，例如 `auth:9090`、`group:9095`、`msg:9092`。
 
-### 4.3 配置拆分
+### 4.4 CDC 必须保持运行
 
-- 非敏感配置放在 `lcchat-common-config`。
-- 敏感配置放在 `lcchat-secret`。
-- 各服务监听地址与调用地址在各自 Deployment 中单独声明，避免同名变量在不同服务中语义冲突。
+注册、资料更新、账号注销等跨服务一致性依赖 MySQL outbox + Debezium CDC（变更数据捕获）：
 
-特别注意：`gateway` 必须配置 `GROUP_SERVICE_ADDR=group:9095`，否则代码会回退到 `localhost:9095`。
+1. 业务服务在事务内写入 `outbox_events`；
+2. Debezium connector 监听 MySQL binlog；
+3. `EventRouter` 按 `event_type` 路由到 Kafka topic；
+4. 下游服务消费 topic 并补齐本地状态。
 
-## 5. 部署前必须修改的占位配置
+因此 Docker Compose 中 `kafka-connect` 必须保持 healthy，且 `cdc-init` 至少成功执行过一次。
 
-编辑 `deploy/k8s/overlays/dev/patches/dev-configmap.yaml`：
+## 5. 镜像准备
 
-```yaml
-MYSQL_HOST: CHANGE_ME_MYSQL_HOST
-REDIS_ADDR: CHANGE_ME_REDIS_HOST:6379
-KAFKA_BROKERS: CHANGE_ME_KAFKA_HOST:9092
-MINIO_ENDPOINT: CHANGE_ME_MINIO_HOST:9000
-MINIO_BASE_URL: http://CHANGE_ME_MINIO_HOST:9000
-```
-
-编辑 `deploy/k8s/overlays/dev/patches/dev-secret.yaml`：
-
-```yaml
-MYSQL_USER: CHANGE_ME_MYSQL_USER
-MYSQL_PASSWORD: CHANGE_ME_MYSQL_PASSWORD
-MINIO_ACCESS_KEY: CHANGE_ME_MINIO_ACCESS_KEY
-MINIO_SECRET_KEY: CHANGE_ME_MINIO_SECRET_KEY
-EMAIL_AUTH_CODE: CHANGE_ME_QQ_SMTP_AUTH_CODE
-```
-
-Kafka 还需要确认 `advertised.listeners` 返回的是 k3s Pod 可访问的 broker 地址，否则只改 `KAFKA_BROKERS` 不够。
-
-## 6. 镜像准备
-
-当前清单默认使用：
+当前清单使用二进制版镜像：
 
 ```text
-lcchat:dev
+lcchat:dev-bin-4
 ```
-
-现阶段为了学习验证，仍复用当前开发型 Dockerfile，通过 `workingDir + go run ./cmd` 启动各服务。
 
 构建镜像：
 
-```bash
-docker build -t lcchat:dev .
+```powershell
+docker build -t lcchat:dev-bin-4 .
 ```
 
-如果 k3s 使用 containerd，通常还需要把镜像导入 k3s 节点，例如：
+导入 k3s containerd：
 
-```bash
-docker save lcchat:dev | sudo k3s ctr images import -
+```powershell
+docker save lcchat:dev-bin-4 -o lcchat-dev-bin-4.tar
+wsl -d Ubuntu-22.04 -- sudo k3s ctr images import /mnt/c/Users/23156/Desktop/go/LCChat/lcchat-dev-bin-4.tar
 ```
 
-后续正式化时，再把 Dockerfile 改成多阶段构建和二进制启动。
+导入后删除临时 tar 包，避免误提交大文件。
 
-## 7. 部署与查看
-
-渲染清单：
-
-```bash
-kubectl kustomize deploy/k8s/overlays/dev
-```
+## 6. 部署与查看
 
 应用清单：
 
-```bash
-kubectl apply -k deploy/k8s/overlays/dev
+```powershell
+wsl -d Ubuntu-22.04 -- sudo kubectl apply -k /mnt/c/Users/23156/Desktop/go/LCChat/deploy/k8s/overlays/dev
 ```
 
 查看状态：
 
-```bash
-kubectl -n lcchat-dev get pods,svc,ingress
+```powershell
+wsl -d Ubuntu-22.04 -- sudo kubectl -n lcchat-dev get pods,svc,endpoints -o wide
 ```
 
-查看日志：
+启动 gateway 本地入口：
 
-```bash
-kubectl -n lcchat-dev logs -l app.kubernetes.io/name=gateway -f
-kubectl -n lcchat-dev logs -l app.kubernetes.io/name=connect -f
-kubectl -n lcchat-dev logs -l app.kubernetes.io/name=message-push -f
+```powershell
+wsl -d Ubuntu-22.04 -- sudo kubectl -n lcchat-dev port-forward svc/gateway 8088:8080
 ```
 
-## 8. 验证清单
+健康检查：
 
-1. `gateway` 健康检查：`GET http://lcchat.local/health`。
-2. 登录接口能通过 `/api/v1/public/user/login` 访问。
-3. WebSocket 能通过 `ws://lcchat.local/ws?token=...&device_id=...` 建连。
-4. Redis 中在线路由值包含 `connect-0.connect-headless...` 或 `connect-1.connect-headless...`。
-5. 发送消息后，下行链路 `msg -> Kafka -> message-push -> connect -> WebSocket client` 可达。
-6. 删除或重启一个 connect Pod 后，路由能在 TTL 窗口内自愈。
+```powershell
+curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:8088/health
+```
 
-## 9. 当前方案的限制
+## 7. 验证清单
 
-- 探针是开发验证级，只证明端口或进程基本可用，不代表所有外部依赖都 ready。
-- `message-push` 两个副本共享 Kafka consumer group，实际并行度取决于 Kafka topic 分区数。
-- `group`、`auth`、`user` 等服务内部消费者也会按 consumer group 参与重平衡，开发验证阶段可接受。
-- 当前镜像仍是开发型镜像，正式环境应改成多阶段构建。
-- 基础设施外置时，k3s Pod 到外部 MySQL、Redis、Kafka、MinIO 的网络必须提前打通。
+1. `docker compose ps mysql redis kafka kafka-connect minio` 均为 healthy；
+2. `curl.exe -s http://127.0.0.1:8083/connectors/lcchat-outbox-connector/status` 显示 connector 和 task 均为 `RUNNING`；
+3. `kubectl -n lcchat-dev get pods` 中所有业务 Pod 为 `Running`；
+4. `gateway` 健康检查返回 `200`；
+5. `scripts/gateway_blackbox_test.py` 至少跑通注册、登录、资料读取、二维码和设备状态阶段。
+
+## 8. 当前方案限制
+
+- 本地验证不启用 Ingress，统一通过 port-forward 访问 gateway。
+- 当前副本数为 1，主要用于单机稳定联调；需要验证多副本时再调高 replicas。
+- Kafka advertised listener 必须保证 k3s Pod 可访问；当前依赖 `Service + Endpoints` 和 Docker Kafka 的 `kafka:9092` 配置。
+- `kubectl logs` 在当前 WSL2 环境可能遇到 kubelet EOF，必要时使用 `crictl logs` 读取容器日志。
+
+更详细的当前联调进度见：[k3s 本地部署与接口联调](../ops/k3s本地部署与接口联调.md)。

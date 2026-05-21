@@ -3,7 +3,7 @@ kind: ConfigMap
 metadata:
   name: lcchat-common-config
 data:
-  # 本地验证环境复用 docker compose 外部基础设施，通过同名 Service + Endpoints 接入。
+  # WSL2 原生 k3s 复用 Windows Docker 基础设施，通过同名 Service + Endpoints 接入。
   TZ: Asia/Shanghai
   GIN_MODE: release
 
@@ -18,7 +18,7 @@ data:
   REDIS_MIN_IDLE_CONNS: "4"
   REDIS_MAX_RETRIES: "3"
 
-  # compose 里的 Kafka advertised.listeners 为 kafka:9092，因此这里保持同名 Service。
+  # Kafka advertised.listeners 为 kafka:9092，因此这里保持同名 Service。
   KAFKA_BROKERS: kafka:9092
   KAFKA_RETRY_TOPIC: redis-retry-queue
   KAFKA_RETRY_GROUP_ID: redis-retry-consumer-group

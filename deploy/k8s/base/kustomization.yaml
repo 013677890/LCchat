@@ -12,4 +12,3 @@ resources:
   - gateway.yaml
   - connect.yaml
   - message-push.yaml
-  - ingress.yaml

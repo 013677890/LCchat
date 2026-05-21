@@ -1,5 +1,6 @@
 #!/bin/sh
-set -eu
+set -e
+set -u
 
 CONNECT_URL="${KAFKA_CONNECT_URL:-http://kafka-connect:8083}"
 CONNECTOR_NAME="${DEBEZIUM_CONNECTOR_NAME:-lcchat-outbox-connector}"
