@@ -1,0 +1,172 @@
+name: lcchat
+
+x-app-scale: &app-scale
+  deploy:
+    replicas: 3
+
+x-connect-node: &connect-node
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  working_dir: /app/apps/connect
+  command: ["/app/bin/connect"]
+  env_file:
+    - ./deploy/env/chatserver.env
+  environment:
+    TZ: ${TZ:-UTC}
+    GIN_MODE: ${GIN_MODE:-release}
+    REDIS_ADDR: redis:6379
+    AUTH_GRPC_ADDR: auth:9090
+    CONNECT_ADDR: ":8081"
+    CONNECT_GRPC_ADDR: ":9091"
+  depends_on:
+    auth:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/health >/dev/null || exit 1"]
+    interval: 5s
+    timeout: 5s
+    retries: 30
+    start_period: 20s
+  networks:
+    - chat-network
+
+services:
+  kafka-topics-init:
+    image: ${KAFKA_IMAGE:-apache/kafka:3.9.2}
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - bash
+      - -ec
+      - |
+        topics="redis-retry-queue user_created profile_display_changed account.deleted msg.push realtime.push group.cache"
+        for topic in $$topics; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic "$$topic" --partitions 3 || true
+        done
+    networks:
+      - chat-network
+
+  auth:
+    <<: *app-scale
+    ports: !reset []
+    depends_on:
+      kafka-topics-init:
+        condition: service_completed_successfully
+
+  user:
+    <<: *app-scale
+    ports: !reset []
+    depends_on:
+      kafka-topics-init:
+        condition: service_completed_successfully
+
+  relation:
+    <<: *app-scale
+    ports: !reset []
+    depends_on:
+      kafka-topics-init:
+        condition: service_completed_successfully
+
+  group:
+    <<: *app-scale
+    ports: !reset []
+    depends_on:
+      kafka-topics-init:
+        condition: service_completed_successfully
+
+  msg:
+    <<: *app-scale
+    ports: !reset []
+    depends_on:
+      kafka-topics-init:
+        condition: service_completed_successfully
+
+  gateway:
+    <<: *app-scale
+    ports: !reset []
+
+  connect:
+    ports: !reset []
+    depends_on:
+      kafka-topics-init:
+        condition: service_completed_successfully
+
+  connect-2:
+    <<: *connect-node
+    environment:
+      TZ: ${TZ:-UTC}
+      GIN_MODE: ${GIN_MODE:-release}
+      REDIS_ADDR: redis:6379
+      AUTH_GRPC_ADDR: auth:9090
+      CONNECT_ADDR: ":8081"
+      CONNECT_GRPC_ADDR: ":9091"
+      CONNECT_SELF_GRPC_ADDR: connect-2:9091
+
+  connect-3:
+    <<: *connect-node
+    environment:
+      TZ: ${TZ:-UTC}
+      GIN_MODE: ${GIN_MODE:-release}
+      REDIS_ADDR: redis:6379
+      AUTH_GRPC_ADDR: auth:9090
+      CONNECT_ADDR: ":8081"
+      CONNECT_GRPC_ADDR: ":9091"
+      CONNECT_SELF_GRPC_ADDR: connect-3:9091
+
+  message-push:
+    <<: *app-scale
+    ports: !reset []
+    depends_on:
+      connect-2:
+        condition: service_healthy
+      connect-3:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+
+  gateway-lb:
+    image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "${GATEWAY_LB_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/nginx/gateway-lb.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - chat-network
+
+  connect-lb:
+    image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    restart: unless-stopped
+    depends_on:
+      connect:
+        condition: service_healthy
+      connect-2:
+        condition: service_healthy
+      connect-3:
+        condition: service_healthy
+    ports:
+      - "${CONNECT_LB_HTTP_PORT:-8081}:8081"
+    volumes:
+      - ./deploy/nginx/connect-lb.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - chat-network

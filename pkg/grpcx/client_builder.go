@@ -8,9 +8,12 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+const defaultClientLoadBalancingPolicy = "round_robin"
 
 // ClientOptions 定义统一的 gRPC 客户端构造参数。
 //
@@ -30,6 +33,10 @@ type ClientOptions struct {
 	InternalCaller *InternalCallerClientConfig
 	Retry          *ClientRetryConfig
 	Observers      []ClientCallObserver
+
+	// LoadBalancingPolicy 写入 gRPC service config。
+	// 默认使用 round_robin，让 Docker/Kubernetes DNS 返回多个后端地址时能分摊请求。
+	LoadBalancingPolicy string
 
 	ExtraUnaryInterceptors []grpc.UnaryClientInterceptor
 
@@ -107,7 +114,7 @@ func NewClient(opts ClientOptions) (*grpc.ClientConn, error) {
 	interceptors = append(interceptors, opts.ExtraUnaryInterceptors...)
 
 	dialOptions := []grpc.DialOption{grpc.WithTransportCredentials(transportCredentials)}
-	if serviceConfigJSON, err := buildClientServiceConfig(opts.Retry); err != nil {
+	if serviceConfigJSON, err := buildClientServiceConfig(opts.Retry, opts.LoadBalancingPolicy); err != nil {
 		return nil, err
 	} else if serviceConfigJSON != "" {
 		dialOptions = append(dialOptions, grpc.WithDefaultServiceConfig(serviceConfigJSON))
@@ -124,6 +131,14 @@ func NewClient(opts ClientOptions) (*grpc.ClientConn, error) {
 	return grpc.NewClient(address, dialOptions...)
 }
 
+func normalizeClientLoadBalancingPolicy(policy string) string {
+	policy = strings.TrimSpace(policy)
+	if policy == "" {
+		return defaultClientLoadBalancingPolicy
+	}
+	return policy
+}
+
 func buildClientCallOptions(opts ClientOptions) []grpc.CallOption {
 	callOptions := make([]grpc.CallOption, 0, 2)
 	if opts.MaxRecvMsgSize > 0 {
@@ -135,46 +150,18 @@ func buildClientCallOptions(opts ClientOptions) []grpc.CallOption {
 	return callOptions
 }
 
-func buildClientServiceConfig(cfg *ClientRetryConfig) (string, error) {
-	if cfg == nil {
-		return "", nil
-	}
-
-	serviceNames := make([]string, 0, len(cfg.ServiceNames))
-	for _, serviceName := range cfg.ServiceNames {
-		serviceName = strings.TrimSpace(serviceName)
-		if serviceName == "" {
-			continue
+func buildClientServiceConfig(cfg *ClientRetryConfig, loadBalancingPolicy string) (string, error) {
+	loadBalancingPolicy = normalizeClientLoadBalancingPolicy(loadBalancingPolicy)
+	serviceNames := make([]string, 0)
+	if cfg != nil {
+		serviceNames = make([]string, 0, len(cfg.ServiceNames))
+		for _, serviceName := range cfg.ServiceNames {
+			serviceName = strings.TrimSpace(serviceName)
+			if serviceName == "" {
+				continue
+			}
+			serviceNames = append(serviceNames, serviceName)
 		}
-		serviceNames = append(serviceNames, serviceName)
-	}
-	if len(serviceNames) == 0 {
-		return "", nil
-	}
-
-	timeout := cfg.Timeout
-	if timeout <= 0 {
-		timeout = 2 * time.Second
-	}
-	maxAttempts := cfg.MaxAttempts
-	if maxAttempts <= 1 {
-		maxAttempts = 2
-	}
-	initialBackoff := cfg.InitialBackoff
-	if initialBackoff <= 0 {
-		initialBackoff = 100 * time.Millisecond
-	}
-	maxBackoff := cfg.MaxBackoff
-	if maxBackoff <= 0 {
-		maxBackoff = time.Second
-	}
-	backoffMultiplier := cfg.BackoffMultiplier
-	if backoffMultiplier <= 0 {
-		backoffMultiplier = 2
-	}
-	retryableCodes := cfg.RetryableStatusCodes
-	if len(retryableCodes) == 0 {
-		retryableCodes = []string{"UNAVAILABLE", "DEADLINE_EXCEEDED", "UNKNOWN"}
 	}
 
 	type serviceNameEntry struct {
@@ -194,16 +181,49 @@ func buildClientServiceConfig(cfg *ClientRetryConfig) (string, error) {
 		RetryPolicy  retryPolicy        `json:"retryPolicy"`
 	}
 	type serviceConfig struct {
-		MethodConfig []methodConfig `json:"methodConfig"`
+		LoadBalancingConfig []map[string]any `json:"loadBalancingConfig,omitempty"`
+		MethodConfig        []methodConfig   `json:"methodConfig,omitempty"`
 	}
 
-	names := make([]serviceNameEntry, 0, len(serviceNames))
-	for _, serviceName := range serviceNames {
-		names = append(names, serviceNameEntry{Service: serviceName})
+	payload := serviceConfig{}
+	if loadBalancingPolicy != "" {
+		payload.LoadBalancingConfig = []map[string]any{{
+			loadBalancingPolicy: map[string]any{},
+		}}
 	}
 
-	payload := serviceConfig{
-		MethodConfig: []methodConfig{{
+	if len(serviceNames) > 0 {
+		timeout := cfg.Timeout
+		if timeout <= 0 {
+			timeout = 2 * time.Second
+		}
+		maxAttempts := cfg.MaxAttempts
+		if maxAttempts <= 1 {
+			maxAttempts = 2
+		}
+		initialBackoff := cfg.InitialBackoff
+		if initialBackoff <= 0 {
+			initialBackoff = 100 * time.Millisecond
+		}
+		maxBackoff := cfg.MaxBackoff
+		if maxBackoff <= 0 {
+			maxBackoff = time.Second
+		}
+		backoffMultiplier := cfg.BackoffMultiplier
+		if backoffMultiplier <= 0 {
+			backoffMultiplier = 2
+		}
+		retryableCodes := cfg.RetryableStatusCodes
+		if len(retryableCodes) == 0 {
+			retryableCodes = []string{"UNAVAILABLE", "DEADLINE_EXCEEDED", "UNKNOWN"}
+		}
+
+		names := make([]serviceNameEntry, 0, len(serviceNames))
+		for _, serviceName := range serviceNames {
+			names = append(names, serviceNameEntry{Service: serviceName})
+		}
+
+		payload.MethodConfig = []methodConfig{{
 			Name:         names,
 			WaitForReady: cfg.WaitForReady,
 			Timeout:      formatServiceConfigDuration(timeout),
@@ -214,7 +234,11 @@ func buildClientServiceConfig(cfg *ClientRetryConfig) (string, error) {
 				BackoffMultiplier:    backoffMultiplier,
 				RetryableStatusCodes: retryableCodes,
 			},
-		}},
+		}}
+	}
+
+	if len(payload.LoadBalancingConfig) == 0 && len(payload.MethodConfig) == 0 {
+		return "", nil
 	}
 
 	raw, err := json.Marshal(payload)

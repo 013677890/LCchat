@@ -169,7 +169,7 @@ services:
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-LCChat}
       EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-smtp.qq.com}
       EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-465}
-      EMAIL_AUTH_CODE: ${EMAIL_AUTH_CODE}
+      EMAIL_AUTH_CODE: ${EMAIL_AUTH_CODE:-CHANGE_ME_QQ_SMTP_AUTH_CODE}
     depends_on:
       mysql:
         condition: service_healthy
@@ -213,7 +213,7 @@ services:
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-LCChat}
       EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-smtp.qq.com}
       EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-465}
-      EMAIL_AUTH_CODE: ${EMAIL_AUTH_CODE}
+      EMAIL_AUTH_CODE: ${EMAIL_AUTH_CODE:-CHANGE_ME_QQ_SMTP_AUTH_CODE}
     depends_on:
       mysql:
         condition: service_healthy
@@ -363,6 +363,7 @@ services:
       AUTH_SERVICE_ADDR: "auth:9090"
       USER_SERVICE_ADDR: "user:9094"
       RELATION_SERVICE_ADDR: "relation:9093"
+      GROUP_SERVICE_ADDR: "group:9095"
       MSG_SERVICE_ADDR: "msg:9092"
       GATEWAY_ADDR: ":8080"
     depends_on:
