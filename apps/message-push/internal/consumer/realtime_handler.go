@@ -58,6 +58,10 @@ func (h *RealtimeHandler) Handle(ctx context.Context, value []byte) error {
 	if len(routes) == 0 {
 		return nil
 	}
+	if h.sender == nil {
+		result = "retriable_error"
+		return fmt.Errorf("%w: realtime.push connect 发送器未初始化", errRetriable)
+	}
 
 	envelope := &connectpb.MessageEnvelope{
 		Type:        event.Type,

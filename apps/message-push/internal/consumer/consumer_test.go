@@ -129,6 +129,33 @@ func TestHandle_UnsupportedConvType_SkipsNonRetriable(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestHandle_MissingRouteRepository_ReturnsRetriable(t *testing.T) {
+	h := &EventHandler{sender: &mockSender{}}
+	err := h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+		ReceiverUuid: "receiver",
+		Type:         "MSG_READ_RECEIPT",
+		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,
+	}))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errRetriable))
+}
+
+func TestHandle_MissingSender_ReturnsRetriable(t *testing.T) {
+	routes := &mockRouteRepo{
+		userRoutes: map[string][]route.DeviceRoute{
+			"receiver": {{UserUUID: "receiver", DeviceID: "receiver-dev", ConnectGRPCAddr: "connect-a"}},
+		},
+	}
+	h := &EventHandler{routes: routes}
+	err := h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+		ReceiverUuid: "receiver",
+		Type:         "MSG_READ_RECEIPT",
+		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,
+	}))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errRetriable))
+}
+
 func TestHandle_P2PPush_SendsReceiverAndSenderOtherDevices(t *testing.T) {
 	sender := &mockSender{}
 	routes := &mockRouteRepo{

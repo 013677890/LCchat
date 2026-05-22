@@ -281,6 +281,10 @@ func (h *MsgHandler) UpdateConversationSettings(c *gin.Context) {
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}
+	if req.Mute == nil && req.Pin == nil {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
 
 	err := h.msgService.UpdateConversationSettings(ctx, &req)
 	if err != nil {

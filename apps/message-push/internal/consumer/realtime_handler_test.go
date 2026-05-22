@@ -132,6 +132,21 @@ func TestRealtimeHandle_InvalidProto_SkipsNonRetriable(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestRealtimeHandle_MissingSender_ReturnsRetriable(t *testing.T) {
+	routes := &mockRouteRepo{
+		userRoutes: map[string][]route.DeviceRoute{
+			"user-1": {{UserUUID: "user-1", DeviceID: "dev-1", ConnectGRPCAddr: "connect-a"}},
+		},
+	}
+	h := &RealtimeHandler{routes: routes}
+	event := realtimepush.NewEvent(realtimepush.TypeFriendApplyCreated, realtimepush.NewUserTarget("user-1"), nil)
+	event.ServerTs = 123
+
+	err := h.Handle(context.Background(), marshalRealtimeEvent(t, event))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errRetriable))
+}
+
 func TestRealtimeHandle_ReturnsRetriableWhenAllPushesFail(t *testing.T) {
 	sender := &mockSender{err: errors.New("push failed")}
 	routes := &mockRouteRepo{

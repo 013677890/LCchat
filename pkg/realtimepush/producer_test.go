@@ -98,7 +98,7 @@ func TestGroupAggregateTargetUsesGroupPartitionKey(t *testing.T) {
 		t.Fatalf("proto.Unmarshal(payload) error = %v", err)
 	}
 	if decodedPayload.GroupUuid != "group-1" || decodedPayload.Version != 9 {
-		t.Fatalf("payload = %#v, want group_uuid=group-1 version=9", decodedPayload)
+		t.Fatalf("payload.GroupUuid = %q, Version = %d, want group_uuid=group-1 version=9", decodedPayload.GroupUuid, decodedPayload.Version)
 	}
 	if got := decodedPayload.Changed; len(got) != 2 || got[0] != GroupChangedInfo || got[1] != GroupChangedNotice {
 		t.Fatalf("payload.Changed = %#v, want [info notice]", got)

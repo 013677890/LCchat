@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -361,6 +362,17 @@ func (r *applyRepositoryImpl) invalidateApplyCachesAsync(ctx context.Context, ta
 
 // UpdateStatus 更新申请状态。
 func (r *applyRepositoryImpl) UpdateStatus(ctx context.Context, id int64, status int, remark string) error {
+	var apply model.ApplyRequest
+	if err := r.db.WithContext(ctx).
+		Select("applicant_uuid", "target_uuid").
+		Where("id = ? AND apply_type = ? AND deleted_at IS NULL", id, 0).
+		Take(&apply).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrApplyNotFound
+		}
+		return WrapDBError(err)
+	}
+
 	updates := map[string]interface{}{"status": status}
 	if remark != "" {
 		updates["handle_remark"] = remark
@@ -374,6 +386,7 @@ func (r *applyRepositoryImpl) UpdateStatus(ctx context.Context, id int64, status
 	if result.Error != nil {
 		return WrapDBError(result.Error)
 	}
+	r.removePendingApplyCache(ctx, apply.TargetUuid, apply.ApplicantUuid)
 	if result.RowsAffected == 0 {
 		return ErrApplyNotFound
 	}
@@ -449,6 +462,7 @@ func (r *applyRepositoryImpl) AcceptApplyAndCreateRelation(ctx context.Context, 
 		return false, WrapDBError(err)
 	}
 
+	r.removePendingApplyCache(ctx, userUUID, friendUUID)
 	if !alreadyProcessed {
 		r.invalidateFriendCacheAsync(ctx, userUUID, friendUUID, remark)
 	}
@@ -509,6 +523,32 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 			}
 		}
 	}, async.AsyncRedisTimeout)
+}
+
+// removePendingApplyCache 在好友申请进入终态后同步移除待处理列表中的申请人。
+//
+// 这里仍遵循 patch-if-exists：只有待处理列表缓存已经存在时才删除 field；缓存缺失时让下一次
+// 读路径从 MySQL 全量重建，避免写路径用单条事实误建一份不完整缓存。
+func (r *applyRepositoryImpl) removePendingApplyCache(ctx context.Context, targetUUID, applicantUUID string) {
+	if r.redisClient == nil || targetUUID == "" || applicantUUID == "" {
+		return
+	}
+
+	cacheKey := rediskey.ApplyPendingKey(targetUUID)
+	luaScript := goredis.NewScript(luaRemovePendingApplyIfExists)
+	expireSeconds := int(getRandomExpireTime(rediskey.ApplyPendingTTL).Seconds())
+	_, err := luaScript.Run(ctx, r.redisClient,
+		[]string{cacheKey},
+		applicantUUID,
+		expireSeconds,
+	).Result()
+	if err != nil && err != goredis.Nil {
+		if isRedisWrongType(err) {
+			_ = r.redisClient.Del(ctx, cacheKey).Err()
+			return
+		}
+		LogRedisError(ctx, err)
+	}
 }
 
 // MarkAsRead 标记指定申请已读。

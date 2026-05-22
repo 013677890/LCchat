@@ -170,6 +170,9 @@ func Run(ctx context.Context, server *grpc.Server, listener net.Listener) error 
 
 	logger.Info(ctx, "gRPC 服务启动", logger.String("addr", listener.Addr().String()))
 	if err := server.Serve(listener); err != nil {
+		if errors.Is(err, grpc.ErrServerStopped) {
+			return nil
+		}
 		return fmt.Errorf("grpc serve failed: %w", err)
 	}
 	return nil

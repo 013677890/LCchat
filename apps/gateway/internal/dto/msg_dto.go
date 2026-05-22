@@ -8,11 +8,11 @@ import (
 
 // SendMessageRequest 发送消息请求
 type SendMessageRequest struct {
-	ClientMsgID  string   `json:"clientMsgId" binding:"required"`
-	ConvType     int32    `json:"convType" binding:"required"`
-	TargetUUID   string   `json:"targetUuid" binding:"required"`
+	ClientMsgID  string   `json:"clientMsgId" binding:"required,min=1,max=64"`
+	ConvType     int32    `json:"convType" binding:"required,oneof=1 2"`
+	TargetUUID   string   `json:"targetUuid" binding:"required,min=1"`
 	MsgType      int32    `json:"msgType" binding:"required"`
-	Content      string   `json:"content" binding:"required"`
+	Content      string   `json:"content" binding:"required,min=1,max=65536"`
 	ReplyToMsgID string   `json:"replyToMsgId"`
 	AtUsers      []string `json:"atUsers"`
 }
@@ -63,8 +63,8 @@ func ConvertSendMessageResponseFromProto(pb *msgpb.SendMessageResponse) *SendMes
 type PullMessagesRequest struct {
 	ConvID    string `form:"convId" binding:"required"`
 	AnchorSeq int64  `form:"anchorSeq"`
-	Limit     int32  `form:"limit"`
-	Direction int32  `form:"direction"`
+	Limit     int32  `form:"limit" binding:"omitempty,min=0,max=200"`
+	Direction int32  `form:"direction" binding:"omitempty,oneof=0 1 2"`
 }
 
 // PullMessagesResponse 拉取消息响应
@@ -103,8 +103,8 @@ func ConvertPullMessagesResponseFromProto(pb *msgpb.PullMessagesResponse) *PullM
 
 // GetMessagesByIdsRequest 批量获取消息请求
 type GetMessagesByIdsRequest struct {
-	ConvID string   `json:"convId" binding:"required"`
-	MsgIDs []string `json:"msgIds" binding:"required"`
+	ConvID string   `json:"convId" binding:"required,min=1"`
+	MsgIDs []string `json:"msgIds" binding:"required,min=1,max=50,dive,required"`
 }
 
 // GetMessagesByIdsResponse 批量获取消息响应
@@ -137,8 +137,8 @@ func ConvertGetMessagesByIdsResponseFromProto(pb *msgpb.GetMessagesByIdsResponse
 
 // RecallMessageRequest 撤回消息请求
 type RecallMessageRequest struct {
-	ConvID string `json:"convId" binding:"required"`
-	MsgID  string `json:"msgId" binding:"required"`
+	ConvID string `json:"convId" binding:"required,min=1"`
+	MsgID  string `json:"msgId" binding:"required,min=1"`
 }
 
 // ConvertToProtoRecallMessageRequest 将撤回消息 DTO 转换为 Protobuf 请求
@@ -159,7 +159,7 @@ func ConvertToProtoRecallMessageRequest(dto *RecallMessageRequest, operatorUUID 
 // GetConversationsRequest 获取会话列表请求（Query 绑定）
 type GetConversationsRequest struct {
 	UpdatedSince int64  `form:"updatedSince"`
-	PageSize     int32  `form:"pageSize"`
+	PageSize     int32  `form:"pageSize" binding:"omitempty,min=0,max=200"`
 	Cursor       string `form:"cursor"`
 }
 
@@ -201,7 +201,7 @@ func ConvertGetConversationsResponseFromProto(pb *msgpb.GetConversationsResponse
 // MarkReadRequest 标记已读请求
 type MarkReadRequest struct {
 	ConvID  string `json:"convId" binding:"required"`
-	ReadSeq int64  `json:"readSeq" binding:"required"`
+	ReadSeq int64  `json:"readSeq" binding:"required,gt=0"`
 }
 
 // MarkReadResponse 标记已读响应

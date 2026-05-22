@@ -108,8 +108,11 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 
 	var routes []route.DeviceRoute
 	appendUserRoutes := func(userUUID, excludeDeviceID, logLabel string) error {
-		if userUUID == "" || h.routes == nil {
+		if userUUID == "" {
 			return nil
+		}
+		if h.routes == nil {
+			return fmt.Errorf("%w: 路由仓储未初始化", errRetriable)
 		}
 		userRoutes, routeErr := h.routes.ListUserRoutes(ctx, userUUID)
 		if routeErr != nil {
@@ -140,6 +143,10 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 	}
 
 	appendGroupRoutes := func(groupUUID, excludeUserUUID string) error {
+		if h.routes == nil {
+			result = "retriable_error"
+			return fmt.Errorf("%w: 路由仓储未初始化", errRetriable)
+		}
 		if h.groups == nil {
 			result = "permanent_error"
 			logger.Warn(ctx, "message-push 群组客户端未初始化，跳过群聊扩散",
@@ -226,6 +233,10 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 
 	if len(routes) == 0 {
 		return nil
+	}
+	if h.sender == nil {
+		result = "retriable_error"
+		return fmt.Errorf("%w: connect 发送器未初始化", errRetriable)
 	}
 
 	dedupedRoutes := make([]route.DeviceRoute, 0, len(routes))
