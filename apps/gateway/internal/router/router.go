@@ -33,7 +33,8 @@ var gatewayRequestTimeouts = map[string]time.Duration{
 	"/api/v1/public/user/verify-code":      2 * time.Second,
 	"/api/v1/public/user/parse-qrcode":     1 * time.Second,
 	// auth user
-	"/api/v1/auth/user/profile":                 1 * time.Second,
+	// 更新个人资料需要经过 gRPC、事务和展示字段事件，预算要比读取更宽。
+	"/api/v1/auth/user/profile":                 5 * time.Second,
 	"/api/v1/auth/user/profile/:userUuid":       2 * time.Second,
 	"/api/v1/auth/user/search":                  3 * time.Second,
 	"/api/v1/auth/user/avatar":                  3 * time.Second,

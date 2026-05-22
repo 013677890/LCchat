@@ -78,7 +78,8 @@ var defaultClientMethodTimeouts = map[string]time.Duration{
 	"/user.UserService/GetProfile":                       300 * time.Millisecond,
 	"/user.UserService/GetOtherProfile":                  300 * time.Millisecond,
 	"/user.UserService/SearchUser":                       800 * time.Millisecond,
-	"/user.UserService/UpdateProfile":                    500 * time.Millisecond,
+	// 资料更新要写入主表并触发展示字段事件，预算不能压得和只读接口一样紧。
+	"/user.UserService/UpdateProfile":                    5 * time.Second,
 	"/user.UserService/UploadAvatar":                     500 * time.Millisecond,
 	"/user.UserService/GetQRCode":                        300 * time.Millisecond,
 	"/user.UserService/ParseQRCode":                      300 * time.Millisecond,
@@ -136,7 +137,8 @@ var defaultClientMethodTimeouts = map[string]time.Duration{
 	"/msg.MsgService/SendMessage":                        1000 * time.Millisecond,
 	"/msg.MsgService/PullMessages":                       500 * time.Millisecond,
 	"/msg.MsgService/GetMessagesByIds":                   500 * time.Millisecond,
-	"/msg.MsgService/RecallMessage":                      500 * time.Millisecond,
+	// 撤回消息会先更新 DB，再尽力投递撤回通知；本地三副本环境下 500ms 容易误伤。
+	"/msg.MsgService/RecallMessage":                      1500 * time.Millisecond,
 	"/msg.MsgService/GetConversations":                   800 * time.Millisecond,
 	"/msg.MsgService/MarkRead":                           500 * time.Millisecond,
 	"/msg.MsgService/DeleteConversation":                 500 * time.Millisecond,

@@ -29,7 +29,7 @@ type GetOtherProfileResponse struct {
 // UpdateProfileRequest 更新基本信息请求 DTO
 type UpdateProfileRequest struct {
 	Nickname  string `json:"nickname" binding:"omitempty,min=2,max=20"` // 昵称(2-20字符)
-	Gender    int32  `json:"gender" binding:"omitempty,oneof=1 2 3"`    // 性别(1:男 2:女 3:未知)
+	Gender    *int32 `json:"gender" binding:"omitempty,oneof=1 2 3"`    // 性别(1:男 2:女 3:未知)
 	Birthday  string `json:"birthday" binding:"omitempty"`              // 生日(YYYY-MM-DD)
 	Signature string `json:"signature" binding:"omitempty,max=100"`     // 个性签名
 }
@@ -138,12 +138,15 @@ func ConvertToProtoUpdateProfileRequest(dto *UpdateProfileRequest) *userpb.Updat
 	if dto == nil {
 		return nil
 	}
-	return &userpb.UpdateProfileRequest{
+	req := &userpb.UpdateProfileRequest{
 		Nickname:  dto.Nickname,
-		Gender:    dto.Gender,
 		Birthday:  dto.Birthday,
 		Signature: dto.Signature,
 	}
+	if dto.Gender != nil {
+		req.Gender = *dto.Gender
+	}
+	return req
 }
 
 // ConvertToProtoChangePasswordRequest 将 DTO 转换为 Protobuf 请求

@@ -416,11 +416,30 @@ func TestUserHandlerChangePasswordAndUpdateProfile(t *testing.T) {
 		h := NewUserHandler(&fakeUserHTTPService{
 			updateProfileFn: func(_ context.Context, req *dto.UpdateProfileRequest) (*dto.UpdateProfileResponse, error) {
 				require.Equal(t, "new-nick", req.Nickname)
+				require.Nil(t, req.Gender)
 				return &dto.UpdateProfileResponse{}, nil
 			},
 		})
 		w := httptest.NewRecorder()
 		req := newUserJSONRequest(t, http.MethodPut, "/api/v1/auth/user/profile", `{"nickname":"new-nick"}`)
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+
+		h.UpdateProfile(c)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, consts.CodeSuccess, decodeUserHandlerCode(t, w))
+	})
+
+	t.Run("update_profile_gender_only_success", func(t *testing.T) {
+		h := NewUserHandler(&fakeUserHTTPService{
+			updateProfileFn: func(_ context.Context, req *dto.UpdateProfileRequest) (*dto.UpdateProfileResponse, error) {
+				require.NotNil(t, req.Gender)
+				require.Equal(t, int32(3), *req.Gender)
+				return &dto.UpdateProfileResponse{}, nil
+			},
+		})
+		w := httptest.NewRecorder()
+		req := newUserJSONRequest(t, http.MethodPut, "/api/v1/auth/user/profile", `{"gender":3}`)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req
 

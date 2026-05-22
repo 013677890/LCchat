@@ -127,8 +127,8 @@ message SearchUserResponse {
 
 // UpdateProfileRequest 更新基本信息请求
 message UpdateProfileRequest {
-	string nickname = 1 [(validate.rules).string = {min_len: 2, max_len: 20}];
-	int32 gender = 2 [(validate.rules).int32 = {in: [1, 2, 3]}]; // 1:男 2:女 3:未知
+	string nickname = 1 [(validate.rules).string = {ignore_empty: true, min_len: 2, max_len: 20}];
+	int32 gender = 2 [(validate.rules).int32 = {ignore_empty: true, in: [1, 2, 3]}]; // 1:男 2:女 3:未知；0 表示未传
 	string birthday = 3 [(validate.rules).string = {}]; // YYYY-MM-DD 格式
 	string signature = 4 [(validate.rules).string.max_len = 100];
 }

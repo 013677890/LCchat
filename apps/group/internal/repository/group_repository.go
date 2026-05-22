@@ -1594,7 +1594,8 @@ func (r *groupRepositoryImpl) loadGroupMembersFromDB(ctx context.Context, groupU
 	if err := r.db.WithContext(ctx).
 		Table("group_members AS gm").
 		Select("gm.*").
-		Joins("JOIN groups AS g ON g.uuid = gm.group_uuid").
+		// groups 是 MySQL 8 保留关键字，手写 JOIN 时必须显式转义，避免线上 SQL 语法错误。
+		Joins("JOIN `groups` AS g ON g.uuid = gm.group_uuid").
 		Where("gm.group_uuid = ? AND gm.status = 0 AND gm.deleted_at IS NULL", groupUUID).
 		Where("g.status = 0 AND g.deleted_at IS NULL").
 		Order("gm.role DESC, gm.joined_at ASC, gm.id ASC").
@@ -1961,7 +1962,8 @@ func (r *groupRepositoryImpl) ListUserGroups(ctx context.Context, userUUID strin
 func (r *groupRepositoryImpl) loadUserGroupsFromDB(ctx context.Context, userUUID string) ([]*model.GroupInfo, error) {
 	var groups []*model.GroupInfo
 	if err := r.db.WithContext(ctx).
-		Table("groups AS g").
+		// groups 是 MySQL 8 保留关键字，作为主表名拼接 SQL 时同样需要显式转义。
+		Table("`groups` AS g").
 		Select("DISTINCT g.*").
 		Joins("JOIN group_members AS gm ON gm.group_uuid = g.uuid").
 		Where("gm.user_uuid = ? AND gm.status = 0 AND gm.deleted_at IS NULL", userUUID).

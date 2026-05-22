@@ -444,6 +444,13 @@ func TestGatewayUserServiceOtherMethods(t *testing.T) {
 		wantErr := errors.New("update failed")
 		svc := NewUserService(&fakeGatewayUserServiceClient{
 			updateProfileFn: func(_ context.Context, req *userpb.UpdateProfileRequest) (*userpb.UpdateProfileResponse, error) {
+				if req.Nickname == "gender-only" {
+					require.Equal(t, int32(2), req.Gender)
+					return &userpb.UpdateProfileResponse{
+						UserInfo: &userpb.UserInfo{Uuid: "u1", Gender: req.Gender},
+					}, nil
+				}
+				require.Zero(t, req.Gender)
 				if req.Nickname == "err" {
 					return nil, wantErr
 				}
@@ -457,6 +464,12 @@ func TestGatewayUserServiceOtherMethods(t *testing.T) {
 		require.NoError(t, okErr)
 		require.NotNil(t, okResp)
 		assert.Equal(t, "nick", okResp.UserInfo.Nickname)
+
+		gender := int32(2)
+		genderResp, genderErr := svc.UpdateProfile(context.Background(), &dto.UpdateProfileRequest{Nickname: "gender-only", Gender: &gender})
+		require.NoError(t, genderErr)
+		require.NotNil(t, genderResp)
+		assert.Equal(t, int8(2), genderResp.UserInfo.Gender)
 
 		errResp, err := svc.UpdateProfile(context.Background(), &dto.UpdateProfileRequest{Nickname: "err"})
 		require.Nil(t, errResp)

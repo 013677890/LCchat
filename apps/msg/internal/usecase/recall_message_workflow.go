@@ -23,6 +23,8 @@ type RecallMessageWorkflow struct {
 	producer   *mq.Producer
 }
 
+const recallKafkaPublishTimeout = 200 * time.Millisecond
+
 // NewRecallMessageWorkflow 创建撤回消息用例
 func NewRecallMessageWorkflow(
 	msgService *msgsvc.Service,
@@ -85,14 +87,23 @@ func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessa
 		Seq:          0,
 	}
 
-	if err := w.producer.Publish(ctx, req.ConvId, pushEvent); err != nil {
-		// DB 已更新，Kafka 失败不阻断。客户端下次 PullMessages 也能看到 status=1
+	w.publishRecallEventBestEffort(ctx, req, pushEvent)
+
+	return &pb.RecallMessageResponse{}, nil
+}
+
+// publishRecallEventBestEffort 尝试投递撤回通知，但不会把 Kafka 波动放大为主链路超时。
+// 这里显式脱离父请求的 cancel/deadline，并附加一个更短的独立超时，保证“DB 已成功撤回”后，
+// 最多只为通知投递额外等待一个很小的时间窗口；失败则记录告警，客户端后续仍可通过 Pull 自愈。
+func (w *RecallMessageWorkflow) publishRecallEventBestEffort(ctx context.Context, req *pb.RecallMessageRequest, pushEvent *pb.MsgPushEvent) {
+	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recallKafkaPublishTimeout)
+	defer cancel()
+
+	if err := w.producer.Publish(publishCtx, req.ConvId, pushEvent); err != nil {
 		logger.Warn(ctx, "撤回消息：投递 Kafka 失败（不阻断）",
 			logger.String("conv_id", req.ConvId),
 			logger.String("msg_id", req.MsgId),
 			logger.ErrorField("error", err),
 		)
 	}
-
-	return &pb.RecallMessageResponse{}, nil
 }

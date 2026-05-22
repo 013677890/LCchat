@@ -119,6 +119,14 @@ func provideUserGRPCShutdownTimeout() userGRPCShutdownTimeout {
 	return userGRPCShutdownTimeout(10 * time.Second)
 }
 
+// provideUserGRPCMethodTimeouts 为 user-service gRPC 方法提供更细粒度的超时预算。
+// 资料更新需要写主表并触发展示字段事件，比只读查询更重，因此单独放宽。
+func provideUserGRPCMethodTimeouts() map[string]time.Duration {
+	return map[string]time.Duration{
+		"/user.UserService/UpdateProfile": 2 * time.Second,
+	}
+}
+
 // provideUserUserCreatedConsumer 构造 user-service 的 user_created 消费者。
 func provideUserUserCreatedConsumer(cfg config.KafkaConfig, internalProfileSvc service.InternalProfileService, db *gorm.DB) *consumer.UserCreatedConsumer {
 	groupID := cfg.ConsumerConfig.GroupID + "-user-created"
@@ -165,7 +173,7 @@ func provideUserGRPCServer(register grpcx.RegistrationFunc, addr userGRPCAddress
 	return grpcx.NewServer(grpcx.ServerOptions{
 		Address:          string(addr),
 		Namespace:        "user",
-		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: userGRPCDefaultTimeout},
+		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: userGRPCDefaultTimeout, MethodTimeouts: provideUserGRPCMethodTimeouts()},
 		EnableHealth:     true,
 		EnableReflection: grpcx.EnableDevelopmentReflection(),
 		ExtraUnaryInterceptors: []grpc.UnaryServerInterceptor{
