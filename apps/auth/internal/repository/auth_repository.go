@@ -92,11 +92,14 @@ func (r *authRepositoryImpl) CreateWithOutboxEvent(ctx context.Context, user *mo
 // UpdatePassword 更新密码哈希。
 func (r *authRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, password string) error {
 	// 这里只更新 password_hash 一个敏感字段，不顺带修改其他资料列。
-	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).
+	result := r.db.WithContext(ctx).Model(&model.UserAccount{}).
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
-		Update("password_hash", password).Error
-	if err != nil {
-		return WrapDBError(err)
+		Update("password_hash", password)
+	if result.Error != nil {
+		return WrapDBError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrRecordNotFound
 	}
 	// 登录态展示缓存依赖 user_account 快照，密码修改后顺手失效同一个用户缓存。
 	r.invalidateUserCache(ctx, userUUID)
@@ -106,11 +109,14 @@ func (r *authRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, passw
 // UpdateEmail 更新邮箱。
 func (r *authRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email string) error {
 	// 邮箱是登录凭据之一，因此更新时仍只作用于未注销账号。
-	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).
+	result := r.db.WithContext(ctx).Model(&model.UserAccount{}).
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
-		Update("email", email).Error
-	if err != nil {
-		return WrapDBError(err)
+		Update("email", email)
+	if result.Error != nil {
+		return WrapDBError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrRecordNotFound
 	}
 	// 邮箱更新后旧缓存中的登录展示与账号快照都已过期，需要一起失效。
 	r.invalidateUserCache(ctx, userUUID)
@@ -130,11 +136,14 @@ func (r *authRepositoryImpl) UpdateLoginDisplay(ctx context.Context, userUUID, n
 		updates["login_avatar"] = avatar
 	}
 	// 这里使用 Updates(map) 是为了让“只更新有值字段”的语义清晰可控。
-	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).
+	result := r.db.WithContext(ctx).Model(&model.UserAccount{}).
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
-		Updates(updates).Error
-	if err != nil {
-		return WrapDBError(err)
+		Updates(updates)
+	if result.Error != nil {
+		return WrapDBError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrRecordNotFound
 	}
 	r.invalidateUserCache(ctx, userUUID)
 	return nil
@@ -144,11 +153,14 @@ func (r *authRepositoryImpl) UpdateLoginDisplay(ctx context.Context, userUUID, n
 func (r *authRepositoryImpl) Delete(ctx context.Context, userUUID string) error {
 	now := time.Now()
 	// 注销时同时把 status 置为禁用并写 deleted_at，避免后续仍按正常账号被查询出来。
-	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).
+	result := r.db.WithContext(ctx).Model(&model.UserAccount{}).
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
-		Updates(map[string]interface{}{"status": 1, "deleted_at": now, "updated_at": now}).Error
-	if err != nil {
-		return WrapDBError(err)
+		Updates(map[string]interface{}{"status": 1, "deleted_at": now, "updated_at": now})
+	if result.Error != nil {
+		return WrapDBError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrRecordNotFound
 	}
 	r.invalidateUserCache(ctx, userUUID)
 	return nil
@@ -159,10 +171,14 @@ func (r *authRepositoryImpl) DeleteWithOutboxEvent(ctx context.Context, userUUID
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now()
 		// 先在事务里软删除账号，确保后续 account_deleted 事件对应的数据库事实已经落盘。
-		if err := tx.Model(&model.UserAccount{}).
+		result := tx.Model(&model.UserAccount{}).
 			Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
-			Updates(map[string]interface{}{"status": 1, "deleted_at": now, "updated_at": now}).Error; err != nil {
-			return WrapDBError(err)
+			Updates(map[string]interface{}{"status": 1, "deleted_at": now, "updated_at": now})
+		if result.Error != nil {
+			return WrapDBError(result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return ErrRecordNotFound
 		}
 		// 再追加 outbox 事件，让 user/relation 等下游服务后续做清理。
 		if err := outbox.InsertEvent(tx, eventType, userUUID, payload); err != nil {

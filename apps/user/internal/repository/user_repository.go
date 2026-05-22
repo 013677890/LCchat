@@ -41,34 +41,38 @@ func NewUserRepository(db *gorm.DB, redisClient *redis.Client) IUserRepository {
 func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model.UserProfile, error) {
 	// ==================== 1. 先从 Redis 缓存中查询 ====================
 	cacheKey := rediskey.UserProfileKey(uuid)
-	cachedData, err := r.redisClient.Get(ctx, cacheKey).Result()
-	if err == nil {
-		// 缓存命中，反序列化返回
-		// 先判空
-		if cachedData == "{}" {
-			return nil, nil
+	if r.redisClient != nil {
+		cachedData, err := r.redisClient.Get(ctx, cacheKey).Result()
+		if err == nil {
+			// 缓存命中，反序列化返回
+			// 先判空
+			if cachedData == "{}" {
+				return nil, nil
+			}
+			var profile model.UserProfile
+			if err := json.Unmarshal([]byte(cachedData), &profile); err == nil {
+				return &profile, nil
+			}
 		}
-		var profile model.UserProfile
-		if err := json.Unmarshal([]byte(cachedData), &profile); err == nil {
-			return &profile, nil
+		if err != nil && err != redis.Nil {
+			LogRedisError(ctx, err) // 记录日志 降级处理
 		}
-	}
-	if err != nil && err != redis.Nil {
-		LogRedisError(ctx, err) // 记录日志 降级处理
 	}
 
 	// ==================== 2. 缓存未命中，查询 MySQL ====================
 	var profile model.UserProfile
-	err = r.db.WithContext(ctx).Where("user_uuid = ?", uuid).First(&profile).Error
+	err := r.db.WithContext(ctx).Where("user_uuid = ?", uuid).First(&profile).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 存一份空到redis 5min过期
 			randomDuration := getRandomExpireTime(rediskey.UserProfileEmptyTTL)
-			async.RunSafe(ctx, func(runCtx context.Context) {
-				if err := r.redisClient.Set(runCtx, cacheKey, "{}", randomDuration).Err(); err != nil {
-					LogRedisError(runCtx, err)
-				}
-			}, async.AsyncRedisTimeout)
+			if r.redisClient != nil {
+				async.RunSafe(ctx, func(runCtx context.Context) {
+					if err := r.redisClient.Set(runCtx, cacheKey, "{}", randomDuration).Err(); err != nil {
+						LogRedisError(runCtx, err)
+					}
+				}, async.AsyncRedisTimeout)
+			}
 			return nil, nil
 		} else {
 			return nil, WrapDBError(err)
@@ -87,11 +91,13 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	// 随机时间防止缓存雪崩
 	randomDuration := time.Duration(rand.Intn(10)) * time.Minute
 	ttl := rediskey.UserProfileTTL - randomDuration
-	async.RunSafe(ctx, func(runCtx context.Context) {
-		if err := r.redisClient.Set(runCtx, cacheKey, profileJSON, ttl).Err(); err != nil {
-			LogRedisError(runCtx, err)
-		}
-	}, async.AsyncRedisTimeout)
+	if r.redisClient != nil {
+		async.RunSafe(ctx, func(runCtx context.Context) {
+			if err := r.redisClient.Set(runCtx, cacheKey, profileJSON, ttl).Err(); err != nil {
+				LogRedisError(runCtx, err)
+			}
+		}, async.AsyncRedisTimeout)
+	}
 
 	return &profile, nil
 }
@@ -149,52 +155,57 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 	missUUIDs := make([]string, 0, len(uuids))
 
 	// ==================== 1. 批量查询 Redis ====================
-	keys := make([]string, 0, len(uuids))
-	for _, uuid := range uuids {
-		keys = append(keys, rediskey.UserProfileKey(uuid))
-	}
+	if r.redisClient != nil {
+		keys := make([]string, 0, len(uuids))
+		for _, uuid := range uuids {
+			keys = append(keys, rediskey.UserProfileKey(uuid))
+		}
 
-	cachedValues, err := r.redisClient.MGet(ctx, keys...).Result()
-	if err != nil && err != redis.Nil {
-		LogRedisError(ctx, err)
-		// Redis 异常时降级走 DB 全量查询
-		cachedValues = nil
-	}
+		cachedValues, err := r.redisClient.MGet(ctx, keys...).Result()
+		if err != nil && err != redis.Nil {
+			LogRedisError(ctx, err)
+			// Redis 异常时降级走 DB 全量查询
+			cachedValues = nil
+		}
 
-	if cachedValues != nil {
-		for i, value := range cachedValues {
-			uuid := uuids[i]
+		if cachedValues != nil {
+			for i, value := range cachedValues {
+				uuid := uuids[i]
 
-			if value == nil {
-				// key 不存在，需要回源
-				missUUIDs = append(missUUIDs, uuid)
-				continue
+				if value == nil {
+					// key 不存在，需要回源
+					missUUIDs = append(missUUIDs, uuid)
+					continue
+				}
+
+				var raw string
+				switch v := value.(type) {
+				case string:
+					raw = v
+				case []byte:
+					raw = string(v)
+				default:
+					missUUIDs = append(missUUIDs, uuid)
+					continue
+				}
+
+				// 空占位符 `{}` 表示用户不存在，标记为已处理（nil），不回源
+				if raw == "" || raw == "{}" {
+					profileMap[uuid] = nil // 标记为已处理，用户不存在
+					continue
+				}
+
+				var profile model.UserProfile
+				if err := json.Unmarshal([]byte(raw), &profile); err != nil {
+					// 反序列化失败，需要回源
+					missUUIDs = append(missUUIDs, uuid)
+					continue
+				}
+				profileMap[uuid] = &profile
 			}
-
-			var raw string
-			switch v := value.(type) {
-			case string:
-				raw = v
-			case []byte:
-				raw = string(v)
-			default:
-				missUUIDs = append(missUUIDs, uuid)
-				continue
-			}
-
-			// 空占位符 `{}` 表示用户不存在，标记为已处理（nil），不回源
-			if raw == "" || raw == "{}" {
-				profileMap[uuid] = nil // 标记为已处理，用户不存在
-				continue
-			}
-
-			var profile model.UserProfile
-			if err := json.Unmarshal([]byte(raw), &profile); err != nil {
-				// 反序列化失败，需要回源
-				missUUIDs = append(missUUIDs, uuid)
-				continue
-			}
-			profileMap[uuid] = &profile
+		} else {
+			// Redis 完全不可用，全部回源
+			missUUIDs = append(missUUIDs, uuids...)
 		}
 	} else {
 		// Redis 完全不可用，全部回源
@@ -204,7 +215,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 	// ==================== 2. 对未命中部分回源 MySQL ====================
 	if len(missUUIDs) > 0 {
 		var dbProfiles []*model.UserProfile
-		err = r.db.WithContext(ctx).
+		err := r.db.WithContext(ctx).
 			Where("user_uuid IN ?", missUUIDs).
 			Find(&dbProfiles).
 			Error
@@ -229,35 +240,37 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 			}
 		}
 
-		// ==================== 3. 异步回填 Redis 缓存 ====================
-		async.RunSafe(ctx, func(runCtx context.Context) {
-			pipe := r.redisClient.Pipeline()
+		if r.redisClient != nil {
+			// ==================== 3. 异步回填 Redis 缓存 ====================
+			async.RunSafe(ctx, func(runCtx context.Context) {
+				pipe := r.redisClient.Pipeline()
 
-			for _, profile := range dbProfiles {
-				if profile == nil || profile.UserUuid == "" {
-					continue
+				for _, profile := range dbProfiles {
+					if profile == nil || profile.UserUuid == "" {
+						continue
+					}
+					profileJSON, err := json.Marshal(profile)
+					if err != nil {
+						continue
+					}
+					cacheKey := rediskey.UserProfileKey(profile.UserUuid)
+					pipe.Set(runCtx, cacheKey, profileJSON, getRandomExpireTime(rediskey.UserProfileTTL))
 				}
-				profileJSON, err := json.Marshal(profile)
-				if err != nil {
-					continue
-				}
-				cacheKey := rediskey.UserProfileKey(profile.UserUuid)
-				pipe.Set(runCtx, cacheKey, profileJSON, getRandomExpireTime(rediskey.UserProfileTTL))
-			}
 
-			// 对不存在的 UUID 写入空占位，避免缓存穿透
-			for _, uuid := range missUUIDs {
-				if _, ok := foundUUIDs[uuid]; ok {
-					continue
+				// 对不存在的 UUID 写入空占位，避免缓存穿透
+				for _, uuid := range missUUIDs {
+					if _, ok := foundUUIDs[uuid]; ok {
+						continue
+					}
+					cacheKey := rediskey.UserProfileKey(uuid)
+					pipe.Set(runCtx, cacheKey, "{}", getRandomExpireTime(rediskey.UserProfileEmptyTTL))
 				}
-				cacheKey := rediskey.UserProfileKey(uuid)
-				pipe.Set(runCtx, cacheKey, "{}", getRandomExpireTime(rediskey.UserProfileEmptyTTL))
-			}
 
-			if _, err := pipe.Exec(runCtx); err != nil {
-				LogRedisError(runCtx, err)
-			}
-		}, async.AsyncRedisPipelineTimeout)
+				if _, err := pipe.Exec(runCtx); err != nil {
+					LogRedisError(runCtx, err)
+				}
+			}, async.AsyncRedisPipelineTimeout)
+		}
 	}
 
 	// ==================== 4. 按原始 uuids 顺序构建结果 ====================
@@ -415,6 +428,10 @@ func (r *userRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID, 
 // 这里同时维护 token -> userUUID 与 userUUID -> token 两个方向的 Redis Key，
 // 便于“扫码解析”和“复用已有二维码”两个场景共用一份 48 小时有效期数据。
 func (r *userRepositoryImpl) SaveQRCode(ctx context.Context, userUUID, token string) error {
+	if r.redisClient == nil {
+		return ErrRedis
+	}
+
 	// 1. 保存 token -> userUUID 映射
 	tokenKey := rediskey.QRCodeTokenKey(token)
 	err := r.redisClient.Set(ctx, tokenKey, userUUID, rediskey.QRCodeTTL).Err()
@@ -436,6 +453,10 @@ func (r *userRepositoryImpl) SaveQRCode(ctx context.Context, userUUID, token str
 //
 // 当 token 过期或不存在时返回 ErrRedisNil，供 service 层映射为二维码失效类业务反馈。
 func (r *userRepositoryImpl) GetUUIDByQRCodeToken(ctx context.Context, token string) (string, error) {
+	if r.redisClient == nil {
+		return "", ErrRedis
+	}
+
 	tokenKey := rediskey.QRCodeTokenKey(token)
 	userUUID, err := r.redisClient.Get(ctx, tokenKey).Result()
 	if err != nil {
@@ -451,6 +472,10 @@ func (r *userRepositoryImpl) GetUUIDByQRCodeToken(ctx context.Context, token str
 //
 // 通过一次 pipeline 同时读取 token 和 TTL，避免 service 层再发第二次 Redis 请求拼接过期时间。
 func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userUUID string) (string, time.Time, error) {
+	if r.redisClient == nil {
+		return "", time.Time{}, ErrRedis
+	}
+
 	userKey := rediskey.QRCodeUserKey(userUUID)
 	pipe := r.redisClient.Pipeline()
 	pipe.Get(ctx, userKey)

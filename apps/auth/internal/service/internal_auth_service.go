@@ -71,6 +71,9 @@ func (s *internalAuthServiceImpl) UpdateLoginDisplay(ctx context.Context, req *a
 	}
 	// 这里只回写 login_nickname / login_avatar 两个冗余字段，供登录态最小展示复用。
 	if err := s.authRepo.UpdateLoginDisplay(ctx, req.UserUuid, req.Nickname, req.Avatar); err != nil {
+		if errors.Is(err, repository.ErrRecordNotFound) {
+			return &authpb.UpdateLoginDisplayResponse{}, nil
+		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新登录展示字段失败")
 	}
 	return &authpb.UpdateLoginDisplayResponse{}, nil
