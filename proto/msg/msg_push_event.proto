@@ -9,7 +9,7 @@ import "proto/msg/msg_common.proto";
 // MsgPushEvent 为 msg-service 写入 Kafka 的消息推送事件。
 // Kafka Topic: msg.push
 // Kafka Key:   conv_id（保证同一会话的消息在同一 Partition 内有序消费）
-// Kafka Value: MsgPushEvent 序列化后的 bytes
+// Kafka Value: MsgPushEvent 的 protojson 字符串
 //
 // 消费者：Push-Job（独立 Kafka 消费者服务）
 // Push-Job 的职责：
@@ -23,8 +23,8 @@ import "proto/msg/msg_common.proto";
 //   4. 通过 gRPC 调用对应 Connect 节点的 PushToUser 接口投递消息
 //   5. 多端同步（Self-Sync）：向 from_uuid 下除 device_id 以外的在线设备投递一份
 //
-// 注意：msg-service 写完 Kafka 后立即返回 200 OK，绝不等待推送结果。
-// Kafka 是上行发送与下行推送之间的"防弹衣"，确保发消息永远丝滑。
+// 注意：msg-service 写入 MySQL message 和 outbox_events 后立即返回，
+// 不等待 CDC、Kafka 或下游在线投递结果。
 message MsgPushEvent {
   // receiver_uuid: 单聊=对端用户 UUID；群聊=群 UUID。
   string receiver_uuid = 1;
@@ -52,6 +52,8 @@ message MsgPushEvent {
   // seq: 透传到 MessageEnvelope.seq 的事件顺序键。
   // MSG_PUSH 填 MsgItem.seq；MSG_RECALL / MSG_MARK_READ 填 0。
   int64 seq = 9;
+  // event_id: msg.push outbox 事件 ID，用于 CDC 重放和下游幂等。
+  string event_id = 10;
 }
 
 // RecallNotice 撤回通知。

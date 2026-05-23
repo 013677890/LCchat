@@ -10,7 +10,7 @@
 | `user_created` | `KAFKA_USER_CREATED_TOPIC` | auth Outbox | user | 注册成功后初始化用户资料。 |
 | `profile_display_changed` | `KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC` | user | auth | 昵称/头像变化后回写登录展示冗余。 |
 | `account.deleted` | `KAFKA_ACCOUNT_DELETED_TOPIC` | auth Outbox | user/relation/group 等 | 账号注销后的下游清理。 |
-| `msg.push` | `KAFKA_MSG_PUSH_TOPIC` | msg | message-push | 消息下行、撤回、已读同步。 |
+| `msg.push` | `KAFKA_MSG_PUSH_TOPIC` | msg Outbox | message-push | 消息下行、撤回、已读同步。 |
 | `realtime.push` | `KAFKA_REALTIME_PUSH_TOPIC` | relation、group | message-push | 好友、关系、群申请和群状态等非消息类实时提醒。 |
 | `group.cache` | `KAFKA_GROUP_CACHE_TOPIC` | group Outbox | group cache projector | 群缓存投影事件。 |
 
@@ -114,11 +114,13 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 
 | 项 | 说明 |
 | --- | --- |
-| 生产者 | msg usecase。 |
+| 生产者 | msg 写 `outbox_events`，由 Debezium CDC 路由。 |
 | 消费者 | message-push。 |
 | Key | `conv_id`，保证同一会话尽量落在同一分区。 |
-| Value | `msg.MsgPushEvent` Protobuf bytes。 |
+| Value | `msg.MsgPushEvent` protojson。 |
 | 语义 | 将消息事实变更转为在线 WebSocket 下行。 |
+
+`msg.push` 不兼容旧版 Protobuf bytes；消费端只接受严格 protojson，未知字段或缺少 `event_id` 均按永久错误跳过。
 
 `MsgPushEvent` 字段：
 
@@ -133,6 +135,7 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | `server_ts` | int64 | 服务端时间，Unix 毫秒。 |
 | `from_uuid` | string | 发送方 UUID。 |
 | `seq` | int64 | 下行事件顺序键。 |
+| `event_id` | string | Outbox 事件 ID，用于 CDC 重放和下游幂等。 |
 
 支持类型：
 

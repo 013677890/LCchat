@@ -9,9 +9,11 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 func init() { logger.ReplaceGlobal(zap.NewNop()) }
@@ -23,6 +25,7 @@ type mockRepo struct {
 	setIdempotentFn     func(ctx context.Context, from, dev, cid string, msg *model.Message) error
 	allocSeqFn          func(ctx context.Context, convId string) (int64, error)
 	createFn            func(ctx context.Context, msg *model.Message) error
+	createWithOutboxFn  func(ctx context.Context, msg *model.Message, event OutboxEvent) error
 	getByDuplicateKeyFn func(ctx context.Context, from, dev, cid string) (*model.Message, error)
 	getBySeqRangeFn     func(ctx context.Context, convId string, anchor int64, dir int, limit int, clearSeq int64) ([]*model.Message, error)
 	getByIdsFn          func(ctx context.Context, convId string, ids []string) ([]*model.Message, error)
@@ -52,6 +55,12 @@ func (m *mockRepo) AllocSeq(ctx context.Context, convId string) (int64, error) {
 func (m *mockRepo) Create(ctx context.Context, msg *model.Message) error {
 	if m.createFn != nil {
 		return m.createFn(ctx, msg)
+	}
+	return nil
+}
+func (m *mockRepo) CreateWithOutbox(ctx context.Context, msg *model.Message, event OutboxEvent) error {
+	if m.createWithOutboxFn != nil {
+		return m.createWithOutboxFn(ctx, msg, event)
 	}
 	return nil
 }
@@ -117,7 +126,13 @@ func newP2PReq() *pb.SendMessageRequest {
 }
 
 func TestCreateMessage_Success(t *testing.T) {
-	repo := &mockRepo{}
+	var gotEvent OutboxEvent
+	repo := &mockRepo{
+		createWithOutboxFn: func(_ context.Context, _ *model.Message, event OutboxEvent) error {
+			gotEvent = event
+			return nil
+		},
+	}
 	svc := NewService(repo)
 
 	result, err := svc.CreateMessage(context.Background(), newP2PReq())
@@ -126,6 +141,20 @@ func TestCreateMessage_Success(t *testing.T) {
 	assert.Equal(t, "p2p-user_aaa-user_bbb", result.Msg.ConvId)
 	assert.Equal(t, int64(1), result.Msg.Seq)
 	assert.Equal(t, int16(1), result.Msg.MsgType)
+	assert.Equal(t, "msg.push", gotEvent.EventType)
+	assert.Equal(t, result.Msg.ConvId, gotEvent.EntityID)
+	assert.NotEmpty(t, gotEvent.Payload)
+
+	pushEvent, err := msgevent.DecodeMsgPush([]byte(gotEvent.Payload))
+	require.NoError(t, err)
+	assert.NotEmpty(t, pushEvent.GetEventId())
+	assert.Equal(t, "user_bbb", pushEvent.GetReceiverUuid())
+	assert.Equal(t, "dev1", pushEvent.GetDeviceId())
+	assert.Equal(t, "MSG_PUSH", pushEvent.GetType())
+	assert.Equal(t, result.Msg.Seq, pushEvent.GetSeq())
+	var item pb.MsgItem
+	require.NoError(t, proto.Unmarshal(pushEvent.GetData(), &item))
+	assert.Equal(t, result.Msg.MsgId, item.GetMsgId())
 }
 
 func TestCreateMessage_IdempotentHit(t *testing.T) {
@@ -168,7 +197,7 @@ func TestCreateMessage_UnsupportedMsgType(t *testing.T) {
 func TestCreateMessage_DBDuplicate_Fallback(t *testing.T) {
 	existing := &model.Message{MsgId: "existing-id", Seq: 3}
 	repo := &mockRepo{
-		createFn: func(_ context.Context, _ *model.Message) error {
+		createWithOutboxFn: func(_ context.Context, _ *model.Message, _ OutboxEvent) error {
 			return ErrDuplicateMessage
 		},
 		getByDuplicateKeyFn: func(_ context.Context, _, _, _ string) (*model.Message, error) {

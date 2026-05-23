@@ -8,27 +8,22 @@ import (
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/groupcli"
-	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/async"
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"google.golang.org/protobuf/proto"
 )
 
 // SendMessageWorkflow 发送消息用例（协调层）
 //
 // 编排步骤：
-//  1. message.Service.CreateMessage → 幂等检查 + ULID + conv_id + seq + 落库
+//  1. message.Service.CreateMessage → 幂等检查 + ULID + conv_id + seq + message/outbox 同事务落库
 //  2. 幂等命中 → 直接返回首次结果
 //  3. conversation.Service.UpsertForMessage → 更新发送方会话 (isSender=true)
 //  4. P2P → Upsert 接收方会话 (isSender=false) / GROUP → UpsertGroupConv
-//  5. mq.Producer.Publish → 写 Kafka MsgPushEvent (key=conv_id)
-//  6. 返回 {msg_id, seq, conv_id, send_time}
+//  5. 返回 {msg_id, seq, conv_id, send_time}；CDC 后续把 outbox 投递到 Kafka msg.push
 type SendMessageWorkflow struct {
 	msgService        *msgsvc.Service
 	convService       *convsvc.Service
-	producer          *mq.Producer
 	groupCli          *groupcli.Client
 	permissionChecker PermissionChecker
 }
@@ -42,14 +37,12 @@ type PermissionChecker interface {
 func NewSendMessageWorkflow(
 	msgService *msgsvc.Service,
 	convService *convsvc.Service,
-	producer *mq.Producer,
 	groupCli *groupcli.Client,
 	permissionChecker PermissionChecker,
 ) *SendMessageWorkflow {
 	return &SendMessageWorkflow{
 		msgService:        msgService,
 		convService:       convService,
-		producer:          producer,
 		groupCli:          groupCli,
 		permissionChecker: permissionChecker,
 	}
@@ -67,7 +60,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	}
 
 	// ============================================================
-	// Step 1: 消息领域 → 幂等检查 + ULID + conv_id + seq + 落库
+	// Step 1: 消息领域 → 幂等检查 + ULID + conv_id + seq + message/outbox 同事务落库
 	// ============================================================
 	result, err := w.msgService.CreateMessage(ctx, req)
 	if err != nil {
@@ -131,46 +124,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	}
 
 	// ============================================================
-	// Step 5: Kafka → 构造 MsgPushEvent 投递
-	// ============================================================
-	msgItem := msgsvc.ModelToMsgItem(msg)
-	msgItemData, marshalErr := proto.Marshal(msgItem)
-	if marshalErr != nil {
-		// 序列化失败：阻断投递，避免下游收到损坏载荷（MSG-002）。
-		// 消息已落库，客户端可通过拉取补偿，不影响数据一致性。
-		logger.Warn(ctx, "发送消息：MsgItem 序列化失败，跳过 Kafka 投递",
-			logger.String("conv_id", msg.ConvId),
-			logger.String("msg_id", msg.MsgId),
-			logger.ErrorField("error", marshalErr),
-		)
-	} else {
-		serverTs := msg.SendTime.UnixMilli()
-		pushEvent := &pb.MsgPushEvent{
-			ReceiverUuid: req.TargetUuid, // 单聊=对端 UUID, 群聊=群 UUID
-			DeviceId:     req.DeviceId,   // 发送方设备 ID（多端同步时排除）
-			Type:         "MSG_PUSH",     // 新消息推送
-			ConvType:     req.ConvType,   // Push-Job 据此判断扩散策略
-			Data:         msgItemData,    // MsgItem 序列化 bytes
-			FromUuid:     req.FromUuid,   // 多端同步用
-			TraceId:      ctxmeta.TraceID(ctx),
-			ServerTs:     serverTs,
-			Seq:          msg.Seq,
-		}
-
-		// Kafka 投递是非阻断步骤，异步执行并与主请求 deadline 解耦，避免把已成功落库的发送路径拖成超时失败。
-		async.RunSafe(ctx, func(taskCtx context.Context) {
-			if err := w.producer.Publish(taskCtx, msg.ConvId, pushEvent); err != nil {
-				logger.Warn(taskCtx, "发送消息：投递 Kafka 失败（不阻断）",
-					logger.String("conv_id", msg.ConvId),
-					logger.String("msg_id", msg.MsgId),
-					logger.ErrorField("error", err),
-				)
-			}
-		}, 2*time.Second)
-	}
-
-	// ============================================================
-	// Step 6: 返回结果
+	// Step 5: 返回结果
 	// ============================================================
 	return &pb.SendMessageResponse{
 		MsgId:    msg.MsgId,

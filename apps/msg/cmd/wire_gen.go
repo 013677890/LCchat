@@ -52,7 +52,7 @@ func initializeMsgApp() (*MsgApp, error) {
 		return nil, err
 	}
 	permissionChecker := provideMsgPermissionChecker(mainMsgRelationGRPCConn, mainMsgGroupGRPCConn)
-	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, mqProducer, groupcliClient, permissionChecker)
+	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, groupcliClient, permissionChecker)
 	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(service, mqProducer)
 	markReadWorkflow := usecase.NewMarkReadWorkflow(conversationService, mqProducer)
 	msgHandler := handler.NewMsgHandler(service, conversationService, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)

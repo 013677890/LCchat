@@ -6,6 +6,13 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 )
 
+// OutboxEvent 描述需要与消息事实同事务落库的 CDC 事件。
+type OutboxEvent struct {
+	EventType string
+	EntityID  string
+	Payload   string
+}
+
 // Repository 消息领域仓储接口
 // 职责：消息表 CRUD + Redis seq 分配 + 幂等锁
 type Repository interface {
@@ -33,6 +40,10 @@ type Repository interface {
 	// Create 插入一条消息
 	// 如果触发 uidx_sender_client 唯一索引冲突，返回 ErrDuplicateMessage
 	Create(ctx context.Context, msg *model.Message) error
+
+	// CreateWithOutbox 在同一 MySQL 事务中插入消息与 outbox 事件。
+	// 如果消息唯一索引冲突，返回 ErrDuplicateMessage，且不会写 outbox。
+	CreateWithOutbox(ctx context.Context, msg *model.Message, event OutboxEvent) error
 
 	// GetByDuplicateKey 通过幂等三元组查询已存在的消息（DB 唯一索引兜底）
 	GetByDuplicateKey(ctx context.Context, fromUuid, deviceId, clientMsgId string) (*model.Message, error)

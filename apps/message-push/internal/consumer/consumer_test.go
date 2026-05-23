@@ -10,6 +10,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,9 +20,14 @@ import (
 
 func init() { logger.ReplaceGlobal(gozap.NewNop()) }
 
-func marshalEvent(e *msgpb.MsgPushEvent) []byte {
-	data, _ := proto.Marshal(e)
-	return data
+func marshalEvent(t *testing.T, e *msgpb.MsgPushEvent) []byte {
+	t.Helper()
+	if e.EventId == "" {
+		e.EventId = "evt-test"
+	}
+	data, err := msgevent.EncodeMsgPush(e)
+	require.NoError(t, err)
+	return []byte(data)
 }
 
 func marshalRealtimeEvent(t *testing.T, event realtimepush.Event) []byte {
@@ -104,23 +110,36 @@ func TestHandle_InvalidProto_SkipsNonRetriable(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestHandle_ProtoBytes_SkipsNonRetriable(t *testing.T) {
+	h := &EventHandler{}
+	data, err := proto.Marshal(&msgpb.MsgPushEvent{
+		ReceiverUuid: "receiver",
+		Type:         "MSG_READ_RECEIPT",
+		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,
+		EventId:      "evt-old-proto",
+	})
+	require.NoError(t, err)
+	err = h.Handle(context.Background(), data)
+	assert.NoError(t, err)
+}
+
 func TestHandle_UnsupportedEventType_SkipsNonRetriable(t *testing.T) {
 	h := &EventHandler{}
-	data := marshalEvent(&msgpb.MsgPushEvent{ReceiverUuid: "user1", Type: "MSG_UNKNOWN"})
+	data := marshalEvent(t, &msgpb.MsgPushEvent{ReceiverUuid: "user1", Type: "MSG_UNKNOWN"})
 	err := h.Handle(context.Background(), data)
 	assert.NoError(t, err)
 }
 
 func TestHandle_EmptyReceiver_SkipsNonRetriable(t *testing.T) {
 	h := &EventHandler{}
-	data := marshalEvent(&msgpb.MsgPushEvent{Type: "MSG_PUSH"})
+	data := marshalEvent(t, &msgpb.MsgPushEvent{Type: "MSG_PUSH"})
 	err := h.Handle(context.Background(), data)
 	assert.NoError(t, err)
 }
 
 func TestHandle_UnsupportedConvType_SkipsNonRetriable(t *testing.T) {
 	h := &EventHandler{}
-	data := marshalEvent(&msgpb.MsgPushEvent{
+	data := marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "user1",
 		Type:         "MSG_PUSH",
 		ConvType:     999,
@@ -131,7 +150,7 @@ func TestHandle_UnsupportedConvType_SkipsNonRetriable(t *testing.T) {
 
 func TestHandle_MissingRouteRepository_ReturnsRetriable(t *testing.T) {
 	h := &EventHandler{sender: &mockSender{}}
-	err := h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err := h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		Type:         "MSG_READ_RECEIPT",
 		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,
@@ -147,7 +166,7 @@ func TestHandle_MissingSender_ReturnsRetriable(t *testing.T) {
 		},
 	}
 	h := &EventHandler{routes: routes}
-	err := h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err := h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		Type:         "MSG_READ_RECEIPT",
 		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,
@@ -171,7 +190,7 @@ func TestHandle_P2PPush_SendsReceiverAndSenderOtherDevices(t *testing.T) {
 	require.NoError(t, err)
 
 	h := &EventHandler{routes: routes, sender: sender}
-	err = h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err = h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		DeviceId:     "current-dev",
 		Type:         "MSG_PUSH",
@@ -200,7 +219,7 @@ func TestHandle_MsgPush_FillsSeqFromData(t *testing.T) {
 	require.NoError(t, err)
 
 	h := &EventHandler{routes: routes, sender: sender}
-	err = h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err = h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		Type:         "MSG_PUSH",
 		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,
@@ -224,7 +243,7 @@ func TestHandle_MarkRead_OnlySyncsOtherDevices(t *testing.T) {
 		},
 	}
 	h := &EventHandler{routes: routes, sender: sender}
-	err := h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err := h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "reader",
 		DeviceId:     "current-dev",
 		Type:         "MSG_MARK_READ",
@@ -245,7 +264,7 @@ func TestHandle_ReadReceipt_SendsReceiver(t *testing.T) {
 		},
 	}
 	h := &EventHandler{routes: routes, sender: sender}
-	err := h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err := h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "sender",
 		FromUuid:     "reader",
 		DeviceId:     "reader-current",
@@ -280,7 +299,7 @@ func TestHandle_GroupPush_ExpandsMembersAndDeduplicates(t *testing.T) {
 	require.NoError(t, err)
 
 	h := &EventHandler{routes: routes, sender: sender, groups: groups}
-	err = h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err = h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "group-1",
 		Type:         "MSG_PUSH",
 		ConvType:     msgpb.ConvType_CONV_TYPE_GROUP,
@@ -301,7 +320,7 @@ func TestHandle_ReturnsRetriableWhenAllPushesFail(t *testing.T) {
 		},
 	}
 	h := &EventHandler{routes: routes, sender: sender}
-	err := h.Handle(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err := h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		Type:         "MSG_READ_RECEIPT",
 		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,
@@ -318,7 +337,7 @@ func TestRunHandleWithRetry_ReturnsAfterMaxRetriableAttempts(t *testing.T) {
 	handleBackoffs = []time.Duration{0, 0, 0}
 	defer func() { handleBackoffs = originalBackoffs }()
 
-	err := c.runHandleWithRetry(context.Background(), marshalEvent(&msgpb.MsgPushEvent{
+	err := c.runHandleWithRetry(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		Type:         "MSG_READ_RECEIPT",
 		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,

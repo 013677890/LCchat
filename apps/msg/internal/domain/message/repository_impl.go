@@ -8,6 +8,7 @@ import (
 
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/outbox"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -167,6 +168,29 @@ func (r *repositoryImpl) Create(ctx context.Context, msg *model.Message) error {
 			return ErrDuplicateMessage
 		}
 		return fmt.Errorf("Create: db insert failed: %w", err)
+	}
+	return nil
+}
+
+// CreateWithOutbox 在同一事务中写入消息事实和 CDC Outbox 事件。
+func (r *repositoryImpl) CreateWithOutbox(ctx context.Context, msg *model.Message, event OutboxEvent) error {
+	if event.EventType == "" || event.EntityID == "" || event.Payload == "" {
+		return fmt.Errorf("CreateWithOutbox: invalid outbox event")
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(msg).Error; err != nil {
+			if isDuplicateKeyError(err) {
+				return ErrDuplicateMessage
+			}
+			return fmt.Errorf("CreateWithOutbox: db insert failed: %w", err)
+		}
+		if err := outbox.InsertEvent(tx, event.EventType, event.EntityID, event.Payload); err != nil {
+			return fmt.Errorf("CreateWithOutbox: outbox insert failed: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }

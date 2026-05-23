@@ -13,6 +13,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -72,12 +73,12 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		metrics.ObserveHandleDuration(start, result)
 	}()
 
-	var event msgpb.MsgPushEvent
-	if err := proto.Unmarshal(value, &event); err != nil {
+	event, err := msgevent.DecodeMsgPush(value)
+	if err != nil {
 		result = "permanent_error"
 		metrics.EventTypeSkipped.WithLabelValues("unknown", "decode_error").Inc()
-		// proto 结构异常属于永久错误，重试无意义。直接记录并放行。
-		logger.Warn(ctx, "message-push 反序列化 MsgPushEvent 失败，跳过该消息",
+		// payload 合约错误属于永久错误，重试无意义。直接记录并放行。
+		logger.Warn(ctx, "message-push 解析 msg.push outbox payload 失败，跳过该消息",
 			logger.ErrorField("error", err),
 			logger.Int("payload_bytes", len(value)),
 		)

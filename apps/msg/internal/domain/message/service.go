@@ -11,8 +11,11 @@ import (
 
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/id"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/msgevent"
+	"google.golang.org/protobuf/proto"
 )
 
 // ==================== 配置 ====================
@@ -42,11 +45,11 @@ type GroupRoleQuerier interface {
 // Service 消息领域服务
 //
 // 职责边界：
-//   - ✅ 消息创建（幂等检查 + ULID 生成 + conv_id 计算 + seq 分配 + DB 落库）
+//   - ✅ 消息创建（幂等检查 + ULID 生成 + conv_id 计算 + seq 分配 + DB/outbox 落库）
 //   - ✅ 消息拉取（按 seq 范围、按 ID 批量）
 //   - ✅ 消息撤回（权限校验 + 时间窗口 + DB 状态更新）
 //   - ❌ 不涉及会话 Upsert（由 usecase 层调用 conversation.Service 完成）
-//   - ❌ 不涉及 Kafka 投递（由 usecase 层调用 mq.Producer 完成）
+//   - ❌ 不直接投递 Kafka（通过 outbox_events + CDC 异步路由）
 //   - ❌ 不依赖 conversation 领域包（保持领域隔离）
 type Service struct {
 	repo        Repository
@@ -173,8 +176,18 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		SendTime:     now,
 	}
 
-	// ---- Step 7: 落库 ----
-	if err := s.repo.Create(ctx, msg); err != nil {
+	// ---- Step 7: 构造 msg.push outbox 事件 ----
+	payload, err := buildMsgPushOutboxPayload(ctx, req, msg)
+	if err != nil {
+		return nil, fmt.Errorf("CreateMessage: build outbox event failed: %w", err)
+	}
+
+	// ---- Step 8: 落库 ----
+	if err := s.repo.CreateWithOutbox(ctx, msg, OutboxEvent{
+		EventType: msgevent.EventTypeMsgPush,
+		EntityID:  msg.ConvId,
+		Payload:   payload,
+	}); err != nil {
 		if errors.Is(err, ErrDuplicateMessage) {
 			// DB 唯一索引兜底：SETNX 降级时可能走到这里
 			existMsg, queryErr := s.repo.GetByDuplicateKey(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId)
@@ -186,7 +199,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		return nil, fmt.Errorf("CreateMessage: db insert failed: %w", err)
 	}
 
-	// ---- Step 8: 回写幂等缓存 ----
+	// ---- Step 9: 回写幂等缓存 ----
 	// 覆盖 "PROCESSING" → 实际结果 JSON，TTL 延长到 10 分钟
 	// 忽略错误：Redis 回写失败不影响主流程
 	if err := s.repo.SetIdempotentResult(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId, msg); err != nil {
@@ -197,6 +210,26 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 	}
 
 	return &CreateResult{Msg: msg, IsIdempotent: false}, nil
+}
+
+func buildMsgPushOutboxPayload(ctx context.Context, req *pb.SendMessageRequest, msg *model.Message) (string, error) {
+	msgItemData, err := proto.Marshal(ModelToMsgItem(msg))
+	if err != nil {
+		return "", fmt.Errorf("marshal MsgItem failed: %w", err)
+	}
+
+	return msgevent.EncodeMsgPush(&pb.MsgPushEvent{
+		EventId:      id.GenerateULID(),
+		ReceiverUuid: req.TargetUuid,
+		DeviceId:     req.DeviceId,
+		Type:         "MSG_PUSH",
+		ConvType:     req.ConvType,
+		Data:         msgItemData,
+		FromUuid:     req.FromUuid,
+		TraceId:      ctxmeta.TraceID(ctx),
+		ServerTs:     msg.SendTime.UnixMilli(),
+		Seq:          msg.Seq,
+	})
 }
 
 // ==================== PullMessages ====================
