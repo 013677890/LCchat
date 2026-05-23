@@ -100,18 +100,44 @@ func provideGatewayAsyncReleaseTimeout(cfg config.AsyncConfig) gatewayAsyncRelea
 // - 仅影响依赖对象存储的功能，例如头像上传；
 // - 其他纯转发 API 保持可用。
 func provideGatewayMinIOClient(ctx context.Context, log *zap.Logger, cfg config.MinIOConfig) (*pkgminio.MinIOClient, error) {
-	client, err := pkgminio.Build(cfg)
-	if err != nil {
-		logger.Error(ctx, "初始化 MinIO 失败，相关上传能力将降级不可用", logger.ErrorField("error", err))
-		_ = log
-		return nil, nil
-	}
-	logger.Info(ctx, "MinIO 初始化成功",
-		logger.String("endpoint", cfg.Endpoint),
-		logger.String("bucket", cfg.BucketName),
-		logger.Bool("use_ssl", cfg.UseSSL),
+	const (
+		maxAttempts = 5
+		retryDelay  = 1500 * time.Millisecond
 	)
-	return client, nil
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		client, err := pkgminio.Build(cfg)
+		if err == nil {
+			// Gateway 启动早于对象存储完全就绪时，重试后的成功也要明确记录下来，便于排查冷启动问题。
+			log.Info("MinIO 初始化成功",
+				zap.String("endpoint", cfg.Endpoint),
+				zap.String("bucket", cfg.BucketName),
+				zap.Bool("use_ssl", cfg.UseSSL),
+				zap.Int("attempt", attempt),
+			)
+			return client, nil
+		}
+
+		lastErr = err
+		if attempt < maxAttempts {
+			log.Warn("初始化 MinIO 失败，稍后重试",
+				zap.Int("attempt", attempt),
+				zap.Int("max_attempts", maxAttempts),
+				zap.Duration("retry_delay", retryDelay),
+				zap.Error(err),
+			)
+			time.Sleep(retryDelay)
+			continue
+		}
+	}
+
+	log.Error("初始化 MinIO 失败，相关上传能力将降级不可用",
+		zap.Int("attempts", maxAttempts),
+		zap.Error(lastErr),
+	)
+	_ = ctx
+	return nil, nil
 }
 
 // provideGatewayAuthServiceAddr 提供 auth-service 地址。

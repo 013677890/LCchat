@@ -367,7 +367,12 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     expect_contains(groups, "groupUuid", group3_uuid, "group-list")
     recorder.ok("group-list", "three groups visible")
 
-    response, body = request_json("GET", f"/api/v1/auth/groups/{group1_uuid}", token=token_a)
+    response, body = request_json(
+        "GET",
+        f"/api/v1/auth/groups/{group1_uuid}",
+        route_path="/api/v1/auth/groups/:groupUuid",
+        token=token_a,
+    )
     group_info = ensure_success("group-info", response, body)
     if group_info.get("name") != f"{group1_name}-v2":
         raise TestFailure(f"group-info name mismatch: {group_info}")
@@ -393,7 +398,12 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     ensure_success("group-add-member", response, body)
     recorder.ok("group-add-member", user_b)
 
-    response, body = request_json("GET", f"/api/v1/auth/groups/{group1_uuid}/members", token=token_a)
+    response, body = request_json(
+        "GET",
+        f"/api/v1/auth/groups/{group1_uuid}/members",
+        route_path="/api/v1/auth/groups/:groupUuid/members",
+        token=token_a,
+    )
     members = ensure_success("group-members", response, body).get("members", [])
     expect_contains(members, "userUuid", user_a, "group-members")
     expect_contains(members, "userUuid", user_b, "group-members")
@@ -443,6 +453,7 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     response, body = request_json(
         "GET",
         f"/api/v1/auth/groups/{group1_uuid}/members/search",
+        route_path="/api/v1/auth/groups/:groupUuid/members/search",
         token=token_a,
         params={"keyword": f"B-g1-{suffix}", "page": 1, "pageSize": 20},
     )
@@ -460,7 +471,12 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     expect_contains(search_groups, "groupUuid", group1_uuid, "group-search")
     recorder.ok("group-search", group1_uuid)
 
-    response, body = request_json("GET", f"/api/v1/auth/groups/{group1_uuid}/member-ids", token=token_a)
+    response, body = request_json(
+        "GET",
+        f"/api/v1/auth/groups/{group1_uuid}/member-ids",
+        route_path="/api/v1/auth/groups/:groupUuid/member-ids",
+        token=token_a,
+    )
     member_ids = ensure_success("group-member-ids", response, body).get("userUuids", [])
     expect_string_contains(member_ids, user_a, "group-member-ids")
     expect_string_contains(member_ids, user_b, "group-member-ids")
@@ -476,7 +492,12 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     ensure_success("group-member-role", response, body)
     recorder.ok("group-member-role", user_b)
 
-    response, body = request_json("GET", f"/api/v1/auth/groups/{group1_uuid}/members", token=token_a)
+    response, body = request_json(
+        "GET",
+        f"/api/v1/auth/groups/{group1_uuid}/members",
+        route_path="/api/v1/auth/groups/:groupUuid/members",
+        token=token_a,
+    )
     members_after_role = ensure_success("group-members-after-role", response, body).get("members", [])
     role_item = expect_contains(members_after_role, "userUuid", user_b, "group-members-after-role")
     if role_item.get("role") != 1:
@@ -534,7 +555,12 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     group2_apply_id = apply2.get("applyId")
     recorder.ok("group2-apply", str(group2_apply_id))
 
-    response, body = request_json("GET", f"/api/v1/auth/groups/{group2_uuid}/my-join-application", token=token_b)
+    response, body = request_json(
+        "GET",
+        f"/api/v1/auth/groups/{group2_uuid}/my-join-application",
+        route_path="/api/v1/auth/groups/:groupUuid/my-join-application",
+        token=token_b,
+    )
     my_apply2 = ensure_success("group2-my-join-application", response, body)
     if not my_apply2.get("hasApplication"):
         raise TestFailure(f"group2 my-join-application missing: {my_apply2}")
@@ -543,6 +569,7 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     response, body = request_json(
         "GET",
         f"/api/v1/auth/groups/{group2_uuid}/join-requests/pending-count",
+        route_path="/api/v1/auth/groups/:groupUuid/join-requests/pending-count",
         token=token_a,
     )
     pending2 = ensure_success("group2-pending-count", response, body)
@@ -553,6 +580,7 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     response, body = request_json(
         "GET",
         f"/api/v1/auth/groups/{group2_uuid}/join-requests",
+        route_path="/api/v1/auth/groups/:groupUuid/join-requests",
         token=token_a,
         params={"page": 1, "pageSize": 20},
     )
@@ -573,6 +601,7 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     response, body = request_json(
         "GET",
         f"/api/v1/auth/groups/{group2_uuid}/join-requests/reviewed",
+        route_path="/api/v1/auth/groups/:groupUuid/join-requests/reviewed",
         token=token_a,
         params={"page": 1, "pageSize": 20, "status": 1},
     )
@@ -582,7 +611,12 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
         raise TestFailure(f"group2 reviewed status mismatch: {reviewed_item2}")
     recorder.ok("group2-reviewed", str(group2_apply_id))
 
-    response, body = request_json("GET", f"/api/v1/auth/groups/{group2_uuid}/my-join-application", token=token_b)
+    response, body = request_json(
+        "GET",
+        f"/api/v1/auth/groups/{group2_uuid}/my-join-application",
+        route_path="/api/v1/auth/groups/:groupUuid/my-join-application",
+        token=token_b,
+    )
     my_apply2_done = ensure_success("group2-my-join-application-after-review", response, body)
     if not my_apply2_done.get("hasApplication"):
         raise TestFailure(f"group2 my-join-application after review missing: {my_apply2_done}")
@@ -622,6 +656,7 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     response, body = request_json(
         "GET",
         f"/api/v1/auth/groups/{group3_uuid}/join-requests",
+        route_path="/api/v1/auth/groups/:groupUuid/join-requests",
         token=token_a,
         params={"page": 1, "pageSize": 20},
     )
@@ -633,6 +668,7 @@ def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a
     response, body = request_json(
         "GET",
         f"/api/v1/auth/groups/{group3_uuid}/join-requests/pending-count",
+        route_path="/api/v1/auth/groups/:groupUuid/join-requests/pending-count",
         token=token_a,
     )
     pending3_count = ensure_success("group3-pending-count-after-cancel", response, body)
@@ -864,11 +900,21 @@ def main() -> int:
         expect_contains(data.get("devices", []), "deviceId", device_a2, "device-list")
         recorder.ok("device-list", "two devices visible")
 
-        response, body = request_json("DELETE", f"/api/v1/auth/user/devices/{device_a2}", token=token_a1)
+        response, body = request_json(
+            "DELETE",
+            f"/api/v1/auth/user/devices/{device_a2}",
+            route_path="/api/v1/auth/user/devices/:deviceId",
+            token=token_a1,
+        )
         ensure_success("kick-device", response, body)
         recorder.ok("kick-device", device_a2)
 
-        response, body = request_json("GET", f"/api/v1/auth/user/online-status/{user_b}", token=token_a1)
+        response, body = request_json(
+            "GET",
+            f"/api/v1/auth/user/online-status/{user_b}",
+            route_path="/api/v1/auth/user/online-status/:userUuid",
+            token=token_a1,
+        )
         ensure_success("online-status", response, body)
         recorder.ok("online-status", user_b)
 
