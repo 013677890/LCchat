@@ -7,10 +7,13 @@ import (
 
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 func init() { logger.ReplaceGlobal(zap.NewNop()) }
@@ -23,6 +26,7 @@ type mockRepo struct {
 	batchInitFn         func(ctx context.Context, members []string, groupUUID string) error
 	getByOwnerAndConvFn func(ctx context.Context, owner, convId string) (*model.Conversation, error)
 	updateReadSeqFn     func(ctx context.Context, owner, convId string, readSeq int64) error
+	updateReadOutboxFn  func(ctx context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error)
 	deleteFn            func(ctx context.Context, owner, convId string) error
 	updateSettingsFn    func(ctx context.Context, owner, convId string, mute *bool, pin *bool) error
 	listP2PFn           func(ctx context.Context, owner string, since, cursorMs, cursorId int64, size int) ([]*model.Conversation, error)
@@ -59,6 +63,12 @@ func (m *mockRepo) UpdateReadSeq(ctx context.Context, owner, convId string, read
 		return m.updateReadSeqFn(ctx, owner, convId, readSeq)
 	}
 	return nil
+}
+func (m *mockRepo) UpdateReadSeqWithOutbox(ctx context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+	if m.updateReadOutboxFn != nil {
+		return m.updateReadOutboxFn(ctx, owner, convId, readSeq, events)
+	}
+	return &model.Conversation{}, nil
 }
 func (m *mockRepo) Delete(ctx context.Context, owner, convId string) error {
 	if m.deleteFn != nil {
@@ -195,17 +205,64 @@ func TestEnsureGroupMembersConv(t *testing.T) {
 // ==================== MarkRead ====================
 
 func TestMarkRead_ReturnsUnread(t *testing.T) {
+	var gotEvents []OutboxEvent
 	repo := &mockRepo{
-		updateReadSeqFn: func(_ context.Context, _, _ string, _ int64) error { return nil },
-		getByOwnerAndConvFn: func(_ context.Context, _, _ string) (*model.Conversation, error) {
+		updateReadOutboxFn: func(_ context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+			assert.Equal(t, "user1", owner)
+			assert.Equal(t, "group-1", convId)
+			assert.Equal(t, int64(50), readSeq)
+			gotEvents = events
 			return &model.Conversation{UnreadCount: 3}, nil
 		},
 	}
 	svc := NewService(repo)
+	ctx := ctxmeta.WithDeviceID(context.Background(), "dev-1")
 
-	unread, err := svc.MarkRead(context.Background(), "user1", "conv1", 50)
+	unread, err := svc.MarkRead(ctx, "user1", "group-1", 50)
 	require.NoError(t, err)
 	assert.Equal(t, int32(3), unread)
+	require.Len(t, gotEvents, 1)
+	assertMarkReadEvent(t, gotEvents[0], "group-1", "MSG_MARK_READ", "user1", "dev-1", pb.ConvType_CONV_TYPE_GROUP, 50)
+}
+
+func TestMarkRead_P2P_WritesReadReceiptOutbox(t *testing.T) {
+	var gotEvents []OutboxEvent
+	repo := &mockRepo{
+		updateReadOutboxFn: func(_ context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+			assert.Equal(t, "reader", owner)
+			assert.Equal(t, "p2p-peer-reader", convId)
+			assert.Equal(t, int64(88), readSeq)
+			gotEvents = events
+			return &model.Conversation{UnreadCount: 0}, nil
+		},
+	}
+	svc := NewService(repo)
+
+	unread, err := svc.MarkRead(context.Background(), "reader", "p2p-peer-reader", 88)
+	require.NoError(t, err)
+	assert.Equal(t, int32(0), unread)
+	require.Len(t, gotEvents, 2)
+	assertMarkReadEvent(t, gotEvents[0], "p2p-peer-reader", "MSG_MARK_READ", "reader", "", pb.ConvType_CONV_TYPE_P2P, 88)
+	assertMarkReadEvent(t, gotEvents[1], "p2p-peer-reader", "MSG_READ_RECEIPT", "peer", "", pb.ConvType_CONV_TYPE_P2P, 88)
+}
+
+func assertMarkReadEvent(t *testing.T, event OutboxEvent, convId, pushType, receiverUUID, deviceID string, convType pb.ConvType, readSeq int64) {
+	t.Helper()
+	assert.Equal(t, msgevent.EventTypeMsgPush, event.EventType)
+	assert.Equal(t, convId, event.EntityID)
+
+	pushEvent, err := msgevent.DecodeMsgPush([]byte(event.Payload))
+	require.NoError(t, err)
+	assert.NotEmpty(t, pushEvent.GetEventId())
+	assert.Equal(t, pushType, pushEvent.GetType())
+	assert.Equal(t, receiverUUID, pushEvent.GetReceiverUuid())
+	assert.Equal(t, deviceID, pushEvent.GetDeviceId())
+	assert.Equal(t, convType, pushEvent.GetConvType())
+
+	var notice pb.MarkReadNotice
+	require.NoError(t, proto.Unmarshal(pushEvent.GetData(), &notice))
+	assert.Equal(t, convId, notice.GetConvId())
+	assert.Equal(t, readSeq, notice.GetReadSeq())
 }
 
 // ==================== buildPreviewText ====================

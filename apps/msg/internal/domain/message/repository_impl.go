@@ -312,7 +312,27 @@ func (r *repositoryImpl) GetMaxSeq(ctx context.Context, convId string) (int64, e
 // 使用 map 而非 struct 更新，避免 GORM 跳过零值字段
 // RowsAffected=0 说明消息不存在（conv_id + msg_id 不匹配）
 func (r *repositoryImpl) UpdateStatus(ctx context.Context, convId string, msgId string, status int8, content string) error {
-	result := r.db.WithContext(ctx).
+	return updateMessageStatus(r.db.WithContext(ctx), convId, msgId, status, content)
+}
+
+// UpdateStatusWithOutbox 在同一事务中更新消息状态并写入 CDC Outbox 事件。
+func (r *repositoryImpl) UpdateStatusWithOutbox(ctx context.Context, convId string, msgId string, status int8, content string, event OutboxEvent) error {
+	if event.EventType == "" || event.EntityID == "" || event.Payload == "" {
+		return fmt.Errorf("UpdateStatusWithOutbox: invalid outbox event")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := updateMessageStatus(tx, convId, msgId, status, content); err != nil {
+			return err
+		}
+		if err := outbox.InsertEvent(tx, event.EventType, event.EntityID, event.Payload); err != nil {
+			return fmt.Errorf("UpdateStatusWithOutbox: outbox insert failed: %w", err)
+		}
+		return nil
+	})
+}
+
+func updateMessageStatus(db *gorm.DB, convId string, msgId string, status int8, content string) error {
+	result := db.
 		Model(&model.Message{}).
 		Where("conv_id = ? AND msg_id = ?", convId, msgId).
 		Updates(map[string]interface{}{

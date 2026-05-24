@@ -55,7 +55,7 @@ web-chrome-001 => connect:9091|1710000000123
 | `MSG_PUSH` | `msg.MsgItem` | 接收者设备；发送方其他设备 | 插入新消息、更新会话。 |
 | `MSG_RECALL` | `msg.RecallNotice` | 会话内在线设备 | 替换为撤回气泡。 |
 | `MSG_MARK_READ` | `msg.MarkReadNotice` | 当前账号在线设备 | 清理未读红点。 |
-| `MSG_READ_RECEIPT` | 业务约定 payload | 对端或发送方设备 | 更新已读展示。 |
+| `MSG_READ_RECEIPT` | `msg.MarkReadNotice` | 对端在线设备 | 更新已读展示。 |
 
 ## 分发规则
 
@@ -64,13 +64,13 @@ web-chrome-001 => connect:9091|1710000000123
 1. `receiver_uuid` 表示对端用户 UUID。
 2. message-push 查询对端在线路由。
 3. 对每个在线设备调用对应 connect 节点投递。
-4. 对发送者执行多端同步，排除当前发送设备。
+4. `MSG_PUSH` / `MSG_RECALL` 对发送者执行多端同步，排除当前发送设备。
 
 ### 群聊
 
 1. `receiver_uuid` 表示群 UUID。
 2. message-push 查询群成员列表。
-3. 排除发送者当前设备；根据事件类型决定是否投递给发送者其他设备。
+3. 根据事件类型决定是否排除发送者，以及是否投递给发送者其他设备。
 4. 对每个成员查询在线路由并去重 `(user_uuid, device_id)`。
 5. 按 Connect 节点发起 gRPC 投递。
 

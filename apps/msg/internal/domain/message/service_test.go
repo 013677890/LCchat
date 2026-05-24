@@ -32,6 +32,7 @@ type mockRepo struct {
 	getByIdFn           func(ctx context.Context, convId, msgId string) (*model.Message, error)
 	getMaxSeqFn         func(ctx context.Context, convId string) (int64, error)
 	updateStatusFn      func(ctx context.Context, convId, msgId string, status int8, content string) error
+	updateWithOutboxFn  func(ctx context.Context, convId, msgId string, status int8, content string, event OutboxEvent) error
 }
 
 func (m *mockRepo) TryAcquireIdempotent(ctx context.Context, from, dev, cid string) (*model.Message, error) {
@@ -97,6 +98,12 @@ func (m *mockRepo) GetMaxSeq(ctx context.Context, convId string) (int64, error) 
 func (m *mockRepo) UpdateStatus(ctx context.Context, convId, msgId string, status int8, content string) error {
 	if m.updateStatusFn != nil {
 		return m.updateStatusFn(ctx, convId, msgId, status, content)
+	}
+	return nil
+}
+func (m *mockRepo) UpdateStatusWithOutbox(ctx context.Context, convId, msgId string, status int8, content string, event OutboxEvent) error {
+	if m.updateWithOutboxFn != nil {
+		return m.updateWithOutboxFn(ctx, convId, msgId, status, content, event)
 	}
 	return nil
 }
@@ -228,9 +235,20 @@ func TestCreateMessage_GroupConvId(t *testing.T) {
 
 func TestRecallMessage_SelfRecall_Success(t *testing.T) {
 	now := time.Now()
+	var gotStatus int8
+	var gotContent string
+	var gotEvent OutboxEvent
 	repo := &mockRepo{
 		getByIdFn: func(_ context.Context, _, _ string) (*model.Message, error) {
 			return &model.Message{MsgId: "m1", FromUuid: "userA", Status: 0, SendTime: now}, nil
+		},
+		updateWithOutboxFn: func(_ context.Context, convId, msgId string, status int8, content string, event OutboxEvent) error {
+			assert.Equal(t, "p2p-userA-userB", convId)
+			assert.Equal(t, "m1", msgId)
+			gotStatus = status
+			gotContent = content
+			gotEvent = event
+			return nil
 		},
 	}
 	svc := NewService(repo, Config{RecallWindow: 2 * time.Minute})
@@ -238,6 +256,25 @@ func TestRecallMessage_SelfRecall_Success(t *testing.T) {
 	msg, err := svc.RecallMessage(context.Background(), "p2p-userA-userB", "m1", "userA")
 	require.NoError(t, err)
 	assert.Equal(t, "m1", msg.MsgId)
+	assert.Equal(t, int8(1), gotStatus)
+	assert.Contains(t, gotContent, "撤回了一条消息")
+	assert.Equal(t, msgevent.EventTypeMsgPush, gotEvent.EventType)
+	assert.Equal(t, "p2p-userA-userB", gotEvent.EntityID)
+
+	pushEvent, err := msgevent.DecodeMsgPush([]byte(gotEvent.Payload))
+	require.NoError(t, err)
+	assert.NotEmpty(t, pushEvent.GetEventId())
+	assert.Equal(t, "MSG_RECALL", pushEvent.GetType())
+	assert.Equal(t, "userB", pushEvent.GetReceiverUuid())
+	assert.Equal(t, pb.ConvType_CONV_TYPE_P2P, pushEvent.GetConvType())
+	assert.Equal(t, "userA", pushEvent.GetFromUuid())
+
+	var notice pb.RecallNotice
+	require.NoError(t, proto.Unmarshal(pushEvent.GetData(), &notice))
+	assert.Equal(t, "p2p-userA-userB", notice.GetConvId())
+	assert.Equal(t, "m1", notice.GetMsgId())
+	assert.Equal(t, "userA", notice.GetOperator())
+	assert.NotZero(t, notice.GetRecallTime())
 }
 
 func TestRecallMessage_AlreadyRecalled(t *testing.T) {

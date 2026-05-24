@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/outbox"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -160,7 +161,47 @@ func (r *repositoryImpl) Upsert(ctx context.Context, conv *model.Conversation, i
 //
 // GREATEST 保证 read_seq 只增不减，防止旧设备覆盖新设备的已读位点
 func (r *repositoryImpl) UpdateReadSeq(ctx context.Context, ownerUuid, convId string, readSeq int64) error {
-	result := r.db.WithContext(ctx).
+	return updateConversationReadSeq(r.db.WithContext(ctx), ownerUuid, convId, readSeq)
+}
+
+// UpdateReadSeqWithOutbox 在同一事务中更新已读位点并追加 CDC Outbox 事件。
+func (r *repositoryImpl) UpdateReadSeqWithOutbox(ctx context.Context, ownerUuid, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+	if len(events) == 0 {
+		return nil, fmt.Errorf("UpdateReadSeqWithOutbox: empty outbox events")
+	}
+	for _, event := range events {
+		if event.EventType == "" || event.EntityID == "" || event.Payload == "" {
+			return nil, fmt.Errorf("UpdateReadSeqWithOutbox: invalid outbox event")
+		}
+	}
+
+	var conv model.Conversation
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := updateConversationReadSeq(tx, ownerUuid, convId, readSeq); err != nil {
+			return err
+		}
+		for _, event := range events {
+			if err := outbox.InsertEvent(tx, event.EventType, event.EntityID, event.Payload); err != nil {
+				return fmt.Errorf("UpdateReadSeqWithOutbox: outbox insert failed: %w", err)
+			}
+		}
+		if err := tx.Where("owner_uuid = ? AND conv_id = ?", ownerUuid, convId).First(&conv).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return ErrConversationNotFound
+			}
+			return fmt.Errorf("UpdateReadSeqWithOutbox: db query failed: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &conv, nil
+}
+
+// updateConversationReadSeq 执行已读位点单调更新。
+func updateConversationReadSeq(db *gorm.DB, ownerUuid, convId string, readSeq int64) error {
+	result := db.
 		Model(&model.Conversation{}).
 		Where("owner_uuid = ? AND conv_id = ?", ownerUuid, convId).
 		Updates(map[string]interface{}{

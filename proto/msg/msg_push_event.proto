@@ -6,10 +6,10 @@ option go_package = "github.com/013677890/LCchat-Backend/apps/msg/pb";
 
 import "proto/msg/msg_common.proto";
 
-// MsgPushEvent 为 msg-service 写入 Kafka 的消息推送事件。
+// MsgPushEvent 为 msg-service 写入 outbox_events，并经 Debezium CDC 路由到 Kafka 的消息推送事件。
 // Kafka Topic: msg.push
 // Kafka Key:   conv_id（保证同一会话的消息在同一 Partition 内有序消费）
-// Kafka Value: MsgPushEvent 的 protojson 字符串
+// Kafka Value: MsgPushEvent 的严格 protojson 字符串，不兼容旧版 Protobuf bytes
 //
 // 消费者：Push-Job（独立 Kafka 消费者服务）
 // Push-Job 的职责：
@@ -20,7 +20,7 @@ import "proto/msg/msg_common.proto";
 //        查询 Redis 群成员列表拆分为多个 user_uuid
 //   3. 对每个目标 user_uuid，查 Redis 路由表 user:routing:{uuid}
 //      获取其所在 Connect 节点的 gRPC 地址
-//   4. 通过 gRPC 调用对应 Connect 节点的 PushToUser 接口投递消息
+//   4. 通过 gRPC 调用对应 Connect 节点投递消息
 //   5. 多端同步（Self-Sync）：向 from_uuid 下除 device_id 以外的在线设备投递一份
 //
 // 注意：msg-service 写入 MySQL message 和 outbox_events 后立即返回，
@@ -32,7 +32,7 @@ message MsgPushEvent {
   // 对于多端同步场景，此字段用于排除发送方当前设备。
   string device_id = 2;
   // type: 消息类型，与 MessageEnvelope.type 保持一致。
-  // 取值："MSG_PUSH" | "MSG_RECALL" | "MSG_MARK_READ"
+  // 取值："MSG_PUSH" | "MSG_RECALL" | "MSG_MARK_READ" | "MSG_READ_RECEIPT"
   string type = 3;
   // conv_type: 会话类型，Consumer 据此判断扩散策略。
   ConvType conv_type = 4;
@@ -40,6 +40,7 @@ message MsgPushEvent {
   // type="MSG_PUSH"      → MsgItem
   // type="MSG_RECALL"    → RecallNotice
   // type="MSG_MARK_READ" → MarkReadNotice
+  // type="MSG_READ_RECEIPT" → MarkReadNotice
   bytes data = 5;
   // trace_id: 链路追踪 ID。
   string trace_id = 6;
@@ -50,14 +51,14 @@ message MsgPushEvent {
   // 实现发送方其他终端实时看到自己发出的消息。
   string from_uuid = 8;
   // seq: 透传到 MessageEnvelope.seq 的事件顺序键。
-  // MSG_PUSH 填 MsgItem.seq；MSG_RECALL / MSG_MARK_READ 填 0。
+  // MSG_PUSH 填 MsgItem.seq；MSG_RECALL / MSG_MARK_READ / MSG_READ_RECEIPT 填 0。
   int64 seq = 9;
   // event_id: msg.push outbox 事件 ID，用于 CDC 重放和下游幂等。
   string event_id = 10;
 }
 
 // RecallNotice 撤回通知。
-// 由 msg-service 在撤回成功后写入 Kafka，Push-Job 消费后封装为
+// 由 msg-service 在撤回成功后写入 outbox_events，CDC 投递 Kafka 后由 Push-Job 消费并封装为
 // MessageEnvelope{type="MSG_RECALL"} 推送到会话内所有在线设备。
 // 客户端收到后将对应消息气泡替换为"xxx 撤回了一条消息"。
 message RecallNotice {
@@ -72,7 +73,7 @@ message RecallNotice {
 }
 
 // MarkReadNotice 已读同步通知（多端同步）。
-// 由 msg-service 在 MarkRead 成功后写入 Kafka，Push-Job 消费后封装为
+// 由 msg-service 在 MarkRead 成功后写入 outbox_events，CDC 投递 Kafka 后由 Push-Job 消费并封装为
 // MessageEnvelope{type="MSG_MARK_READ"} 推送到该用户在线设备。
 // 各端据此同步清除红点。
 message MarkReadNotice {

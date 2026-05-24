@@ -1,6 +1,6 @@
 # msg 服务
 
-msg 服务拥有消息、会话和已读位点事实，负责消息落库、会话维护、消息拉取、撤回和已读同步事件生产。
+msg 服务拥有消息、会话和已读位点事实，负责消息落库、会话维护、消息拉取、撤回，以及将下行事件可靠写入 `outbox_events`。
 
 ## 职责
 
@@ -8,20 +8,19 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 - 基于 `(from_uuid, device_id, client_msg_id)` 做发送幂等，避免弱网重试重复落库。
 - 拉取历史消息、按消息 ID 批量反查、撤回消息。
 - 维护会话列表、最后消息预览、未读数、免打扰、置顶和逻辑删除位点。
-- 标记会话已读，并投递多端同步通知。
-- 将新消息事件写入 MySQL `outbox_events`，由 Debezium CDC 路由到 Kafka `msg.push`，再由 message-push 做下行投递。
+- 标记会话已读，并与多端同步、P2P 已读回执 outbox 事件同事务提交。
+- 将新消息、撤回、已读事件写入 MySQL `outbox_events`，由 Debezium CDC 路由到 Kafka `msg.push`，再由 message-push 做下行投递。
 
 ## 启动与核心目录
 
 | 路径 | 说明 |
 | --- | --- |
-| `apps/msg/cmd` | 服务启动、gRPC 服务、Kafka Producer、依赖注入。 |
+| `apps/msg/cmd` | 服务启动、gRPC 服务、依赖注入。 |
 | `apps/msg/internal/handler` | gRPC handler，薄适配层。 |
 | `apps/msg/internal/domain/message` | 消息领域：消息落库、seq 分配、撤回、拉取。 |
 | `apps/msg/internal/domain/conversation` | 会话领域：会话列表、已读、删除、设置。 |
 | `apps/msg/internal/usecase` | 跨领域工作流：发送、撤回、已读。 |
 | `apps/msg/internal/groupcli` | 群权限校验客户端。 |
-| `apps/msg/mq` | Kafka Producer（撤回、已读链路仍在迁移中）。 |
 | `proto/msg` | MsgService、MsgItem、MsgPushEvent 契约。 |
 
 ## 分层规则
@@ -31,7 +30,7 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 | handler | 只做参数转换和错误映射，不写业务规则。 |
 | message domain | 只处理消息事实，不依赖 conversation domain。 |
 | conversation domain | 只处理会话事实，不依赖 message domain。 |
-| usecase | 唯一允许协调多个 domain；新消息 Kafka 下行事件通过 message/outbox 同事务生产。 |
+| usecase | 唯一允许协调多个 domain；不直接投递 `msg.push` Kafka。 |
 | repository | 负责 MySQL/Redis 访问，不做跨领域编排。 |
 
 ## 数据所有权
@@ -42,7 +41,14 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 | 会话 | MySQL 会话表 | 会话归属、未读、置顶、免打扰、清理位点。 |
 | 会话 seq | Redis `msg:seq:{conv_id}` | 使用 `INCR` 分配会话内递增序号。 |
 | 消息幂等 | Redis `msg:idempotent:{from_uuid}:{device_id}:{client_msg_id}` | TTL 10 分钟，保存首次发送结果。 |
-| 消息下行 Outbox | MySQL `outbox_events` | 新消息与 `msg.push` 事件同事务落库。 |
+| 消息下行 Outbox | MySQL `outbox_events` | 新消息、撤回、已读与 `msg.push` 事件同事务落库。 |
+
+## `msg.push` 事件契约
+
+- `msg.push` Kafka key 使用 `conv_id`，保证同一会话内事件尽量落到同一分区。
+- Kafka value 是严格 `protojson` 编码的 `msg.MsgPushEvent`，并且必须包含 `event_id`。
+- 消费端不兼容旧版 Protobuf bytes；未知字段、缺少 `event_id` 或非 JSON payload 都会按永久错误跳过。
+- `MsgPushEvent.data` 仍按 `type` 存放对应业务 Protobuf bytes，例如 `MsgItem`、`RecallNotice`、`MarkReadNotice`。
 
 ## 暴露的 gRPC 服务
 
@@ -66,9 +72,9 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 | 事件类型 | Topic | data payload | 说明 |
 | --- | --- | --- | --- |
 | `MSG_PUSH` | `msg.push` | `msg.MsgItem` | 新消息下行，由 msg Outbox 经 CDC 生产。 |
-| `MSG_RECALL` | `msg.push` | `msg.RecallNotice` | 消息撤回通知。 |
-| `MSG_MARK_READ` | `msg.push` | `msg.MarkReadNotice` | 当前账号多端已读同步。 |
-| `MSG_READ_RECEIPT` | `msg.push` | 业务约定 payload | 对端已读回执，下游 message-push 支持分发。 |
+| `MSG_RECALL` | `msg.push` | `msg.RecallNotice` | 撤回消息与 outbox 同事务提交后，由 CDC 生产。 |
+| `MSG_MARK_READ` | `msg.push` | `msg.MarkReadNotice` | 已读位点与 outbox 同事务提交后，推给当前账号其他设备。 |
+| `MSG_READ_RECEIPT` | `msg.push` | `msg.MarkReadNotice` | P2P 已读位点与 outbox 同事务提交后，通知对端。 |
 
 ## 发送消息链路
 
@@ -82,11 +88,19 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 6. 消息与 outbox 提交成功即返回发送成功；会话 Upsert 失败只记录 Warn，不回滚消息。
 7. Debezium 监听 `outbox_events`，将 `msg.push` protojson 事件投递到 Kafka。
 
+## 撤回与已读链路
+
+- `RecallMessage`：权限与时间窗口校验通过后，`message.status/content` 更新和 `MSG_RECALL` outbox 在同一个 MySQL transaction 内提交。
+- `MarkRead`：`conversation.read_seq/unread_count` 更新和 `MSG_MARK_READ` outbox 在同一个 MySQL transaction 内提交。
+- P2P `MarkRead` 会额外写入 `MSG_READ_RECEIPT` outbox；群聊只写当前用户 self-sync 的 `MSG_MARK_READ`。
+- 上述 outbox 的 `entity_id` 均为 `conv_id`，保持同会话分区有序。
+
 ## 非阻断策略
 
 | 步骤 | 失败处理 | 原因 |
 | --- | --- | --- |
 | 消息落库 | 阻断返回错误 | 消息事实未成立。 |
+| 撤回 / 已读 outbox 落库 | 阻断并回滚业务变更 | 业务事实与下行通知必须原子提交。 |
 | 会话 Upsert | Warn，不阻断 | 后续消息或拉取可自愈。 |
 | CDC/Kafka 投递 | 不在请求内等待 | 客户端可通过 PullMessages 自愈。 |
 | 群成员会话初始化 | Warn，不阻断 | 下次会话更新可补偿。 |

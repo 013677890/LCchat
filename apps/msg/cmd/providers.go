@@ -13,12 +13,10 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/usecase"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/usercli"
-	"github.com/013677890/LCchat-Backend/apps/msg/mq"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
-	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -54,8 +52,6 @@ func provideRedisConfig() config.RedisConfig {
 	cfg.WriteTimeout = 50 * time.Millisecond
 	return cfg
 }
-
-func provideKafkaConfig() config.KafkaConfig                     { return config.DefaultKafkaConfig() }
 func provideLogger(cfg config.LoggerConfig) (*zap.Logger, error) { return logger.Build(cfg) }
 
 func provideAsyncPool(_ *zap.Logger, cfg config.AsyncConfig) (*ants.Pool, error) {
@@ -72,14 +68,6 @@ func provideMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
 
 func provideRedisClient(_ *zap.Logger, cfg config.RedisConfig) (*goredis.Client, error) {
 	return pkgredis.Build(cfg)
-}
-
-func provideKafkaProducer(cfg config.KafkaConfig) *kafka.Producer {
-	return kafka.NewProducer(cfg.Brokers, cfg.MsgPushTopic)
-}
-
-func provideMsgProducer(cfg config.KafkaConfig, producer *kafka.Producer) *mq.Producer {
-	return mq.NewProducer(producer, cfg.MsgPushTopic)
 }
 
 func provideMsgConfig() message.Config { return message.DefaultConfig() }
@@ -205,14 +193,11 @@ var msgInfraProviderSet = wire.NewSet(
 	provideAsyncConfig,
 	provideMySQLConfig,
 	provideRedisConfig,
-	provideKafkaConfig,
 	provideLogger,
 	provideAsyncPool,
 	provideAsyncReleaseTimeout,
 	provideMySQLDB,
 	provideRedisClient,
-	provideKafkaProducer,
-	provideMsgProducer,
 	provideMsgConfig,
 	provideMsgGroupGRPCAddress,
 	provideMsgRelationGRPCAddress,

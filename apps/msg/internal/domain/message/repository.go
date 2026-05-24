@@ -65,4 +65,7 @@ type Repository interface {
 
 	// UpdateStatus 更新消息状态和内容（撤回场景：status=1, content=提示JSON）
 	UpdateStatus(ctx context.Context, convId string, msgId string, status int8, content string) error
+
+	// UpdateStatusWithOutbox 在同一 MySQL 事务中更新消息状态并写入 outbox 事件。
+	UpdateStatusWithOutbox(ctx context.Context, convId string, msgId string, status int8, content string, event OutboxEvent) error
 }

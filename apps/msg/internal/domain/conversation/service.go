@@ -228,15 +228,14 @@ func (s *Service) GetConversations(ctx context.Context, ownerUuid string, update
 
 // MarkRead 标记会话已读
 //
-// DB 层面 read_seq = GREATEST(read_seq, readSeq)，同步计算 unread_count
-// 返回最新计算得到的 unread_count
+// DB 层面 read_seq = GREATEST(read_seq, readSeq)，并与已读同步事件同事务写入 outbox。
+// 返回最新计算得到的 unread_count。
 func (s *Service) MarkRead(ctx context.Context, ownerUuid, convId string, readSeq int64) (int32, error) {
-	err := s.repo.UpdateReadSeq(ctx, ownerUuid, convId, readSeq)
+	events, err := buildMarkReadOutboxEvents(ctx, ownerUuid, convId, readSeq)
 	if err != nil {
 		return 0, err
 	}
-	// 查询最新的会话状态获取 unread_count
-	conv, err := s.repo.GetByOwnerAndConvId(ctx, ownerUuid, convId)
+	conv, err := s.repo.UpdateReadSeqWithOutbox(ctx, ownerUuid, convId, readSeq, events)
 	if err != nil {
 		return 0, err
 	}

@@ -1,6 +1,6 @@
 # Message 整体架构
 
-msg 服务负责消息与会话领域，不负责 WebSocket 连接和最终下行投递。它的职责边界是：校验发送权限、生成消息事实、维护会话读模型、生产下行事件。
+msg 服务负责消息与会话领域，不负责 WebSocket 连接和最终下行投递。它的职责边界是：校验发送权限、生成消息事实、维护会话读模型，并在业务事务内写入下行 outbox 事件。
 
 ## 分层结构
 
@@ -10,10 +10,9 @@ msg 服务负责消息与会话领域，不负责 WebSocket 连接和最终下�
 | usecase | `apps/msg/internal/usecase` | 跨领域编排，例如发送、撤回、标记已读。 |
 | message domain | `apps/msg/internal/domain/message` | 消息幂等、msg_id、conv_id、seq、落库、撤回、拉取。 |
 | conversation domain | `apps/msg/internal/domain/conversation` | 会话列表、未读、read_seq、clear_seq、置顶免打扰。 |
-| mq | `apps/msg/mq` | 生产 Kafka `msg.push`。 |
 | cli | `apps/msg/internal/*cli` | 调用 relation、group 等外部权限服务。 |
 
-domain 不直接依赖其他 domain，不直接写 Kafka；跨领域动作由 usecase 编排。
+domain 不直接依赖其他 domain；msg-service 不直接写 `msg.push` Kafka，跨领域动作由 usecase 编排，Kafka 投递由 Debezium CDC 完成。
 
 ## 消息发送主流程
 
@@ -23,10 +22,10 @@ domain 不直接依赖其他 domain，不直接写 Kafka；跨领域动作由 us
    - 群聊校验成员、角色、全员禁言、单人禁言。
 3. message domain 执行幂等检查。
 4. 生成 `msg_id`、`conv_id`，通过 Redis `msg:seq:{conv_id}` 分配会话内 `seq`。
-5. 写入 `message` 表。
+5. 在同一 MySQL 事务内写入 `message` 表和 `outbox_events(event_type=msg.push)`。
 6. conversation domain 更新发送方会话。
 7. 单聊写扩散更新接收方会话；群聊更新 `group_conversation` 热数据，并尝试为群成员初始化会话行。
-8. 构造 `MsgPushEvent` 异步投递到 Kafka `msg.push`。
+8. Debezium 监听 `outbox_events`，将 `MsgPushEvent` protojson 路由到 Kafka `msg.push`。
 9. 返回 `msg_id`、`seq`、`conv_id`、`send_time`。
 
 ## 幂等设计
@@ -51,14 +50,14 @@ domain 不直接依赖其他 domain，不直接写 Kafka；跨领域动作由 us
 | `clear_seq` | 删除会话时的清理位点，拉取时过滤旧消息。 |
 | `mute`、`pin` | 免打扰和置顶设置。 |
 
-## Kafka 非阻断策略
+## Outbox 与 CDC 非阻断策略
 
 消息落库成功即代表发送成功。以下失败只记录 Warn，不回滚消息事实：
 
 - 更新发送方或接收方会话失败。
 - 更新群会话热数据失败。
 - 初始化群成员会话行失败。
-- `MsgItem` 序列化失败或 `msg.push` 投递失败。
+- CDC / Kafka 投递延迟或短暂失败。
 
 自愈方式：客户端后续通过 PullMessages 和会话同步拿到权威状态。
 
@@ -71,6 +70,6 @@ domain 不直接依赖其他 domain，不直接写 Kafka；跨领域动作由 us
 
 ## 与下游关系
 
-- msg 只生产 `msg.push`，不查在线路由。
+- msg 只写 `msg.push` outbox，不查在线路由。
 - message-push 消费 `msg.push` 后查 Redis 路由并调用 connect。
 - connect 只负责把 `MessageEnvelope` 写入本地 WebSocket 连接。

@@ -313,10 +313,10 @@ func (s *Service) GetMessagesByIds(ctx context.Context, convId string, msgIds []
 
 // ==================== RecallMessage ====================
 
-// RecallMessage 撤回一条消息（纯 DB 操作，Kafka 通知由 usecase 层处理）
+// RecallMessage 撤回一条消息，并在同一事务中写入 msg.push Outbox 通知。
 //
-// 流程：查消息 → 校验已撤回 → 校验权限 → 校验时间窗口 → 更新 DB
-// 返回被撤回的原始消息（供 usecase 构造 RecallNotice）
+// 流程：查消息 → 校验已撤回 → 校验权限 → 校验时间窗口 → 更新 DB + Outbox。
+// 返回被撤回的原始消息，便于调用方保持原响应语义。
 func (s *Service) RecallMessage(ctx context.Context, convId, msgId, operatorUuid string) (*model.Message, error) {
 	// 1. 查消息
 	msg, err := s.repo.GetById(ctx, convId, msgId)
@@ -356,17 +356,74 @@ func (s *Service) RecallMessage(ctx context.Context, convId, msgId, operatorUuid
 		return nil, ErrRecallTimeout
 	}
 
-	// 5. 更新 DB：status=1，content 改写为撤回提示 JSON
+	// 5. 构造撤回提示与 CDC Outbox 事件，保证业务事实与下行通知原子提交。
 	recallContent, _ := json.Marshal(map[string]string{
 		"text":     "撤回了一条消息",
 		"operator": operatorUuid,
 	})
+	serverTs := time.Now().UnixMilli()
+	payload, err := buildRecallOutboxPayload(ctx, convId, msgId, operatorUuid, serverTs)
+	if err != nil {
+		return nil, fmt.Errorf("构造撤回 outbox 事件失败: %w", err)
+	}
 
-	if err := s.repo.UpdateStatus(ctx, convId, msgId, 1, string(recallContent)); err != nil {
+	if err := s.repo.UpdateStatusWithOutbox(ctx, convId, msgId, 1, string(recallContent), OutboxEvent{
+		EventType: msgevent.EventTypeMsgPush,
+		EntityID:  convId,
+		Payload:   payload,
+	}); err != nil {
 		return nil, fmt.Errorf("撤回消息更新状态失败: %w", err)
 	}
 
 	return msg, nil
+}
+
+// buildRecallOutboxPayload 构造严格 protojson 的 MSG_RECALL 下行事件。
+func buildRecallOutboxPayload(ctx context.Context, convId, msgId, operatorUuid string, serverTs int64) (string, error) {
+	noticeData, err := proto.Marshal(&pb.RecallNotice{
+		ConvId:     convId,
+		MsgId:      msgId,
+		Operator:   operatorUuid,
+		RecallTime: serverTs,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal RecallNotice failed: %w", err)
+	}
+
+	receiverUuid, convType := resolveRecallReceiver(convId, operatorUuid)
+	return msgevent.EncodeMsgPush(&pb.MsgPushEvent{
+		EventId:      id.GenerateULID(),
+		ReceiverUuid: receiverUuid,
+		DeviceId:     ctxmeta.DeviceID(ctx),
+		Type:         "MSG_RECALL",
+		ConvType:     convType,
+		Data:         noticeData,
+		TraceId:      ctxmeta.TraceID(ctx),
+		FromUuid:     operatorUuid,
+		ServerTs:     serverTs,
+		Seq:          0,
+	})
+}
+
+// resolveRecallReceiver 根据会话类型计算撤回通知的下行接收目标。
+func resolveRecallReceiver(convId, operatorUuid string) (string, pb.ConvType) {
+	if strings.HasPrefix(convId, "p2p-") {
+		return extractPeerUUIDFromP2PConvID(convId, operatorUuid), pb.ConvType_CONV_TYPE_P2P
+	}
+	return convId, pb.ConvType_CONV_TYPE_GROUP
+}
+
+// extractPeerUUIDFromP2PConvID 从 P2P 会话 ID 中解析操作者的对端用户 UUID。
+func extractPeerUUIDFromP2PConvID(convId, selfUuid string) string {
+	body := strings.TrimPrefix(convId, "p2p-")
+	parts := strings.SplitN(body, "-", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	if parts[0] == selfUuid {
+		return parts[1]
+	}
+	return parts[0]
 }
 
 // ==================== 辅助方法 ====================

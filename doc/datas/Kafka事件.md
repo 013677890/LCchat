@@ -144,7 +144,7 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | `MSG_PUSH` | `MsgItem` | 新消息。 |
 | `MSG_RECALL` | `RecallNotice` | 撤回通知。 |
 | `MSG_MARK_READ` | `MarkReadNotice` | 已读多端同步。 |
-| `MSG_READ_RECEIPT` | 业务约定 | 已读回执。 |
+| `MSG_READ_RECEIPT` | `MarkReadNotice` | P2P 已读回执。 |
 
 ## 9. `realtime.push`
 
@@ -176,7 +176,8 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | payload 解析失败 | 视为永久错误，记录并跳过，避免毒消息阻塞。 |
 | Redis 临时失败 | 返回可重试错误，由消费者重试。 |
 | Connect gRPC 临时失败 | message-push 本地有限重试，最终失败由客户端补拉自愈。 |
-| msg Kafka 投递失败 | msg 记录 Warn，不回滚消息落库。 |
+| msg outbox 写入失败 | 与业务事务一起回滚，请求返回失败。 |
+| CDC/Kafka 投递失败 | 不在 msg 请求内等待，由 Debezium/Kafka Connect 重试；客户端可 Pull 自愈。 |
 
 ## 11. 维护规则
 

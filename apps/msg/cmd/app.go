@@ -11,7 +11,6 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
-	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -34,7 +33,6 @@ type MsgApp struct {
 	asyncReleaseTimeout time.Duration
 	db                  *gorm.DB
 	redisClient         *goredis.Client
-	kafkaProducer       *kafka.Producer
 }
 
 // NewMsgApp 创建 msg 服务生命周期对象。
@@ -48,7 +46,6 @@ func NewMsgApp(
 	asyncReleaseTimeout msgAsyncReleaseTimeout,
 	db *gorm.DB,
 	redisClient *goredis.Client,
-	kafkaProducer *kafka.Producer,
 ) (*MsgApp, error) {
 	if built == nil || built.Server == nil {
 		return nil, errors.New("grpc server 未初始化")
@@ -66,7 +63,6 @@ func NewMsgApp(
 		asyncReleaseTimeout: time.Duration(asyncReleaseTimeout),
 		db:                  db,
 		redisClient:         redisClient,
-		kafkaProducer:       kafkaProducer,
 	}, nil
 }
 
@@ -120,11 +116,6 @@ func (a *MsgApp) Shutdown(ctx context.Context) error {
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("释放 Async 协程池失败: %w", err))
-		}
-	}
-	if a.kafkaProducer != nil {
-		if err := a.kafkaProducer.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("关闭 Kafka Producer 失败: %w", err))
 		}
 	}
 	if a.redisClient != nil {

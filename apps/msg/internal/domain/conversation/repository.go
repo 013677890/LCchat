@@ -6,6 +6,13 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 )
 
+// OutboxEvent 描述需要与会话事实同事务落库的 CDC 事件。
+type OutboxEvent struct {
+	EventType string
+	EntityID  string
+	Payload   string
+}
+
 // Repository 会话领域仓储接口
 // 职责：conversation 表 + group_conversation 表 CRUD
 type Repository interface {
@@ -30,6 +37,9 @@ type Repository interface {
 	//   - 实现：UPDATE SET read_seq = GREATEST(read_seq, ?),
 	//           unread_count = GREATEST(0, max_seq - GREATEST(read_seq, ?))
 	UpdateReadSeq(ctx context.Context, ownerUuid, convId string, readSeq int64) error
+
+	// UpdateReadSeqWithOutbox 在同一 MySQL 事务中更新已读位点并写入 outbox 事件。
+	UpdateReadSeqWithOutbox(ctx context.Context, ownerUuid, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error)
 
 	// Delete 逻辑删除会话
 	//   - 实现：status=1, clear_seq=max_seq, read_seq=max_seq, unread_count=0

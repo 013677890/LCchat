@@ -43,9 +43,6 @@ func initializeMsgApp() (*MsgApp, error) {
 	service := provideMsgService(repository, config, groupcliClient)
 	conversationRepository := conversation.NewRepository(db)
 	conversationService := conversation.NewService(conversationRepository)
-	kafkaConfig := provideKafkaConfig()
-	producer := provideKafkaProducer(kafkaConfig)
-	mqProducer := provideMsgProducer(kafkaConfig, producer)
 	mainMsgRelationGRPCAddress := provideMsgRelationGRPCAddress()
 	mainMsgRelationGRPCConn, err := provideMsgRelationGRPCConn(logger, mainMsgRelationGRPCAddress)
 	if err != nil {
@@ -53,8 +50,8 @@ func initializeMsgApp() (*MsgApp, error) {
 	}
 	permissionChecker := provideMsgPermissionChecker(mainMsgRelationGRPCConn, mainMsgGroupGRPCConn)
 	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, groupcliClient, permissionChecker)
-	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(service, mqProducer)
-	markReadWorkflow := usecase.NewMarkReadWorkflow(conversationService, mqProducer)
+	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(service)
+	markReadWorkflow := usecase.NewMarkReadWorkflow(conversationService)
 	msgHandler := handler.NewMsgHandler(service, conversationService, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)
 	registrationFunc := provideMsgRegistration(msgHandler)
 	mainMsgGRPCAddress := provideMsgGRPCAddress()
@@ -74,7 +71,7 @@ func initializeMsgApp() (*MsgApp, error) {
 		return nil, err
 	}
 	mainMsgAsyncReleaseTimeout := provideAsyncReleaseTimeout(asyncConfig)
-	msgApp, err := NewMsgApp(logger, server, builtServer, listener, mainMsgGRPCShutdownTimeout, pool, mainMsgAsyncReleaseTimeout, db, client, producer)
+	msgApp, err := NewMsgApp(logger, server, builtServer, listener, mainMsgGRPCShutdownTimeout, pool, mainMsgAsyncReleaseTimeout, db, client)
 	if err != nil {
 		return nil, err
 	}
