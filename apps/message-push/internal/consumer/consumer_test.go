@@ -110,6 +110,20 @@ func TestHandle_InvalidProto_SkipsNonRetriable(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestEventTypeForMetric(t *testing.T) {
+	// 合法 protojson 事件返回真实类型。
+	data := marshalEvent(t, &msgpb.MsgPushEvent{ReceiverUuid: "user1", Type: "MSG_READ_RECEIPT"})
+	assert.Equal(t, "MSG_READ_RECEIPT", eventTypeForMetric(data))
+
+	// 非 protojson / 垃圾字节回退 "unknown"。
+	assert.Equal(t, "unknown", eventTypeForMetric([]byte("garbage")))
+
+	// 旧的二进制 proto 编码（非 DecodeMsgPush 接受的 protojson）回退 "unknown"。
+	protoBytes, err := proto.Marshal(&msgpb.MsgPushEvent{Type: "MSG_PUSH", EventId: "evt-x"})
+	require.NoError(t, err)
+	assert.Equal(t, "unknown", eventTypeForMetric(protoBytes))
+}
+
 func TestHandle_ProtoBytes_SkipsNonRetriable(t *testing.T) {
 	h := &EventHandler{}
 	data, err := proto.Marshal(&msgpb.MsgPushEvent{

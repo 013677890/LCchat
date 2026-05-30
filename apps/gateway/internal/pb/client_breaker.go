@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/sony/gobreaker"
 )
@@ -17,6 +18,8 @@ func CreateCircuitBreaker(name string) *gobreaker.CircuitBreaker {
 		MaxRequests: 3,
 		Interval:    15 * time.Second,
 		Timeout:     45 * time.Second,
+		// 仅把基础设施类故障计入失败率；业务错误、客户端取消不应触发熔断（否则会误熔断健康下游）。
+		IsSuccessful: grpcx.BreakerIsSuccessful,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			// 至少累计 5 次请求后再按失败率判断，避免低流量时过早熔断。
 			if counts.Requests < 5 {

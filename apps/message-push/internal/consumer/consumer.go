@@ -357,9 +357,21 @@ func (c *Consumer) Start(ctx context.Context) error {
 
 		handleErr := c.runHandleWithRetry(ctx, msg.Value)
 		if handleErr != nil {
-			logger.Warn(ctx, "message-push 本地重试仍失败，按阶段一策略提交 offset",
-				logger.ErrorField("error", handleErr),
-			)
+			if ctx.Err() != nil {
+				// 关闭流程中被取消，不计为故障丢弃，避免污染告警指标。
+				logger.Warn(ctx, "message-push 处理在关闭中被取消，提交 offset",
+					logger.ErrorField("error", handleErr),
+				)
+			} else {
+				// 本地重试耗尽仍失败：提交 offset 放弃该事件（阶段一策略），依赖客户端按 seq 拉取兜底。
+				// 记录按事件类型聚合的丢弃指标，便于在 Redis/connect 持续异常时及时告警。
+				eventType := eventTypeForMetric(msg.Value)
+				metrics.MessagesDroppedAfterRetry.WithLabelValues(eventType).Inc()
+				logger.Warn(ctx, "message-push 本地重试仍失败，提交 offset 丢弃该事件（依赖客户端 seq 拉取兜底）",
+					logger.String("event_type", eventType),
+					logger.ErrorField("error", handleErr),
+				)
+			}
 		}
 		if err := reader.CommitMessages(ctx, msg); err != nil {
 			metrics.KafkaCommitErrors.Inc()
@@ -407,4 +419,15 @@ func (c *Consumer) runHandleWithRetry(ctx context.Context, payload []byte) error
 	}
 	metrics.HandleRetries.WithLabelValues("failed").Observe(float64(handleMaxAttempts))
 	return lastErr
+}
+
+// eventTypeForMetric 在丢弃指标/告警处尽力解析事件类型作为标签；解析失败回退 "unknown"。
+// 进入丢弃分支的消息必然已在 Handle 内成功解码过（解码失败属永久错误，返回 nil 不会重试/丢弃），
+// 因此这里的二次解码几乎总能成功，且只在稀有的丢弃路径触发，成本可忽略。
+func eventTypeForMetric(value []byte) string {
+	event, err := msgevent.DecodeMsgPush(value)
+	if err != nil || event.Type == "" {
+		return "unknown"
+	}
+	return event.Type
 }

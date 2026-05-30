@@ -84,6 +84,17 @@ var (
 		Help:      "单条消息成功投递的设备数分布",
 		Buckets:   []float64{0, 1, 2, 3, 5, 10, 20},
 	})
+
+	// MessagesDroppedAfterRetry 本地重试耗尽后仍失败、被迫提交 offset 而丢弃的消息计数（按事件类型）。
+	// msg.push 是 best-effort 实时通道，被丢弃的事件依赖客户端按 seq 拉取兜底；
+	// 但本指标持续非零通常意味着 Redis 路由或 connect 节点持续异常，应作为告警信号
+	// （区别于"用户离线"这类正常跳过——后者根本不会进入重试/丢弃路径）。
+	MessagesDroppedAfterRetry = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "message_push",
+		Subsystem: "handler",
+		Name:      "dropped_after_retry_total",
+		Help:      "本地重试耗尽后被迫提交 offset 而丢弃的消息总数（依赖客户端 seq 拉取兜底）",
+	}, []string{"event_type"}) // event_type: MSG_PUSH / MSG_RECALL / MSG_MARK_READ / MSG_READ_RECEIPT / unknown
 )
 
 // ObserveHandleDuration 记录处理耗时
