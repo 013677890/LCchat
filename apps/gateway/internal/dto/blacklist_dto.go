@@ -44,7 +44,7 @@ type BlacklistItem struct {
 
 // CheckIsBlacklistRequest 判断是否拉黑请求 DTO
 type CheckIsBlacklistRequest struct {
-	UserUUID   string `json:"userUuid" binding:"required"`   // 当前用户UUID
+	UserUUID   string `json:"userUuid"`                      // 本人侧UUID：由网关用 JWT 身份强制覆盖，客户端无需传（传了也会被忽略）
 	TargetUUID string `json:"targetUuid" binding:"required"` // 目标用户UUID
 }
 

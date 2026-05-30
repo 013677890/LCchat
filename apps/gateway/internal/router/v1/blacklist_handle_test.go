@@ -13,6 +13,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -406,6 +407,22 @@ func TestBlacklistHandlerCheckIsBlacklist(t *testing.T) {
 			wantCalled: true,
 		},
 		{
+			// 安全回归：body 里伪造的 userUuid 必须被 JWT 身份覆盖，禁止探测他人关系。
+			name: "spoofed_user_uuid_overridden_by_jwt",
+			body: `{"userUuid":"attacker","targetUuid":"u2"}`,
+			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
+				svc.checkFn = func(_ context.Context, req *dto.CheckIsBlacklistRequest) (*dto.CheckIsBlacklistResponse, error) {
+					*called = true
+					require.Equal(t, "u1", req.UserUUID) // 被 ctx 中的登录用户 u1 覆盖，而非 body 的 "attacker"
+					require.Equal(t, "u2", req.TargetUUID)
+					return &dto.CheckIsBlacklistResponse{IsBlacklist: false}, nil
+				}
+			},
+			wantStatus: http.StatusOK,
+			wantCode:   consts.CodeSuccess,
+			wantCalled: true,
+		},
+		{
 			name: "business_error_passthrough",
 			body: `{"userUuid":"u1","targetUuid":"u2"}`,
 			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
@@ -454,6 +471,8 @@ func TestBlacklistHandlerCheckIsBlacklist(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			c, _ := gin.CreateTestContext(w)
 			c.Request = req
+			// 模拟鉴权中间件已注入当前登录用户身份；CheckIsBlacklist 会以该身份覆盖 body 的 userUuid。
+			ctxmeta.SetUserUUID(c, "u1")
 
 			h.CheckIsBlacklist(c)
 

@@ -2,51 +2,62 @@
 package middleware
 
 import (
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"context"
 	"net"
+	"os"
 	"strings"
+
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	headerXRealIP       = "X-Real-IP"
-	headerXForwardedFor = "X-Forwarded-For"
-	headerClientIP      = "Client-IP" // 或 X-Client-IP
-	headerXClientIP     = "X-Client-IP"
-)
+// ConfigureTrustedProxies 按环境变量 GATEWAY_TRUSTED_PROXIES（逗号分隔的 IP/CIDR）配置 gin 可信代理。
+// 必须在注册路由前调用。
+//
+// 安全语义：
+//   - 未配置（空）时不信任任何代理，c.ClientIP() 只返回直连地址 RemoteAddr，
+//     忽略一切可被客户端伪造的 X-Real-IP / X-Forwarded-For，避免伪造来源 IP 绕过限流/黑名单；
+//   - 配置为反代 / LB 所在网段后，仅当直连 peer 属于可信代理时，才按 X-Real-IP /
+//     X-Forwarded-For 解析真实客户端 IP（XFF 从右向左跳过可信跳）。
+//
+// 部署提示：网关位于 nginx / ingress 之后时，应把该变量设为这些代理的 IP/网段
+// （例如容器网络 CIDR），否则取到的将是代理自身地址。
+func ConfigureTrustedProxies(r *gin.Engine) {
+	r.ForwardedByClientIP = true
+	// 与历史行为保持一致的取值优先级：先 X-Real-IP，再 X-Forwarded-For。
+	r.RemoteIPHeaders = []string{"X-Real-IP", "X-Forwarded-For"}
 
-// GetClientIP 从 Gin Context 中获取客户端真实 IP
-// 优先级：X-Real-IP > X-Forwarded-For > Client-IP > RemoteAddr
+	proxies := parseTrustedProxies(os.Getenv("GATEWAY_TRUSTED_PROXIES"))
+	if err := r.SetTrustedProxies(proxies); err != nil {
+		// 配置非法时回退到“不信任任何代理”，保证安全默认而非沿用 gin 的信任所有。
+		logger.Warn(context.Background(), "GATEWAY_TRUSTED_PROXIES 配置无效，回退为仅信任直连地址",
+			logger.ErrorField("error", err),
+		)
+		_ = r.SetTrustedProxies(nil)
+	}
+}
+
+// parseTrustedProxies 解析逗号分隔的可信代理列表；空字符串返回 nil（不信任任何代理）。
+func parseTrustedProxies(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var proxies []string
+	for _, item := range strings.Split(raw, ",") {
+		if v := strings.TrimSpace(item); v != "" {
+			proxies = append(proxies, v)
+		}
+	}
+	return proxies
+}
+
+// GetClientIP 返回客户端真实 IP。
+// 委托给 gin 的 c.ClientIP()，由其依据 ConfigureTrustedProxies 设置的可信代理边界，
+// 安全地解析 X-Real-IP / X-Forwarded-For 或回退到直连地址，不再无条件信任转发头。
 func GetClientIP(c *gin.Context) string {
-	// 1. 优先使用网关设置的真实 IP
-	if ip := c.GetHeader(headerXRealIP); ip != "" {
-		return strings.TrimSpace(ip)
-	}
-
-	// 2. 使用 X-Forwarded-For（代理链）
-	if xff := c.GetHeader(headerXForwardedFor); xff != "" {
-		// 取第一个 IP（原始客户端）
-		if idx := strings.Index(xff, ","); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-
-	// 3. 使用客户端传入的 IP（可选）
-	if ip := c.GetHeader(headerClientIP); ip != "" {
-		// 验证 IP 格式
-		if net.ParseIP(ip) != nil {
-			return ip
-		}
-	}
-	if ip := c.GetHeader(headerXClientIP); ip != "" {
-		if net.ParseIP(ip) != nil {
-			return ip
-		}
-	}
-
-	// 4. 使用 Gin 的 ClientIP 方法（包含 RemoteAddr 逻辑）
 	return c.ClientIP()
 }
 
@@ -73,7 +84,7 @@ func GetClientIPOrDefault(c *gin.Context, defaultIP string) string {
 	return defaultIP
 }
 
-// Middleware 注入 IP 到 Context
+// ClientIPMiddleware 注入 IP 到 Context
 func ClientIPMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := GetClientIP(c)
@@ -89,7 +100,7 @@ func ClientIPMiddleware() gin.HandlerFunc {
 	}
 }
 
-// 从 Gin Context 获取 IP（便捷方法）
+// ClientIPFromGinContext 从 Gin Context 获取 IP（便捷方法）
 func ClientIPFromGinContext(c *gin.Context) string {
 	return ctxmeta.ClientIPFromGin(c)
 }

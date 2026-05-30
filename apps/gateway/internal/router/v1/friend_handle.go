@@ -493,6 +493,14 @@ func (h *FriendHandler) CheckIsFriend(c *gin.Context) {
 		return
 	}
 
+	// 强制以当前登录用户为"本人"侧，禁止探测任意两人之间的好友关系（越权防护）。
+	currentUserUUID, ok := middleware.GetUserUUID(c)
+	if !ok {
+		result.Fail(c, nil, consts.CodeUnauthorized)
+		return
+	}
+	req.UserUUID = currentUserUUID
+
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	checkResp, err := h.friendService.CheckIsFriend(ctx, &req)
 	if err != nil {
@@ -530,6 +538,14 @@ func (h *FriendHandler) GetRelationStatus(c *gin.Context) {
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}
+
+	// 强制以当前登录用户为"本人"侧，禁止探测任意两人之间的关系（越权防护）。
+	currentUserUUID, ok := middleware.GetUserUUID(c)
+	if !ok {
+		result.Fail(c, nil, consts.CodeUnauthorized)
+		return
+	}
+	req.UserUUID = currentUserUUID
 
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	relationResp, err := h.friendService.GetRelationStatus(ctx, &req)

@@ -14,6 +14,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -585,6 +586,8 @@ func TestFriendHandlerSimpleMethods(t *testing.T) {
 			}
 			c, _ := gin.CreateTestContext(w)
 			c.Request = req
+			// 模拟鉴权中间件已注入当前登录用户身份；CheckIsFriend/GetRelationStatus 会以该身份覆盖 body 的 userUuid。
+			ctxmeta.SetUserUUID(c, "u1")
 
 			tt.invoke(h, c)
 

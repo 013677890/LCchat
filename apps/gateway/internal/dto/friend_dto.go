@@ -200,7 +200,7 @@ type SetFriendTagResponse struct{}
 
 // CheckIsFriendRequest 判断是否好友请求 DTO
 type CheckIsFriendRequest struct {
-	UserUUID string `json:"userUuid" binding:"required"` // 当前用户UUID
+	UserUUID string `json:"userUuid"`                    // 本人侧UUID：由网关用 JWT 身份强制覆盖，客户端无需传（传了也会被忽略）
 	PeerUUID string `json:"peerUuid" binding:"required"` // 目标用户UUID
 }
 
@@ -211,7 +211,7 @@ type CheckIsFriendResponse struct {
 
 // GetRelationStatusRequest 获取关系状态请求 DTO
 type GetRelationStatusRequest struct {
-	UserUUID string `json:"userUuid" binding:"required"` // 当前用户UUID
+	UserUUID string `json:"userUuid"`                    // 本人侧UUID：由网关用 JWT 身份强制覆盖，客户端无需传（传了也会被忽略）
 	PeerUUID string `json:"peerUuid" binding:"required"` // 目标用户UUID
 }
 

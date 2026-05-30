@@ -149,6 +149,14 @@ func (h *BlacklistHandler) CheckIsBlacklist(c *gin.Context) {
 		return
 	}
 
+	// 强制以当前登录用户为"本人"侧，禁止探测任意两人之间的拉黑关系（越权防护）。
+	currentUserUUID, ok := middleware.GetUserUUID(c)
+	if !ok {
+		result.Fail(c, nil, consts.CodeUnauthorized)
+		return
+	}
+	req.UserUUID = currentUserUUID
+
 	resp, err := h.blacklistService.CheckIsBlacklist(ctx, &req)
 	if err != nil {
 		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {

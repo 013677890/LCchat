@@ -118,6 +118,8 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 		groupHandler = groupHandlers[0]
 	}
 	r := gin.New()
+	// 可信代理配置：必须在使用 c.ClientIP() 前设置，避免客户端伪造 X-Real-IP / X-Forwarded-For。
+	middleware.ConfigureTrustedProxies(r)
 	// 恢复中间件
 	r.Use(middleware.GinRecovery(true))
 	// 追踪中间件 (生成 trace_id)
