@@ -135,6 +135,15 @@ func provideMsgService(repo message.Repository, cfg message.Config, gc *groupcli
 	return svc
 }
 
+// provideConvService 创建会话领域服务，并注入群成员查询器（用于群已读/群历史访问回退）。
+func provideConvService(repo conversation.Repository, gc *groupcli.Client) *conversation.Service {
+	svc := conversation.NewService(repo)
+	if gc != nil {
+		svc.SetGroupMembershipQuerier(gc)
+	}
+	return svc
+}
+
 func provideMsgGRPCAddress() msgGRPCAddress {
 	addr := os.Getenv("MSG_GRPC_ADDR")
 	if addr == "" {
@@ -218,7 +227,7 @@ var msgInfraProviderSet = wire.NewSet(
 var msgDomainProviderSet = wire.NewSet(
 	message.NewRepository,
 	conversation.NewRepository,
-	conversation.NewService,
+	provideConvService,
 	usecase.NewSendMessageWorkflow,
 	usecase.NewRecallMessageWorkflow,
 	usecase.NewMarkReadWorkflow,

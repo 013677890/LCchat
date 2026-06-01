@@ -42,7 +42,7 @@ func initializeMsgApp() (*MsgApp, error) {
 	groupcliClient := provideMsgGroupClient(mainMsgGroupGRPCConn)
 	service := provideMsgService(repository, config, groupcliClient)
 	conversationRepository := conversation.NewRepository(db)
-	conversationService := conversation.NewService(conversationRepository)
+	conversationService := provideConvService(conversationRepository, groupcliClient)
 	mainMsgRelationGRPCAddress := provideMsgRelationGRPCAddress()
 	mainMsgRelationGRPCConn, err := provideMsgRelationGRPCConn(logger, mainMsgRelationGRPCAddress)
 	if err != nil {

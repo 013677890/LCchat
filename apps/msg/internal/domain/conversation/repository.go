@@ -41,6 +41,11 @@ type Repository interface {
 	// UpdateReadSeqWithOutbox 在同一 MySQL 事务中更新已读位点并写入 outbox 事件。
 	UpdateReadSeqWithOutbox(ctx context.Context, ownerUuid, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error)
 
+	// UpsertGroupReadSeqWithOutbox 群会话专用：本地无行时按需建行并写入已读位点 + outbox（同事务）。
+	//   - 冲突时 read_seq = GREATEST(read_seq, ?)，不触碰 status/clear_seq/mute/pin。
+	//   - 仅用于群会话（type=2, target_uuid=group_uuid），调用方需先校验群成员资格。
+	UpsertGroupReadSeqWithOutbox(ctx context.Context, ownerUuid, groupUuid string, readSeq int64, events []OutboxEvent) (*model.Conversation, error)
+
 	// Delete 逻辑删除会话
 	//   - 实现：status=1, clear_seq=max_seq, read_seq=max_seq, unread_count=0
 	Delete(ctx context.Context, ownerUuid, convId string) error

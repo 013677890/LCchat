@@ -199,6 +199,53 @@ func (r *repositoryImpl) UpdateReadSeqWithOutbox(ctx context.Context, ownerUuid,
 	return &conv, nil
 }
 
+// UpsertGroupReadSeqWithOutbox 群会话专用：本地无行时按需建行并写入已读位点 + outbox（同事务）。
+func (r *repositoryImpl) UpsertGroupReadSeqWithOutbox(ctx context.Context, ownerUuid, groupUuid string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+	if len(events) == 0 {
+		return nil, fmt.Errorf("UpsertGroupReadSeqWithOutbox: empty outbox events")
+	}
+	for _, event := range events {
+		if event.EventType == "" || event.EntityID == "" || event.Payload == "" {
+			return nil, fmt.Errorf("UpsertGroupReadSeqWithOutbox: invalid outbox event")
+		}
+	}
+
+	var conv model.Conversation
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		row := &model.Conversation{
+			ConvId:      groupUuid,
+			Type:        2, // GROUP
+			OwnerUuid:   ownerUuid,
+			TargetUuid:  groupUuid,
+			ReadSeq:     readSeq,
+			UnreadCount: 0, // 群未读由会话列表用 group_conversation.max_seq 现算，这里不维护
+			Status:      0,
+		}
+		// 冲突（行已存在）时只单调推进 read_seq，绝不触碰 status/clear_seq/mute/pin。
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "owner_uuid"}, {Name: "conv_id"}},
+			DoUpdates: clause.Assignments(map[string]interface{}{
+				"read_seq": gorm.Expr("GREATEST(read_seq, ?)", readSeq),
+			}),
+		}).Create(row).Error; err != nil {
+			return fmt.Errorf("UpsertGroupReadSeqWithOutbox: upsert failed: %w", err)
+		}
+		for _, event := range events {
+			if err := outbox.InsertEvent(tx, event.EventType, event.EntityID, event.Payload); err != nil {
+				return fmt.Errorf("UpsertGroupReadSeqWithOutbox: outbox insert failed: %w", err)
+			}
+		}
+		if err := tx.Where("owner_uuid = ? AND conv_id = ?", ownerUuid, groupUuid).First(&conv).Error; err != nil {
+			return fmt.Errorf("UpsertGroupReadSeqWithOutbox: db query failed: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &conv, nil
+}
+
 // updateConversationReadSeq 执行已读位点单调更新。
 func updateConversationReadSeq(db *gorm.DB, ownerUuid, convId string, readSeq int64) error {
 	result := db.

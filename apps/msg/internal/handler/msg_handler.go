@@ -217,14 +217,14 @@ func requireOwnerUUID(ctx context.Context, requestedOwnerUUID string) (string, e
 }
 
 func (h *MsgHandler) requireConversationAccess(ctx context.Context, ownerUUID, convID string) (int64, error) {
-	conv, err := h.convService.GetByOwnerAndConvId(ctx, ownerUUID, convID)
+	clearSeq, err := h.convService.ResolveReadAccess(ctx, ownerUUID, convID)
 	if err != nil {
 		if errors.Is(err, convsvc.ErrConversationNotFound) {
 			return 0, apperr.New(consts.CodeConversationNotFound)
 		}
 		return 0, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
 	}
-	return conv.ClearSeq, nil
+	return clearSeq, nil
 }
 
 func mapMsgDomainError(_ context.Context, err error) error {

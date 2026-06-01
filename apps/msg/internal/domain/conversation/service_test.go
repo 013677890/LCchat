@@ -27,11 +27,16 @@ type mockRepo struct {
 	getByOwnerAndConvFn func(ctx context.Context, owner, convId string) (*model.Conversation, error)
 	updateReadSeqFn     func(ctx context.Context, owner, convId string, readSeq int64) error
 	updateReadOutboxFn  func(ctx context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error)
+	upsertGroupReadFn   func(ctx context.Context, owner, groupUuid string, readSeq int64, events []OutboxEvent) (*model.Conversation, error)
 	deleteFn            func(ctx context.Context, owner, convId string) error
 	updateSettingsFn    func(ctx context.Context, owner, convId string, mute *bool, pin *bool) error
 	listP2PFn           func(ctx context.Context, owner string, since, cursorMs, cursorId int64, size int) ([]*model.Conversation, error)
 	listGroupFn         func(ctx context.Context, owner string, since, cursorMs, cursorId int64, size int) ([]*model.Conversation, error)
 	getGroupConvFn      func(ctx context.Context, groupUuid string) (*model.GroupConversation, error)
+}
+
+type mockGroupMembershipQuerier struct {
+	queryFn func(ctx context.Context, groupUUID, userUUID string) (int8, error)
 }
 
 func (m *mockRepo) Upsert(ctx context.Context, conv *model.Conversation, isSender bool) error {
@@ -70,6 +75,12 @@ func (m *mockRepo) UpdateReadSeqWithOutbox(ctx context.Context, owner, convId st
 	}
 	return &model.Conversation{}, nil
 }
+func (m *mockRepo) UpsertGroupReadSeqWithOutbox(ctx context.Context, owner, groupUuid string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+	if m.upsertGroupReadFn != nil {
+		return m.upsertGroupReadFn(ctx, owner, groupUuid, readSeq, events)
+	}
+	return &model.Conversation{}, nil
+}
 func (m *mockRepo) Delete(ctx context.Context, owner, convId string) error {
 	if m.deleteFn != nil {
 		return m.deleteFn(ctx, owner, convId)
@@ -99,6 +110,12 @@ func (m *mockRepo) GetGroupConv(ctx context.Context, groupUuid string) (*model.G
 		return m.getGroupConvFn(ctx, groupUuid)
 	}
 	return nil, ErrConversationNotFound
+}
+func (m *mockGroupMembershipQuerier) QueryMemberRole(ctx context.Context, groupUUID, userUUID string) (int8, error) {
+	if m.queryFn != nil {
+		return m.queryFn(ctx, groupUUID, userUUID)
+	}
+	return -1, nil
 }
 
 // ==================== UpsertForMessage ====================
@@ -202,6 +219,66 @@ func TestEnsureGroupMembersConv(t *testing.T) {
 	assert.Equal(t, "g-100", capturedGroup)
 }
 
+// ==================== ResolveReadAccess ====================
+
+func TestResolveReadAccess_ExistingConversationReturnsClearSeq(t *testing.T) {
+	repo := &mockRepo{
+		getByOwnerAndConvFn: func(_ context.Context, owner, convId string) (*model.Conversation, error) {
+			assert.Equal(t, "user1", owner)
+			assert.Equal(t, "group-1", convId)
+			return &model.Conversation{ClearSeq: 12}, nil
+		},
+	}
+	svc := NewService(repo)
+
+	clearSeq, err := svc.ResolveReadAccess(context.Background(), "user1", "group-1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(12), clearSeq)
+}
+
+func TestResolveReadAccess_GroupMemberWithoutConversationAllowed(t *testing.T) {
+	repo := &mockRepo{
+		getByOwnerAndConvFn: func(_ context.Context, owner, convId string) (*model.Conversation, error) {
+			assert.Equal(t, "user1", owner)
+			assert.Equal(t, "group-1", convId)
+			return nil, ErrConversationNotFound
+		},
+	}
+	svc := NewService(repo)
+	svc.SetGroupMembershipQuerier(&mockGroupMembershipQuerier{
+		queryFn: func(_ context.Context, groupUUID, userUUID string) (int8, error) {
+			assert.Equal(t, "group-1", groupUUID)
+			assert.Equal(t, "user1", userUUID)
+			return 0, nil
+		},
+	})
+
+	clearSeq, err := svc.ResolveReadAccess(context.Background(), "user1", "group-1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), clearSeq)
+}
+
+func TestResolveReadAccess_GroupNonMemberWithoutConversationDenied(t *testing.T) {
+	repo := &mockRepo{
+		getByOwnerAndConvFn: func(_ context.Context, owner, convId string) (*model.Conversation, error) {
+			assert.Equal(t, "user1", owner)
+			assert.Equal(t, "group-1", convId)
+			return nil, ErrConversationNotFound
+		},
+	}
+	svc := NewService(repo)
+	svc.SetGroupMembershipQuerier(&mockGroupMembershipQuerier{
+		queryFn: func(_ context.Context, groupUUID, userUUID string) (int8, error) {
+			assert.Equal(t, "group-1", groupUUID)
+			assert.Equal(t, "user1", userUUID)
+			return -1, nil
+		},
+	})
+
+	_, err := svc.ResolveReadAccess(context.Background(), "user1", "group-1")
+	require.ErrorIs(t, err, ErrConversationNotFound)
+}
+
 // ==================== MarkRead ====================
 
 func TestMarkRead_ReturnsUnread(t *testing.T) {
@@ -244,6 +321,73 @@ func TestMarkRead_P2P_WritesReadReceiptOutbox(t *testing.T) {
 	require.Len(t, gotEvents, 2)
 	assertMarkReadEvent(t, gotEvents[0], "p2p-peer-reader", "MSG_MARK_READ", "reader", "", pb.ConvType_CONV_TYPE_P2P, 88)
 	assertMarkReadEvent(t, gotEvents[1], "p2p-peer-reader", "MSG_READ_RECEIPT", "peer", "", pb.ConvType_CONV_TYPE_P2P, 88)
+}
+
+func TestMarkRead_GroupMemberWithoutConversationUpsertsReadSeq(t *testing.T) {
+	var gotEvents []OutboxEvent
+	var upsertCalled bool
+	repo := &mockRepo{
+		updateReadOutboxFn: func(_ context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+			assert.Equal(t, "user1", owner)
+			assert.Equal(t, "group-1", convId)
+			assert.Equal(t, int64(50), readSeq)
+			gotEvents = events
+			return nil, ErrConversationNotFound
+		},
+		upsertGroupReadFn: func(_ context.Context, owner, groupUuid string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+			upsertCalled = true
+			assert.Equal(t, "user1", owner)
+			assert.Equal(t, "group-1", groupUuid)
+			assert.Equal(t, int64(50), readSeq)
+			assert.Equal(t, gotEvents, events)
+			return &model.Conversation{UnreadCount: 0}, nil
+		},
+	}
+	svc := NewService(repo)
+	svc.SetGroupMembershipQuerier(&mockGroupMembershipQuerier{
+		queryFn: func(_ context.Context, groupUUID, userUUID string) (int8, error) {
+			assert.Equal(t, "group-1", groupUUID)
+			assert.Equal(t, "user1", userUUID)
+			return 0, nil
+		},
+	})
+	ctx := ctxmeta.WithDeviceID(context.Background(), "dev-1")
+
+	unread, err := svc.MarkRead(ctx, "user1", "group-1", 50)
+	require.NoError(t, err)
+	assert.Equal(t, int32(0), unread)
+	assert.True(t, upsertCalled)
+	require.Len(t, gotEvents, 1)
+	assertMarkReadEvent(t, gotEvents[0], "group-1", "MSG_MARK_READ", "user1", "dev-1", pb.ConvType_CONV_TYPE_GROUP, 50)
+}
+
+func TestMarkRead_GroupNonMemberWithoutConversationDenied(t *testing.T) {
+	upsertCalled := false
+	repo := &mockRepo{
+		updateReadOutboxFn: func(_ context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+			assert.Equal(t, "user1", owner)
+			assert.Equal(t, "group-1", convId)
+			assert.Equal(t, int64(50), readSeq)
+			require.Len(t, events, 1)
+			return nil, ErrConversationNotFound
+		},
+		upsertGroupReadFn: func(context.Context, string, string, int64, []OutboxEvent) (*model.Conversation, error) {
+			upsertCalled = true
+			return &model.Conversation{}, nil
+		},
+	}
+	svc := NewService(repo)
+	svc.SetGroupMembershipQuerier(&mockGroupMembershipQuerier{
+		queryFn: func(_ context.Context, groupUUID, userUUID string) (int8, error) {
+			assert.Equal(t, "group-1", groupUUID)
+			assert.Equal(t, "user1", userUUID)
+			return -1, nil
+		},
+	})
+
+	_, err := svc.MarkRead(context.Background(), "user1", "group-1", 50)
+	require.ErrorIs(t, err, ErrConversationNotFound)
+	assert.False(t, upsertCalled)
 }
 
 func assertMarkReadEvent(t *testing.T, event OutboxEvent, convId, pushType, receiverUUID, deviceID string, convType pb.ConvType, readSeq int64) {
