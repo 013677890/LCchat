@@ -91,7 +91,7 @@ Gateway 对外暴露 HTTP JSON，不直接暴露 Protobuf 字段名。
 关键设计：
 
 - 好友关系为单向记录，成为好友时双方各有一条正常关系。
-- `SyncFriendList` 通过版本号返回增量变更。
+- `SyncFriendList` 兼容旧版毫秒 `version`，并通过 `cursor` / `nextCursor` 做精确增量翻页。
 - `GetRelationStatus` 聚合好友和黑名单状态，供前端展示和 msg 权限判断参考。
 
 ### 5.2 `BlacklistService`

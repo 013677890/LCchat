@@ -1118,7 +1118,9 @@ def main() -> int:
         data = ensure_success("friend-sync", response, body)
         if not data.get("changes"):
             raise TestFailure(f"friend-sync empty: {data}")
-        recorder.ok("friend-sync", str(data.get("latestVersion")))
+        friend_version = data.get("latestVersion", friend_version)
+        friend_cursor = data.get("nextCursor", "")
+        recorder.ok("friend-sync", friend_cursor or str(friend_version))
 
         response, body = request_json(
             "POST",
@@ -1250,10 +1252,11 @@ def main() -> int:
             "POST",
             "/api/v1/auth/friend/sync",
             token=token_a1,
-            json_body={"version": friend_version, "limit": 100},
+            json_body={"version": friend_version, "cursor": friend_cursor, "limit": 100},
         )
         data = ensure_success("friend-sync-after-delete", response, body)
-        recorder.ok("friend-sync-after-delete", str(data.get("latestVersion")))
+        friend_cursor = data.get("nextCursor", friend_cursor)
+        recorder.ok("friend-sync-after-delete", friend_cursor or str(data.get("latestVersion")))
 
         response, body = request_json(
             "POST",
