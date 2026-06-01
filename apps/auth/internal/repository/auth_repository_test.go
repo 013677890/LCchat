@@ -6,9 +6,12 @@ import (
 	"testing"
 	"time"
 
+	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
+	"github.com/alicebob/miniredis/v2"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -36,6 +39,24 @@ func seedAuthAccount(t *testing.T, repo *authRepositoryImpl, userUUID string) {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}).Error)
+}
+
+func newAuthRepositoryWithRedisForTest(t *testing.T) (*authRepositoryImpl, *miniredis.Miniredis) {
+	t.Helper()
+	repo := newAuthRepositoryForTest(t)
+	mr := miniredis.RunT(t)
+	repo.redisClient = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = repo.redisClient.Close()
+	})
+	return repo, mr
+}
+
+func requireRedisString(t *testing.T, mr *miniredis.Miniredis, key, want string) {
+	t.Helper()
+	got, err := mr.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
 
 func TestAuthRepositoryWriteReturnsNotFoundOnZeroRows(t *testing.T) {
@@ -99,4 +120,43 @@ func TestAuthRepositoryWritesExistingAccount(t *testing.T) {
 	var count int64
 	require.NoError(t, repo.db.Model(&outbox.Event{}).Count(&count).Error)
 	require.Equal(t, int64(1), count)
+}
+
+func TestAuthRepositoryUpdateEmailDuplicateReturnsDuplicateKey(t *testing.T) {
+	repo := newAuthRepositoryForTest(t)
+	ctx := context.Background()
+	seedAuthAccount(t, repo, "u1")
+	seedAuthAccount(t, repo, "u2")
+
+	err := repo.UpdateEmail(ctx, "u2", "u1@test.com")
+	require.ErrorIs(t, err, ErrDuplicateKey)
+}
+
+func TestCheckAndIncrementVerifyCodeRateLimitAtomic(t *testing.T) {
+	repo, mr := newAuthRepositoryWithRedisForTest(t)
+	ctx := context.Background()
+	email := "u1@test.com"
+	ip := "127.0.0.1"
+
+	limited, err := repo.CheckAndIncrementVerifyCodeRateLimit(ctx, email, ip)
+	require.NoError(t, err)
+	require.False(t, limited)
+	requireRedisString(t, mr, rediskey.VerifyCodeMinuteKey(email), "1")
+	requireRedisString(t, mr, rediskey.VerifyCode24HKey(email), "1")
+	requireRedisString(t, mr, rediskey.VerifyCodeIPKey(ip), "1")
+
+	limited, err = repo.CheckAndIncrementVerifyCodeRateLimit(ctx, email, ip)
+	require.NoError(t, err)
+	require.True(t, limited)
+	requireRedisString(t, mr, rediskey.VerifyCodeMinuteKey(email), "1")
+	requireRedisString(t, mr, rediskey.VerifyCode24HKey(email), "1")
+	requireRedisString(t, mr, rediskey.VerifyCodeIPKey(ip), "1")
+}
+
+func TestCheckAndIncrementVerifyCodeRateLimitRequiresRedis(t *testing.T) {
+	repo := newAuthRepositoryForTest(t)
+
+	limited, err := repo.CheckAndIncrementVerifyCodeRateLimit(context.Background(), "u1@test.com", "127.0.0.1")
+	require.ErrorIs(t, err, ErrRedis)
+	require.False(t, limited)
 }

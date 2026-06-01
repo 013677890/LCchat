@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/repository"
@@ -86,10 +87,9 @@ func (s *accountServiceImpl) ChangePassword(ctx context.Context, req *authpb.Cha
 // ChangeEmail 换绑邮箱。
 // 业务流程：
 //  1. 从上下文中提取当前登录用户 UUID；
-//  2. 检查新邮箱是否已被其他账号占用；
-//  3. 校验换绑邮箱验证码；
-//  4. 再次确认账号存在后更新邮箱字段；
-//  5. 尽力删除已消费验证码，并返回新的邮箱信息。
+//  2. 校验新邮箱格式与换绑邮箱验证码；
+//  3. 再次确认账号存在后更新邮箱字段；
+//  4. 尽力删除已消费验证码，并返回新的邮箱信息。
 //
 // 错误码映射：
 //   - codes.Unauthenticated: 未登录
@@ -104,17 +104,13 @@ func (s *accountServiceImpl) ChangeEmail(ctx context.Context, req *authpb.Change
 		return nil, apperr.New(consts.CodeUnauthorized)
 	}
 
-	// 先检查新邮箱是否已被占用，避免后续验证码校验通过后才发现唯一键冲突。
-	exists, err := s.authRepo.ExistsByEmail(ctx, req.NewEmail)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查邮箱是否存在失败")
-	}
-	if exists {
-		return nil, apperr.New(consts.CodeEmailAlreadyExist)
+	newEmail := strings.TrimSpace(req.NewEmail)
+	if !util.ValidateEmail(newEmail) {
+		return nil, apperr.New(consts.CodeInvalidEmail)
 	}
 
 	// 换绑验证码按 type=4 存储；这里明确区分“验证码过期”和“验证码不匹配”。
-	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.NewEmail, req.VerifyCode, 4)
+	isValid, err := s.authRepo.VerifyVerifyCode(ctx, newEmail, req.VerifyCode, 4)
 	if err != nil {
 		if errors.Is(err, repository.ErrRedisNil) {
 			return nil, apperr.New(consts.CodeVerifyCodeExpire)
@@ -133,16 +129,19 @@ func (s *accountServiceImpl) ChangeEmail(ctx context.Context, req *authpb.Change
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
 	}
 
-	// 数据库更新成功后，这个邮箱就成为新的登录凭据。
-	if err := s.authRepo.UpdateEmail(ctx, userUUID, req.NewEmail); err != nil {
+	// 数据库唯一索引是邮箱占用的最终裁决点；并发换绑冲突按业务冲突返回。
+	if err := s.authRepo.UpdateEmail(ctx, userUUID, newEmail); err != nil {
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			return nil, apperr.New(consts.CodeEmailAlreadyExist)
+		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新邮箱失败")
 	}
 	// 验证码删除只做 best-effort，不因为清理失败而回滚已成功的换绑结果。
-	if err := s.authRepo.DeleteVerifyCode(ctx, req.NewEmail, 4); err != nil {
+	if err := s.authRepo.DeleteVerifyCode(ctx, newEmail, 4); err != nil {
 		logger.Warn(ctx, "删除验证码失败", logger.ErrorField("error", err))
 	}
 
-	return buildChangeEmailResponse(req.NewEmail), nil
+	return buildChangeEmailResponse(newEmail), nil
 }
 
 // ChangeTelephone 换绑手机号。

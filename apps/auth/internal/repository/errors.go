@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/redisretry"
+	gmysql "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -29,12 +31,28 @@ func wrapError(err error, rules map[error]error, defaultErr error) error {
 	if err == nil {
 		return nil
 	}
+	if isDuplicateKeyError(err) {
+		return ErrDuplicateKey
+	}
 	for source, target := range rules {
 		if errors.Is(err, source) {
 			return target
 		}
 	}
 	return fmt.Errorf("%w: %v", defaultErr, err)
+}
+
+func isDuplicateKeyError(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var mysqlErr *gmysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate entry") ||
+		strings.Contains(msg, "unique constraint failed")
 }
 
 var (

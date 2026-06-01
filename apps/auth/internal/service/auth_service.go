@@ -377,10 +377,9 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 // SendVerifyCode 发送验证码。
 // 业务流程：
 //  1. 校验邮箱格式；
-//  2. 基于邮箱和 IP 执行分钟级 / 天级 / IP 级限流；
+//  2. 基于邮箱和 IP 原子执行分钟级 / 天级 / IP 级限流检查与计数占位；
 //  3. 生成验证码并写入 Redis；
-//  4. 递增限流计数；
-//  5. 发送邮件并返回过期时间。
+//  4. 发送邮件并返回过期时间。
 //
 // 错误码映射：
 //   - codes.InvalidArgument: 邮箱非法
@@ -392,9 +391,9 @@ func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *authpb.SendVe
 		return nil, apperr.New(consts.CodeInvalidEmail)
 	}
 
-	// 限流依赖“邮箱 + IP”双维度，既限制单账号滥发，也限制单来源扫描。
+	// 限流依赖“邮箱 + IP”双维度，检查与计数占位必须原子完成。
 	ip := util.GetClientIPFromContext(ctx)
-	isLimited, err := s.authRepo.VerifyVerifyCodeRateLimit(ctx, req.Email, ip)
+	isLimited, err := s.authRepo.CheckAndIncrementVerifyCodeRateLimit(ctx, req.Email, ip)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "验证码限流检查失败")
 	}
@@ -407,13 +406,9 @@ func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *authpb.SendVe
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成验证码失败")
 	}
-	// 先存 Redis，再计数，再发邮件，保证邮件中携带的是当前真实生效验证码。
+	// 先存 Redis，再发邮件，保证邮件中携带的是当前真实生效验证码。
 	if err := s.authRepo.StoreVerifyCode(ctx, req.Email, code, req.Type, 2*time.Minute); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "存储验证码失败")
-	}
-	// 限流计数递增失败只记 warn，不阻塞本次已经成功保存的验证码发送流程。
-	if err := s.authRepo.IncrementVerifyCodeCount(ctx, req.Email, ip); err != nil {
-		logger.Warn(ctx, "递增验证码计数失败", logger.ErrorField("error", err))
 	}
 	// 最后才真正发邮件，避免 Redis 未落盘时出现“用户收到验证码但系统不认”的情况。
 	if err := util.SendVerifyCodeEmail(req.Email, code, 2); err != nil {

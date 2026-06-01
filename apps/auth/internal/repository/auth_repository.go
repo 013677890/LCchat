@@ -244,66 +244,29 @@ func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string,
 	return nil
 }
 
-// VerifyVerifyCodeRateLimit 校验验证码发送限流。
-func (r *authRepositoryImpl) VerifyVerifyCodeRateLimit(ctx context.Context, email, ip string) (bool, error) {
+// CheckAndIncrementVerifyCodeRateLimit 原子校验验证码发送限流并占用一次计数。
+func (r *authRepositoryImpl) CheckAndIncrementVerifyCodeRateLimit(ctx context.Context, email, ip string) (bool, error) {
 	if r.redisClient == nil {
-		return false, nil
+		return false, ErrRedis
 	}
 
-	// 第一层：单邮箱分钟级限流，防止连续重复点击发送。
-	minuteCount, err := r.redisClient.Get(ctx, rediskey.VerifyCodeMinuteKey(email)).Int()
-	if err != nil && err != redis.Nil {
-		return false, WrapRedisError(err)
-	}
-	if minuteCount >= 1 {
-		return true, nil
-	}
-
-	// 第二层：单邮箱 24 小时上限，防止被长期刷验证码。
-	hour24Count, err := r.redisClient.Get(ctx, rediskey.VerifyCode24HKey(email)).Int()
-	if err != nil && err != redis.Nil {
-		return false, WrapRedisError(err)
-	}
-	if hour24Count >= 10 {
-		return true, nil
-	}
-
-	// 第三层：单 IP 小时级上限，防止同一来源批量轰炸不同邮箱。
-	hour1Count, err := r.redisClient.Get(ctx, rediskey.VerifyCodeIPKey(ip)).Int()
-	if err != nil && err != redis.Nil {
-		return false, WrapRedisError(err)
-	}
-	if hour1Count >= 100 {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-// IncrementVerifyCodeCount 增加验证码发送计数。
-func (r *authRepositoryImpl) IncrementVerifyCodeCount(ctx context.Context, email, ip string) error {
-	if r.redisClient == nil {
-		return nil
-	}
-	// 验证码限流计数具有强时序语义，失败后直接返回，避免异步重放放大计数。
-	pipe := r.redisClient.Pipeline()
-	// 邮箱分钟级计数：每次发送都递增，并由 Lua 保证首次写入时附带 TTL。
-	if _, err := pipe.Eval(ctx, luaIncrementWithExpire, []string{rediskey.VerifyCodeMinuteKey(email)}, int(rediskey.VerifyCodeMinuteTTL.Seconds())).Result(); err != nil {
-		return WrapRedisError(err)
-	}
-	// 邮箱 24 小时计数：控制单邮箱长窗口发送总量。
-	if _, err := pipe.Eval(ctx, luaIncrementWithExpire, []string{rediskey.VerifyCode24HKey(email)}, int(rediskey.VerifyCode24HTTL.Seconds())).Result(); err != nil {
-		return WrapRedisError(err)
-	}
-	// IP 级计数：限制单来源对整站的验证码发送压力。
-	if _, err := pipe.Eval(ctx, luaIncrementWithExpire, []string{rediskey.VerifyCodeIPKey(ip)}, int(rediskey.VerifyCodeIPTTL.Seconds())).Result(); err != nil {
-		return WrapRedisError(err)
-	}
-	_, err := pipe.Exec(ctx)
+	// 检查与递增必须在 Redis 单脚本内完成，避免并发请求在检查通过后一起写入计数。
+	result, err := r.redisClient.Eval(ctx, luaCheckAndIncrementVerifyCodeRateLimit, []string{
+		rediskey.VerifyCodeMinuteKey(email),
+		rediskey.VerifyCode24HKey(email),
+		rediskey.VerifyCodeIPKey(ip),
+	},
+		1,
+		10,
+		100,
+		int(rediskey.VerifyCodeMinuteTTL.Seconds()),
+		int(rediskey.VerifyCode24HTTL.Seconds()),
+		int(rediskey.VerifyCodeIPTTL.Seconds()),
+	).Int()
 	if err != nil {
-		return WrapRedisError(err)
+		return false, WrapRedisError(err)
 	}
-	return nil
+	return result != 0, nil
 }
 
 // BatchGetAccountStatus 批量查询账号存在性与状态。

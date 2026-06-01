@@ -49,10 +49,8 @@ type IAuthRepository interface {
 	StoreVerifyCode(ctx context.Context, email, verifyCode string, codeType int32, expireDuration time.Duration) error
 	// DeleteVerifyCode 删除验证码。
 	DeleteVerifyCode(ctx context.Context, email string, codeType int32) error
-	// VerifyVerifyCodeRateLimit 校验验证码发送限流。
-	VerifyVerifyCodeRateLimit(ctx context.Context, email, ip string) (bool, error)
-	// IncrementVerifyCodeCount 增加验证码发送计数。
-	IncrementVerifyCodeCount(ctx context.Context, email, ip string) error
+	// CheckAndIncrementVerifyCodeRateLimit 原子校验验证码发送限流并占用一次计数。
+	CheckAndIncrementVerifyCodeRateLimit(ctx context.Context, email, ip string) (bool, error)
 
 	// BatchGetAccountStatus 批量查询账号存在性与状态。
 	BatchGetAccountStatus(ctx context.Context, userUUIDs []string) ([]*AccountStatusItem, error)
