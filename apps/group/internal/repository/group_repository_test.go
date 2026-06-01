@@ -79,6 +79,7 @@ func TestIsActiveGroupMember(t *testing.T) {
 func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
 	updatedAt := time.Unix(1710000000, 0)
 	group := &model.GroupInfo{
+		Id:        42,
 		Uuid:      "group-1",
 		Name:      "测试群",
 		Avatar:    "avatar.png",
@@ -95,8 +96,11 @@ func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
 	restored := buildGroupInfoFromSnapshot(snapshot)
 	if assert.NotNil(t, snapshot) && assert.NotNil(t, restored) {
 		assert.Equal(t, group.Uuid, snapshot.GroupUUID)
+		assert.Equal(t, group.Id, snapshot.GroupID)
 		assert.Equal(t, group.MemberCnt, int(snapshot.MemberCount))
+		assert.Equal(t, group.UpdatedAt.UnixMilli(), snapshot.UpdatedAtUnixMs)
 		assert.Equal(t, group.UpdatedAt.Unix(), snapshot.UpdatedAtUnix)
+		assert.Equal(t, group.Id, restored.Id)
 		assert.Equal(t, group.Uuid, restored.Uuid)
 		assert.Equal(t, group.Name, restored.Name)
 		assert.Equal(t, group.Avatar, restored.Avatar)
@@ -107,6 +111,22 @@ func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
 		assert.Equal(t, group.Status, restored.Status)
 		assert.True(t, group.UpdatedAt.Equal(restored.UpdatedAt))
 	}
+}
+
+func TestSortGroupInfosMatchesDBOrder(t *testing.T) {
+	base := time.UnixMilli(1710000000123)
+	groups := []*model.GroupInfo{
+		{Id: 1, Uuid: "group-a", UpdatedAt: base},
+		{Id: 3, Uuid: "group-c", UpdatedAt: base},
+		{Id: 2, Uuid: "group-b", UpdatedAt: base.Add(time.Millisecond)},
+	}
+
+	sortGroupInfos(groups)
+
+	require.Len(t, groups, 3)
+	assert.Equal(t, "group-b", groups[0].Uuid)
+	assert.Equal(t, "group-c", groups[1].Uuid)
+	assert.Equal(t, "group-a", groups[2].Uuid)
 }
 
 func TestBuildGroupMemberSnapshotsDeduplicate(t *testing.T) {

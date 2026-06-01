@@ -1445,6 +1445,7 @@ func (r *groupRepositoryImpl) getUserGroupsFromCache(ctx context.Context, userUU
 	if missing {
 		return nil, false, nil
 	}
+	sortGroupInfos(groups)
 	if getRandomBool(0.01) {
 		if expireErr := r.redisClient.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.UserGroupListTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
 			LogRedisError(ctx, expireErr)
@@ -1489,7 +1490,7 @@ func (r *groupRepositoryImpl) rebuildUserGroupsCache(ctx context.Context, userUU
 			if group == nil || group.Uuid == "" {
 				continue
 			}
-			items = append(items, goredis.Z{Score: float64(group.UpdatedAt.Unix()), Member: group.Uuid})
+			items = append(items, goredis.Z{Score: float64(group.UpdatedAt.UnixMilli()), Member: group.Uuid})
 		}
 		if len(items) > 0 {
 			pipe.ZAdd(ctx, cacheKey, items...)

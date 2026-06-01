@@ -544,7 +544,7 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 //
 // 该方法返回按 updated_at 升序排列的变更集，供 service 层转成 add/update/delete 三类
 // 变化事件。limit 额外多查一条以判断是否还有下一页，从而避免单独执行 count 查询。
-func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID string, version int64, limit int) ([]*model.UserRelation, int64, bool, error) {
+func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID string, cursor FriendSyncCursor, limit int) ([]*model.UserRelation, FriendSyncCursor, bool, error) {
 	// 同步窗口默认值与上限都在仓储内收口，避免上层把过大 limit 直接打进数据库。
 	if limit <= 0 {
 		limit = 100
@@ -553,21 +553,24 @@ func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID stri
 		limit = 500
 	}
 
-	changedAfter := time.UnixMilli(0)
-	if version > 0 {
-		// version>0 时表示增量同步，从该时间点之后开始找变化。
-		changedAfter = time.UnixMilli(version)
-	}
-
 	var relations []*model.UserRelation
 	// 使用 Unscoped 保留已删除关系，这样客户端才能收到 delete 类型的增量事件。
-	if err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Unscoped().
-		Where("user_uuid = ? AND updated_at > ?", userUUID, changedAfter).
+		Where("user_uuid = ?", userUUID)
+	if cursor.UpdatedAtUnixMilli > 0 {
+		changedAfter := time.UnixMilli(cursor.UpdatedAtUnixMilli)
+		if cursor.Exact {
+			query = query.Where("(updated_at > ? OR (updated_at = ? AND id > ?))", changedAfter, changedAfter, cursor.LastID)
+		} else {
+			query = query.Where("updated_at > ?", changedAfter)
+		}
+	}
+	if err := query.
 		Order("updated_at ASC, id ASC").
 		Limit(limit + 1).
 		Find(&relations).Error; err != nil {
-		return nil, version, false, WrapDBError(err)
+		return nil, cursor, false, WrapDBError(err)
 	}
 
 	// 多查一条判断是否还有更多，避免追加一次 count 查询。
@@ -576,15 +579,19 @@ func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID stri
 		relations = relations[:limit]
 	}
 
-	// latestVersion 取当前批次中最大的 updated_at，供上层作为下一次同步游标。
-	latestVersion := version
-	for _, relation := range relations {
-		if relation != nil && relation.UpdatedAt.UnixMilli() > latestVersion {
-			latestVersion = relation.UpdatedAt.UnixMilli()
+	nextCursor := cursor
+	if len(relations) > 0 {
+		last := relations[len(relations)-1]
+		if last != nil {
+			nextCursor = FriendSyncCursor{
+				UpdatedAtUnixMilli: last.UpdatedAt.UnixMilli(),
+				LastID:             last.Id,
+				Exact:              true,
+			}
 		}
 	}
 
-	return relations, latestVersion, hasMore, nil
+	return relations, nextCursor, hasMore, nil
 }
 
 // rebuildFriendCacheFromDBAsync 异步从数据库重建某个用户的整份好友 Hash。

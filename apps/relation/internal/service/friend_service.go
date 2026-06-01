@@ -300,6 +300,9 @@ func (s *friendServiceImpl) HandleFriendApply(ctx context.Context, req *pb.Handl
 	if req == nil || req.ApplyId <= 0 {
 		return apperr.New(consts.CodeParamError)
 	}
+	if req.Action != 1 && req.Action != 2 {
+		return apperr.New(consts.CodeParamError)
+	}
 
 	// 先取申请快照；后续权限判断和 accept/reject 分支都依赖这条记录。
 	apply, err := s.applyRepo.GetByID(ctx, req.ApplyId)
@@ -497,8 +500,17 @@ func (s *friendServiceImpl) SyncFriendList(ctx context.Context, req *pb.SyncFrie
 		limit = 500
 	}
 
-	// 仓储层返回本批关系变更、数据库最新版本以及是否还有更多分页数据。
-	relations, latestDBVersion, hasMore, err := s.friendRepo.SyncFriendList(ctx, currentUserUUID, version, limit)
+	cursor := repository.FriendSyncCursorFromVersion(version)
+	if req != nil && req.Cursor != "" {
+		decodedCursor, decodeErr := repository.DecodeFriendSyncCursor(req.Cursor)
+		if decodeErr != nil {
+			return nil, apperr.New(consts.CodeParamError)
+		}
+		cursor = decodedCursor
+	}
+
+	// 仓储层返回本批关系变更、下一页精确游标以及是否还有更多分页数据。
+	relations, nextCursor, hasMore, err := s.friendRepo.SyncFriendList(ctx, currentUserUUID, cursor, limit)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "增量同步好友列表失败")
 	}
@@ -509,16 +521,26 @@ func (s *friendServiceImpl) SyncFriendList(ctx context.Context, req *pb.SyncFrie
 		if latestVersion < 0 {
 			latestVersion = 0
 		}
+		if latestVersion < cursor.UpdatedAtUnixMilli {
+			latestVersion = cursor.UpdatedAtUnixMilli
+		}
+		nextCursor = repository.FriendSyncCursor{
+			UpdatedAtUnixMilli: latestVersion,
+			Exact:              true,
+		}
+		if latestVersion == cursor.UpdatedAtUnixMilli {
+			nextCursor.LastID = cursor.LastID
+		}
 		return &pb.SyncFriendListResponse{
 			Changes:       []*pb.FriendChange{},
 			HasMore:       false,
 			LatestVersion: latestVersion,
+			NextCursor:    repository.EncodeFriendSyncCursor(nextCursor),
 		}, nil
 	}
 
-	versionTime := time.UnixMilli(version)
+	versionTime := time.UnixMilli(cursor.UpdatedAtUnixMilli)
 	changes := make([]*pb.FriendChange, 0, len(relations))
-	var lastChangedAt int64
 	for _, relation := range relations {
 		// 防御空元素，避免单条脏数据影响整批同步。
 		if relation == nil {
@@ -541,25 +563,13 @@ func (s *friendServiceImpl) SyncFriendList(ctx context.Context, req *pb.SyncFrie
 		if item := buildFriendChangeProto(relation, changeType, changedAt); item != nil {
 			changes = append(changes, item)
 		}
-		lastChangedAt = changedAt
-	}
-
-	latestVersion := latestDBVersion
-	if hasMore {
-		// 分页场景以下一批起点为准，避免越过未返回的数据。
-		latestVersion = lastChangedAt
-	} else {
-		// 完整返回当前批次后回退一小段时间，降低边界时间戳漏数据的风险。
-		latestVersion = time.Now().UnixMilli() - syncVersionRollbackMs
-		if latestVersion < 0 {
-			latestVersion = 0
-		}
 	}
 
 	return &pb.SyncFriendListResponse{
 		Changes:       changes,
 		HasMore:       hasMore,
-		LatestVersion: latestVersion,
+		LatestVersion: nextCursor.UpdatedAtUnixMilli,
+		NextCursor:    repository.EncodeFriendSyncCursor(nextCursor),
 	}, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/relation/pb"
@@ -54,7 +55,7 @@ type fakeFriendRepoForService struct {
 	checkIsFriendFn      func(context.Context, string, string) (bool, error)
 	batchCheckIsFriendFn func(context.Context, string, []string) (map[string]bool, error)
 	getRelationStatusFn  func(context.Context, string, string) (*model.UserRelation, error)
-	syncFriendListFn     func(context.Context, string, int64, int) ([]*model.UserRelation, int64, bool, error)
+	syncFriendListFn     func(context.Context, string, repository.FriendSyncCursor, int) ([]*model.UserRelation, repository.FriendSyncCursor, bool, error)
 }
 
 func (f *fakeFriendRepoForService) GetFriendList(ctx context.Context, userUUID, groupTag string, page, pageSize int) ([]*model.UserRelation, int64, int64, error) {
@@ -134,11 +135,11 @@ func (f *fakeFriendRepoForService) GetRelationStatus(ctx context.Context, userUU
 	return f.getRelationStatusFn(ctx, userUUID, peerUUID)
 }
 
-func (f *fakeFriendRepoForService) SyncFriendList(ctx context.Context, userUUID string, version int64, limit int) ([]*model.UserRelation, int64, bool, error) {
+func (f *fakeFriendRepoForService) SyncFriendList(ctx context.Context, userUUID string, cursor repository.FriendSyncCursor, limit int) ([]*model.UserRelation, repository.FriendSyncCursor, bool, error) {
 	if f.syncFriendListFn == nil {
-		return nil, 0, false, nil
+		return nil, repository.FriendSyncCursor{}, false, nil
 	}
-	return f.syncFriendListFn(ctx, userUUID, version, limit)
+	return f.syncFriendListFn(ctx, userUUID, cursor, limit)
 }
 
 type fakeApplyRepoForService struct {
@@ -399,6 +400,20 @@ func TestRelationFriendServiceHandleFriendApply(t *testing.T) {
 		requireRelationBizCode(t, err, consts.CodeNoPermission)
 	})
 
+	t.Run("invalid_action", func(t *testing.T) {
+		getByIDCalled := false
+		applyRepo := &fakeApplyRepoForService{
+			getByIDFn: func(_ context.Context, _ int64) (*model.ApplyRequest, error) {
+				getByIDCalled = true
+				return &model.ApplyRequest{Id: 1, ApplicantUuid: "u2", TargetUuid: "u1"}, nil
+			},
+		}
+		svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{})
+		err := svc.HandleFriendApply(withRelationUserUUID("u1"), &pb.HandleFriendApplyRequest{ApplyId: 1, Action: 99})
+		requireRelationBizCode(t, err, consts.CodeParamError)
+		assert.False(t, getByIDCalled)
+	})
+
 	t.Run("accept_success", func(t *testing.T) {
 		called := false
 		applyRepo := &fakeApplyRepoForService{
@@ -446,6 +461,55 @@ func TestRelationFriendServiceHandleFriendApply(t *testing.T) {
 		svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{})
 		err := svc.HandleFriendApply(withRelationUserUUID("u1"), &pb.HandleFriendApplyRequest{ApplyId: 1, Action: 2})
 		requireRelationBizCode(t, err, consts.CodeInternalError)
+	})
+}
+
+func TestRelationFriendServiceSyncFriendListCursor(t *testing.T) {
+	initRelationServiceTestLogger()
+
+	t.Run("uses_exact_cursor_and_returns_next_cursor", func(t *testing.T) {
+		updatedAt := time.UnixMilli(1710000000123)
+		inputCursor := repository.FriendSyncCursor{UpdatedAtUnixMilli: 1710000000000, LastID: 7, Exact: true}
+		var gotCursor repository.FriendSyncCursor
+		friendRepo := &fakeFriendRepoForService{
+			syncFriendListFn: func(_ context.Context, userUUID string, cursor repository.FriendSyncCursor, limit int) ([]*model.UserRelation, repository.FriendSyncCursor, bool, error) {
+				assert.Equal(t, "u1", userUUID)
+				assert.Equal(t, 1, limit)
+				gotCursor = cursor
+				nextCursor := repository.FriendSyncCursor{UpdatedAtUnixMilli: updatedAt.UnixMilli(), LastID: 8, Exact: true}
+				return []*model.UserRelation{{
+					Id:        8,
+					PeerUuid:  "u2",
+					UpdatedAt: updatedAt,
+				}}, nextCursor, true, nil
+			},
+		}
+		svc := NewFriendService(nil, nil, friendRepo, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{})
+		resp, err := svc.SyncFriendList(withRelationUserUUID("u1"), &pb.SyncFriendListRequest{
+			Version: 999,
+			Limit:   1,
+			Cursor:  repository.EncodeFriendSyncCursor(inputCursor),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, inputCursor, gotCursor)
+		assert.True(t, resp.HasMore)
+		assert.Equal(t, updatedAt.UnixMilli(), resp.LatestVersion)
+		assert.Equal(t, "v1:1710000000123:8", resp.NextCursor)
+	})
+
+	t.Run("rejects_invalid_cursor", func(t *testing.T) {
+		called := false
+		friendRepo := &fakeFriendRepoForService{
+			syncFriendListFn: func(context.Context, string, repository.FriendSyncCursor, int) ([]*model.UserRelation, repository.FriendSyncCursor, bool, error) {
+				called = true
+				return nil, repository.FriendSyncCursor{}, false, nil
+			},
+		}
+		svc := NewFriendService(nil, nil, friendRepo, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{})
+		resp, err := svc.SyncFriendList(withRelationUserUUID("u1"), &pb.SyncFriendListRequest{Cursor: "bad-cursor"})
+		require.Nil(t, resp)
+		requireRelationBizCode(t, err, consts.CodeParamError)
+		assert.False(t, called)
 	})
 }
 

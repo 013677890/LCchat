@@ -70,6 +70,8 @@ const (
 //  3. 给未来缓存结构调整留出独立演化空间。
 
 type groupInfoCacheEntry struct {
+	GroupID int64 `json:"group_id,omitempty"`
+
 	GroupUUID string `json:"group_uuid"`
 
 	Name string `json:"name"`
@@ -88,7 +90,9 @@ type groupInfoCacheEntry struct {
 
 	Status int8 `json:"status"`
 
-	UpdatedAt int64 `json:"updated_at_unix"`
+	UpdatedAtUnix int64 `json:"updated_at_unix,omitempty"`
+
+	UpdatedAtUnixMs int64 `json:"updated_at_unix_ms,omitempty"`
 }
 
 // groupMemberCacheEntry 是 group:members:{group_uuid} Hash 中单个 field 的值结构。
@@ -144,6 +148,7 @@ func encodeGroupInfoCacheValue(group *model.GroupInfo) string {
 	entry := groupInfoCacheEntry{}
 
 	if group != nil {
+		entry.GroupID = group.Id
 
 		entry.GroupUUID = group.Uuid
 
@@ -163,7 +168,9 @@ func encodeGroupInfoCacheValue(group *model.GroupInfo) string {
 
 		entry.Status = group.Status
 
-		entry.UpdatedAt = group.UpdatedAt.Unix()
+		entry.UpdatedAtUnix = group.UpdatedAt.Unix()
+
+		entry.UpdatedAtUnixMs = group.UpdatedAt.UnixMilli()
 
 	}
 
@@ -206,6 +213,7 @@ func buildGroupInfoFromCache(entry *groupInfoCacheEntry) *model.GroupInfo {
 	}
 
 	group := &model.GroupInfo{
+		Id: entry.GroupID,
 
 		Uuid: entry.GroupUUID,
 
@@ -226,9 +234,13 @@ func buildGroupInfoFromCache(entry *groupInfoCacheEntry) *model.GroupInfo {
 		Status: entry.Status,
 	}
 
-	if entry.UpdatedAt > 0 {
+	if entry.UpdatedAtUnixMs > 0 {
 
-		group.UpdatedAt = time.Unix(entry.UpdatedAt, 0)
+		group.UpdatedAt = time.UnixMilli(entry.UpdatedAtUnixMs)
+
+	} else if entry.UpdatedAtUnix > 0 {
+
+		group.UpdatedAt = time.Unix(entry.UpdatedAtUnix, 0)
 
 	}
 
@@ -253,6 +265,7 @@ func buildGroupInfoFromSnapshot(snapshot *groupevent.GroupSnapshot) *model.Group
 	}
 
 	group := &model.GroupInfo{
+		Id: snapshot.GroupID,
 
 		Uuid: snapshot.GroupUUID,
 
@@ -273,7 +286,11 @@ func buildGroupInfoFromSnapshot(snapshot *groupevent.GroupSnapshot) *model.Group
 		Status: int8(snapshot.Status),
 	}
 
-	if snapshot.UpdatedAtUnix > 0 {
+	if snapshot.UpdatedAtUnixMs > 0 {
+
+		group.UpdatedAt = time.UnixMilli(snapshot.UpdatedAtUnixMs)
+
+	} else if snapshot.UpdatedAtUnix > 0 {
 
 		group.UpdatedAt = time.Unix(snapshot.UpdatedAtUnix, 0)
 
@@ -640,6 +657,29 @@ func cloneGroupInfos(groups []*model.GroupInfo) []*model.GroupInfo {
 
 	return cloned
 
+}
+
+// sortGroupInfos 统一用户群列表排序规则。
+//
+// 排序与 DB 查询保持一致：
+//  1. 群更新时间新的在前；
+//  2. 更新时间相同时，ID 大的在前；
+//  3. 最后用群 UUID 保证稳定顺序。
+func sortGroupInfos(groups []*model.GroupInfo) {
+	sort.SliceStable(groups, func(i, j int) bool {
+		left := groups[i]
+		right := groups[j]
+		if left == nil || right == nil {
+			return right == nil
+		}
+		if !left.UpdatedAt.Equal(right.UpdatedAt) {
+			return left.UpdatedAt.After(right.UpdatedAt)
+		}
+		if left.Id != right.Id {
+			return left.Id > right.Id
+		}
+		return left.Uuid > right.Uuid
+	})
 }
 
 // sortGroupMembers 统一群成员排序规则。

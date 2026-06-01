@@ -21,7 +21,7 @@ type IFriendRepository interface {
 	CheckIsFriendRelation(ctx context.Context, userUUID, peerUUID string) (bool, error)
 	BatchCheckIsFriend(ctx context.Context, userUUID string, peerUUIDs []string) (map[string]bool, error)
 	GetRelationStatus(ctx context.Context, userUUID, peerUUID string) (*model.UserRelation, error)
-	SyncFriendList(ctx context.Context, userUUID string, version int64, limit int) ([]*model.UserRelation, int64, bool, error)
+	SyncFriendList(ctx context.Context, userUUID string, cursor FriendSyncCursor, limit int) ([]*model.UserRelation, FriendSyncCursor, bool, error)
 }
 
 // ==================== 好友申请 Repository ====================

@@ -147,8 +147,9 @@ type GetFriendListResponse struct {
 
 // SyncFriendListRequest 增量同步请求 DTO
 type SyncFriendListRequest struct {
-	Version int64 `json:"version" binding:"min=0"`                 // 版本号
-	Limit   int32 `json:"limit" binding:"omitempty,min=1,max=500"` // 每次同步数量
+	Version int64  `json:"version" binding:"min=0"`                 // 兼容旧客户端的版本号
+	Limit   int32  `json:"limit" binding:"omitempty,min=1,max=500"` // 每次同步数量
+	Cursor  string `json:"cursor" binding:"omitempty,max=128"`      // 服务端返回的复合游标
 }
 
 // FriendChange 好友变更 DTO
@@ -170,6 +171,7 @@ type SyncFriendListResponse struct {
 	Changes       []*FriendChange `json:"changes"`       // 变更列表
 	HasMore       bool            `json:"hasMore"`       // 是否还有更多
 	LatestVersion int64           `json:"latestVersion"` // 最新版本号
+	NextCursor    string          `json:"nextCursor"`    // 下一次同步使用的复合游标
 }
 
 // DeleteFriendRequest 删除好友请求 DTO
@@ -540,6 +542,7 @@ func ConvertSyncFriendListResponseFromProto(pb *relationpb.SyncFriendListRespons
 		Changes:       changes,
 		HasMore:       pb.HasMore,
 		LatestVersion: pb.LatestVersion,
+		NextCursor:    pb.NextCursor,
 	}
 }
 

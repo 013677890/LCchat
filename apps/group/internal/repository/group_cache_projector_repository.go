@@ -332,7 +332,7 @@ func (r *groupRepositoryImpl) addGroupToUserGroupIfExists(ctx context.Context, u
 	expireSeconds := int(getRandomExpireTime(rediskey.UserGroupListTTL).Seconds())
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
-		strconv.FormatInt(group.UpdatedAt.Unix(), 10),
+		strconv.FormatInt(group.UpdatedAt.UnixMilli(), 10),
 		group.Uuid,
 		strconv.Itoa(expireSeconds),
 	).Result()

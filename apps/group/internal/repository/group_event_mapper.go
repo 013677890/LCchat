@@ -224,23 +224,25 @@ func (r *groupRepositoryImpl) insertGroupCacheEvent(tx *gorm.DB, payload groupev
 
 // buildGroupSnapshot 把领域模型转换为事件快照。
 //
-// 这里记录 UpdatedAtUnix，是为了让 projector 在维护 user_groups ZSet 时
-// 复用同一份“最近更新时间”作为 score，保持读排序和 DB 一致。
+// 这里记录毫秒级 UpdatedAt 与 DB id，是为了让 projector 和缓存读路径
+// 能复现 DB 的 updated_at DESC, id DESC 排序。
 func buildGroupSnapshot(group *model.GroupInfo) *groupevent.GroupSnapshot {
 	if group == nil {
 		return nil
 	}
 	return &groupevent.GroupSnapshot{
-		GroupUUID:     group.Uuid,
-		Name:          group.Name,
-		Avatar:        group.Avatar,
-		Notice:        group.Notice,
-		OwnerUUID:     group.OwnerUuid,
-		MemberCount:   int32(group.MemberCnt),
-		AddMode:       int32(group.AddMode),
-		MuteAll:       group.MuteAll,
-		Status:        int32(group.Status),
-		UpdatedAtUnix: group.UpdatedAt.Unix(),
+		GroupID:         group.Id,
+		GroupUUID:       group.Uuid,
+		Name:            group.Name,
+		Avatar:          group.Avatar,
+		Notice:          group.Notice,
+		OwnerUUID:       group.OwnerUuid,
+		MemberCount:     int32(group.MemberCnt),
+		AddMode:         int32(group.AddMode),
+		MuteAll:         group.MuteAll,
+		Status:          int32(group.Status),
+		UpdatedAtUnixMs: group.UpdatedAt.UnixMilli(),
+		UpdatedAtUnix:   group.UpdatedAt.Unix(),
 	}
 }
 

@@ -260,6 +260,7 @@ func (s *FriendServiceImpl) SyncFriendList(ctx context.Context, req *dto.SyncFri
 	grpcReq := &relationpb.SyncFriendListRequest{
 		Version: req.Version,
 		Limit:   req.Limit,
+		Cursor:  req.Cursor,
 	}
 
 	// 2. 调用用户服务同步好友列表(gRPC)

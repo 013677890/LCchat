@@ -70,6 +70,8 @@ const (
 // GroupSnapshot 描述单条群聚合快照。
 
 type GroupSnapshot struct {
+	GroupID int64 `json:"group_id,omitempty"`
+
 	GroupUUID string `json:"group_uuid"`
 
 	Name string `json:"name"`
@@ -87,6 +89,8 @@ type GroupSnapshot struct {
 	MuteAll bool `json:"mute_all"`
 
 	Status int32 `json:"status"`
+
+	UpdatedAtUnixMs int64 `json:"updated_at_unix_ms,omitempty"`
 
 	UpdatedAtUnix int64 `json:"updated_at_unix"`
 }

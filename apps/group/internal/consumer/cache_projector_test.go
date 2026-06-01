@@ -60,10 +60,11 @@ func buildConsumerTestMessage(t *testing.T, eventID string) []byte {
 		Action:    groupevent.ActionGroupInfoUpdated,
 		GroupUUID: "group-1",
 		Group: &groupevent.GroupSnapshot{
-			GroupUUID:     "group-1",
-			Name:          "测试群",
-			Status:        0,
-			UpdatedAtUnix: 1710000000,
+			GroupUUID:       "group-1",
+			Name:            "测试群",
+			Status:          0,
+			UpdatedAtUnixMs: 1710000000000,
+			UpdatedAtUnix:   1710000000,
 		},
 	})
 	require.NoError(t, err)
