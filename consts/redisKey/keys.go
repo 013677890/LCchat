@@ -53,6 +53,14 @@ const (
 	UserGroupListEmptyTTL = 5 * time.Minute
 )
 
+// ==================== Bloom Filter Key ====================
+const (
+	// UserUUIDBloomKey 用户 UUID 存在性 Bloom Filter。
+	UserUUIDBloomKey = "bf:user_uuid"
+	// GroupUUIDBloomKey 群 UUID 存在性 Bloom Filter。
+	GroupUUIDBloomKey = "bf:group_uuid"
+)
+
 // ==================== Key 构造函数 ====================
 // VerifyCodeKey 生成验证码 Key: user:verify_code:{email}:{type}
 func VerifyCodeKey(email string, codeType int32) string {

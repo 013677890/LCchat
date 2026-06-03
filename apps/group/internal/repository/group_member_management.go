@@ -411,6 +411,10 @@ func (r *groupRepositoryImpl) loadReadableGroupInfo(ctx context.Context, groupUU
 		}
 		return groupInfo, nil
 	}
+	// 发送权限检查是高频链路，缓存 miss 后先用 Bloom 拦截明显不存在的 group_uuid。
+	if !r.groupUUIDMayExist(ctx, groupUUID) {
+		return nil, ErrRecordNotFound
+	}
 	var group model.GroupInfo
 	err = r.db.WithContext(ctx).
 		Select("uuid", "status", "mute_all").
@@ -419,6 +423,7 @@ func (r *groupRepositoryImpl) loadReadableGroupInfo(ctx context.Context, groupUU
 	if err != nil {
 		return nil, WrapDBError(err)
 	}
+	r.addGroupUUIDToBloomBestEffort(ctx, groupUUID)
 	if group.Status == groupStatusDismissed {
 		return nil, ErrGroupDismissed
 	}

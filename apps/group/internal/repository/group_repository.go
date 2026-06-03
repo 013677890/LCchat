@@ -7,6 +7,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/redisbloom"
 	goredis "github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
@@ -44,14 +45,23 @@ const (
 	maxGroupAdminCount        int64 = 10
 )
 
+// groupUUIDBloomFilter 维护 groups.uuid 的存在性索引。
+//
+// 群规模通常小于用户规模，容量按两百万级预留；容量不足时需要新建过滤器并全量回填。
+var groupUUIDBloomFilter = redisbloom.Filter{
+	Key:       rediskey.GroupUUIDBloomKey,
+	ErrorRate: 0.001,
+	Capacity:  2_000_000,
+}
+
 // NewGroupRepository 创建 group 仓储实例。
 //
-// 当前仍保持薄构造：
-//  1. 只接收 gorm.DB；
-//  2. 不在构造阶段探测连通性；
-//  3. 由上层 provider 负责基础设施初始化与失败处理。
+// 构造时会 best-effort 初始化 group_uuid Bloom Filter；初始化失败只记录降级日志，
+// 读路径会继续回源数据库，避免 RedisBloom 短暂不可用影响服务启动。
 func NewGroupRepository(db *gorm.DB, redisClient *goredis.Client) IGroupRepository {
-	return &groupRepositoryImpl{db: db, redisClient: redisClient}
+	repo := &groupRepositoryImpl{db: db, redisClient: redisClient}
+	repo.initGroupUUIDBloom(context.Background())
+	return repo
 }
 
 // CreateGroup 创建群与初始成员关系。
@@ -63,6 +73,11 @@ func (r *groupRepositoryImpl) CreateGroup(ctx context.Context, group *model.Grou
 	if group.MemberCnt <= 0 {
 		// member_cnt 以初始成员关系为准，避免上层漏填导致群人数与成员表不一致。
 		group.MemberCnt = len(members)
+	}
+	// 先写 Bloom 再写 DB，确保新群一旦提交成功，读路径不会被 Bloom false 拦截。
+	// 如果后续 DB 事务失败，Bloom 中多一个 group_uuid 只会导致未来多一次 DB 回源。
+	if err := r.ensureGroupUUIDInBloom(ctx, group.Uuid); err != nil {
+		return WrapRedisError(err)
 	}
 	// 群基础资料和初始成员必须同事务写入，否则会出现“有群无群主”的不可恢复状态。
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1166,6 +1181,10 @@ func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID s
 		}
 		return nil
 	}
+	if !r.groupUUIDMayExist(ctx, groupUUID) {
+		r.setGroupInfoEmptyCacheAsync(ctx, groupUUID)
+		return ErrRecordNotFound
+	}
 	var group model.GroupInfo
 	// 高频读路径只需要 status，避免为了权限检查读取整行群资料。
 	err = r.db.WithContext(ctx).
@@ -1175,6 +1194,7 @@ func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID s
 	if err != nil {
 		return WrapDBError(err)
 	}
+	r.addGroupUUIDToBloomBestEffort(ctx, groupUUID)
 	if group.Status == groupStatusDismissed {
 		return ErrGroupDismissed
 	}
@@ -1545,6 +1565,10 @@ func (r *groupRepositoryImpl) GetGroupInfo(ctx context.Context, groupUUID string
 		}
 		return groupInfo, nil
 	}
+	if !r.groupUUIDMayExist(ctx, groupUUID) {
+		r.setGroupInfoEmptyCacheAsync(ctx, groupUUID)
+		return nil, ErrRecordNotFound
+	}
 	groupInfo, err = r.loadGroupInfoFromDB(ctx, groupUUID)
 	if err != nil {
 		if errors.Is(err, ErrRecordNotFound) {
@@ -1552,6 +1576,7 @@ func (r *groupRepositoryImpl) GetGroupInfo(ctx context.Context, groupUUID string
 		}
 		return nil, err
 	}
+	r.addGroupUUIDToBloomBestEffort(ctx, groupInfo.Uuid)
 	r.setGroupInfoCacheAsync(ctx, groupInfo)
 	return groupInfo, nil
 }

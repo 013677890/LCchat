@@ -19,7 +19,9 @@ import (
 //  2. Wire 装配时可以显式区分业务仓储依赖和投影仓储依赖；
 //  3. 即便当前底层复用同一个实现体，也能把依赖边界表达清楚。
 func NewGroupCacheProjectorRepository(db *gorm.DB, redisClient *goredis.Client) IGroupCacheProjectorRepository {
-	return &groupRepositoryImpl{db: db, redisClient: redisClient}
+	repo := &groupRepositoryImpl{db: db, redisClient: redisClient}
+	repo.initGroupUUIDBloom(context.Background())
+	return repo
 }
 
 // ApplyGroupCacheEvent 根据 group.cache 事件把最终事实投影到 Redis。
@@ -124,6 +126,9 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 //  3. user_groups 反向索引仍只做 patch-if-exists，保持和项目既有策略一致。
 func (r *groupRepositoryImpl) applyGroupCreatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
 	group := buildGroupInfoFromSnapshot(payload.Group)
+	// projector 消费到 group_created 时 DB 事实已经存在，这里只做 Bloom 自愈补写；
+	// 失败不能阻断主缓存投影，否则会影响 group:info/group:members 的正常重建。
+	r.addGroupUUIDToBloomBestEffort(ctx, group.Uuid)
 	if err := r.setGroupInfoCache(ctx, group); err != nil {
 		return err
 	}

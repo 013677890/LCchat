@@ -162,17 +162,25 @@ func (r *groupRepositoryImpl) GetGroupsByUUIDs(ctx context.Context, groupUUIDs [
 	if len(unique) == 0 {
 		return result, nil
 	}
+	// 批量补展示字段前先过滤确定不存在的 group_uuid，避免申请列表里脏 UUID 持续穿透 DB。
+	queryUUIDs := r.filterGroupUUIDsByBloom(ctx, unique)
+	if len(queryUUIDs) == 0 {
+		return result, nil
+	}
 	var groups []*model.GroupInfo
 	if err := r.db.WithContext(ctx).
-		Where("uuid IN ? AND deleted_at IS NULL", unique).
+		Where("uuid IN ? AND deleted_at IS NULL", queryUUIDs).
 		Find(&groups).Error; err != nil {
 		return nil, WrapDBError(err)
 	}
+	foundGroupUUIDs := make([]string, 0, len(groups))
 	for _, group := range groups {
 		if group == nil || group.Uuid == "" {
 			continue
 		}
 		result[group.Uuid] = group
+		foundGroupUUIDs = append(foundGroupUUIDs, group.Uuid)
 	}
+	r.addGroupUUIDsToBloomAsync(ctx, foundGroupUUIDs)
 	return result, nil
 }
