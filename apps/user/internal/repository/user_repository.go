@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/rand"
+	"time"
+
 	"github.com/013677890/LCchat-Backend/apps/user/mq"
 	"github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
@@ -12,11 +15,10 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/013677890/LCchat-Backend/pkg/redisbloom"
 	"github.com/013677890/LCchat-Backend/pkg/util"
-	"math/rand"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // userRepositoryImpl 用户资料数据访问层实现。
@@ -240,16 +242,25 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 			return WrapDBError(err)
 		}
 
+		now := time.Now()
 		profile = model.UserProfile{
 			UserUuid:  userUUID,
 			Nickname:  nickname,
 			Avatar:    avatar,
 			Gender:    3,
 			Signature: "",
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
-		if err := tx.Create(&profile).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_uuid"}},
+			DoNothing: true,
+		}).Create(&profile).Error; err != nil {
+			return WrapDBError(err)
+		}
+
+		// 冲突忽略后必须回查权威记录，避免返回被并发请求忽略的内存对象。
+		if err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error; err != nil {
 			return WrapDBError(err)
 		}
 		return nil

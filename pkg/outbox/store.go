@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // InsertEvent 在业务事务内追加一条 CDC Outbox 事件。
@@ -37,5 +38,6 @@ func MarkIdempotent(db *gorm.DB, eventType, eventID string) error {
 		EventID:     eventID,
 		ProcessedAt: time.Now(),
 	}
-	return db.Create(record).Error
+	// 重复事件并发补写幂等记录时按成功处理，保留首次 processed_at。
+	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(record).Error
 }
