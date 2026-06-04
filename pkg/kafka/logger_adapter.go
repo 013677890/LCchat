@@ -45,6 +45,12 @@ func convertFieldsToZap(ctx context.Context, fields map[string]interface{}) []za
 	if traceID := ctxmeta.TraceID(ctx); traceID != "" {
 		zapFields = append(zapFields, zap.String(ctxmeta.KeyTraceID, traceID))
 	}
+	if spanID := ctxmeta.SpanID(ctx); spanID != "" {
+		zapFields = append(zapFields, zap.String(ctxmeta.KeySpanID, spanID))
+	}
+	if parentSpanID := ctxmeta.ParentSpanID(ctx); parentSpanID != "" {
+		zapFields = append(zapFields, zap.String(ctxmeta.KeyParentSpanID, parentSpanID))
+	}
 	if userUUID := ctxmeta.UserUUID(ctx); userUUID != "" {
 		zapFields = append(zapFields, zap.String(ctxmeta.KeyUserUUID, userUUID))
 	}

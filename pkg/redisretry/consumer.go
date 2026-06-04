@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/redis/go-redis/v9"
 )
@@ -54,11 +55,11 @@ func (c *RedisRetryConsumer) processMessage(ctx context.Context, message []byte)
 	if err := json.Unmarshal(message, &task); err != nil {
 		return fmt.Errorf("解析 Redis 任务失败: %w", err)
 	}
+	ctx = contextFromTask(ctx, task)
 
 	c.logger.Info(ctx, "处理 Redis 重试任务", map[string]interface{}{
 		"type":        task.Type,
 		"retry_count": task.RetryCount,
-		"trace_id":    task.TraceID,
 	})
 
 	err := c.executeRedisTask(ctx, task)
@@ -93,6 +94,29 @@ func (c *RedisRetryConsumer) processMessage(ctx context.Context, message []byte)
 		"retry_count": task.RetryCount,
 	})
 	return nil
+}
+
+func contextFromTask(ctx context.Context, task RedisTask) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if task.TraceID != "" {
+		ctx = ctxmeta.WithTraceID(ctx, task.TraceID)
+	}
+	if task.UserUUID != "" {
+		ctx = ctxmeta.WithUserUUID(ctx, task.UserUUID)
+	}
+	if task.DeviceID != "" {
+		ctx = ctxmeta.WithDeviceID(ctx, task.DeviceID)
+	}
+	if task.TraceID == "" {
+		return ctx
+	}
+	if task.SpanID == "" {
+		return ctx
+	}
+	ctx = ctxmeta.WithParentSpanID(ctx, task.SpanID)
+	return ctxmeta.WithSpanID(ctx, ctxmeta.NewSpanID())
 }
 
 func (c *RedisRetryConsumer) executeRedisTask(ctx context.Context, task RedisTask) error {

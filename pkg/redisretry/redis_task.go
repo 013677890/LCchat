@@ -33,14 +33,16 @@ type RedisTask struct {
 	LuaArgs   []interface{} `json:"lua_args,omitempty"`
 
 	// 元数据字段用于追踪来源和控制重试。
-	TraceID     string    `json:"trace_id,omitempty"`
-	UserUUID    string    `json:"user_uuid,omitempty"`
-	DeviceID    string    `json:"device_id,omitempty"`
-	Timestamp   time.Time `json:"timestamp"`
-	RetryCount  int       `json:"retry_count"`
-	MaxRetries  int       `json:"max_retries"`
-	OriginalErr string    `json:"original_err"`
-	Source      string    `json:"source,omitempty"`
+	TraceID      string    `json:"trace_id,omitempty"`
+	SpanID       string    `json:"span_id,omitempty"`
+	ParentSpanID string    `json:"parent_span_id,omitempty"`
+	UserUUID     string    `json:"user_uuid,omitempty"`
+	DeviceID     string    `json:"device_id,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+	RetryCount   int       `json:"retry_count"`
+	MaxRetries   int       `json:"max_retries"`
+	OriginalErr  string    `json:"original_err"`
+	Source       string    `json:"source,omitempty"`
 }
 
 // RedisCmd 表示 Pipeline 中的一条 Redis 命令。
@@ -187,6 +189,12 @@ func BuildLuaTask(script string, keys []string, args ...interface{}) RedisTask {
 func (t RedisTask) WithContext(ctx context.Context) RedisTask {
 	if traceID := ctxmeta.TraceID(ctx); traceID != "" {
 		t.TraceID = traceID
+	}
+	if spanID := ctxmeta.SpanID(ctx); spanID != "" {
+		t.SpanID = spanID
+	}
+	if parentSpanID := ctxmeta.ParentSpanID(ctx); parentSpanID != "" {
+		t.ParentSpanID = parentSpanID
 	}
 	if userUUID := ctxmeta.UserUUID(ctx); userUUID != "" {
 		t.UserUUID = userUUID

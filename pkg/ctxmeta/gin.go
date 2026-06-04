@@ -37,6 +37,14 @@ func SetTraceID(c *gin.Context, traceID string) string {
 	return setGinString(c, KeyTraceID, traceID)
 }
 
+func SetSpanID(c *gin.Context, spanID string) string {
+	return setGinString(c, KeySpanID, spanID)
+}
+
+func SetParentSpanID(c *gin.Context, parentSpanID string) string {
+	return setGinString(c, KeyParentSpanID, parentSpanID)
+}
+
 func SetUserUUID(c *gin.Context, userUUID string) string {
 	return setGinString(c, KeyUserUUID, userUUID)
 }
@@ -51,6 +59,14 @@ func SetClientIP(c *gin.Context, clientIP string) string {
 
 func TraceIDFromGin(c *gin.Context) string {
 	return getGinString(c, KeyTraceID)
+}
+
+func SpanIDFromGin(c *gin.Context) string {
+	return getGinString(c, KeySpanID)
+}
+
+func ParentSpanIDFromGin(c *gin.Context) string {
+	return getGinString(c, KeyParentSpanID)
 }
 
 func UserUUIDFromGin(c *gin.Context) string {
@@ -73,6 +89,12 @@ func BuildContextFromGin(c *gin.Context) context.Context {
 	ctx := c.Request.Context()
 	if traceID := TraceIDFromGin(c); traceID != "" {
 		ctx = WithTraceID(ctx, traceID)
+	}
+	if spanID := SpanIDFromGin(c); spanID != "" {
+		ctx = WithSpanID(ctx, spanID)
+	}
+	if parentSpanID := ParentSpanIDFromGin(c); parentSpanID != "" {
+		ctx = WithParentSpanID(ctx, parentSpanID)
 	}
 	if userUUID := UserUUIDFromGin(c); userUUID != "" {
 		ctx = WithUserUUID(ctx, userUUID)

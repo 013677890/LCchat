@@ -148,7 +148,7 @@ func (a *MsgApp) installProcessGlobals(ctx context.Context) {
 		pkgredis.ReplaceGlobal(a.redisClient)
 	}
 	async.SetContextPropagator(func(parent context.Context) context.Context {
-		return ctxmeta.CopyKnownFromParent(parent)
+		return ctxmeta.ChildContextFromParent(parent)
 	})
 	async.ReplaceGlobalWithReleaseTimeout(a.asyncPool, a.asyncReleaseTimeout)
 	_ = util.InitSnowflake(2)

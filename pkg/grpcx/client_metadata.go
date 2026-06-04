@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// MetadataUnaryClientInterceptor 把 trace/user/device/ip 等已知上下文元数据
+// MetadataUnaryClientInterceptor 把 trace/span/user/device/ip 等已知上下文元数据
 // 注入到出站 gRPC metadata，保证跨服务链路能继续读取这些字段。
 func MetadataUnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
@@ -19,8 +19,22 @@ func MetadataUnaryClientInterceptor() grpc.UnaryClientInterceptor {
 			md = md.Copy()
 		}
 
-		if traceID := ctxmeta.TraceID(ctx); traceID != "" {
+		traceID := ctxmeta.TraceID(ctx)
+		parentSpanID := ctxmeta.SpanID(ctx)
+		if traceID != "" {
 			md.Set(ctxmeta.MetadataTraceID, traceID)
+		}
+		if traceID != "" && parentSpanID != "" {
+			childSpanID := ctxmeta.NewSpanID()
+
+			ctx = ctxmeta.WithSpanID(ctx, childSpanID)
+			ctx = ctxmeta.WithParentSpanID(ctx, parentSpanID)
+
+			md.Set(ctxmeta.MetadataSpanID, childSpanID)
+			md.Set(ctxmeta.MetadataParentSpanID, parentSpanID)
+		} else {
+			md.Delete(ctxmeta.MetadataSpanID)
+			md.Delete(ctxmeta.MetadataParentSpanID)
 		}
 		if userUUID := ctxmeta.UserUUID(ctx); userUUID != "" {
 			md.Set(ctxmeta.MetadataUserUUID, userUUID)

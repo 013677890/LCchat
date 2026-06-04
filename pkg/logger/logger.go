@@ -116,6 +116,12 @@ func appendContextFields(ctx context.Context, fields []zap.Field) []zap.Field {
 	if traceID := ctxmeta.TraceID(ctx); traceID != "" {
 		fields = append(fields, zap.String(ctxmeta.KeyTraceID, traceID))
 	}
+	if spanID := ctxmeta.SpanID(ctx); spanID != "" {
+		fields = append(fields, zap.String(ctxmeta.KeySpanID, spanID))
+	}
+	if parentSpanID := ctxmeta.ParentSpanID(ctx); parentSpanID != "" {
+		fields = append(fields, zap.String(ctxmeta.KeyParentSpanID, parentSpanID))
+	}
 	if userUUID := ctxmeta.UserUUID(ctx); userUUID != "" {
 		fields = append(fields, zap.String(ctxmeta.KeyUserUUID, userUUID))
 	}

@@ -9,12 +9,19 @@ import (
 )
 
 // MetadataUnaryInterceptor 将 gRPC incoming metadata 注入到 context 中，
-// 使下游业务代码可通过 ctxmeta 包统一读取 trace_id / user_uuid / device_id / client_ip。
+// 使下游业务代码可通过 ctxmeta 包统一读取 trace_id / span_id / parent_span_id / user_uuid / device_id / client_ip。
 func MetadataUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		if md, ok := metadata.FromIncomingContext(ctx); ok {
-			if traceID := firstValue(md.Get(ctxmeta.MetadataTraceID)); traceID != "" {
+			traceID := firstValue(md.Get(ctxmeta.MetadataTraceID))
+			if traceID != "" {
 				ctx = ctxmeta.WithTraceID(ctx, traceID)
+			}
+			if spanID := firstValue(md.Get(ctxmeta.MetadataSpanID)); spanID != "" {
+				ctx = ctxmeta.WithSpanID(ctx, spanID)
+			}
+			if parentSpanID := firstValue(md.Get(ctxmeta.MetadataParentSpanID)); parentSpanID != "" {
+				ctx = ctxmeta.WithParentSpanID(ctx, parentSpanID)
 			}
 			if userUUID := firstValue(md.Get(ctxmeta.MetadataUserUUID)); userUUID != "" {
 				ctx = ctxmeta.WithUserUUID(ctx, userUUID)

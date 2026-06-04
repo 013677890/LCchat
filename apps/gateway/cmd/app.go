@@ -205,7 +205,7 @@ func (a *GatewayApp) installGatewayGlobals(ctx context.Context) {
 		pkgredis.ReplaceGlobal(a.redisClient)
 	}
 	async.SetContextPropagator(func(parent context.Context) context.Context {
-		return ctxmeta.CopyKnownFromParent(parent)
+		return ctxmeta.ChildContextFromParent(parent)
 	})
 	async.ReplaceGlobalWithReleaseTimeout(a.asyncPool, a.asyncReleaseTimeout)
 	if a.minioClient != nil {

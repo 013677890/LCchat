@@ -171,7 +171,7 @@ func (a *RelationApp) installProcessGlobals(ctx context.Context) {
 		pkgredis.ReplaceGlobal(a.redisClient)
 	}
 	async.SetContextPropagator(func(parent context.Context) context.Context {
-		return ctxmeta.CopyKnownFromParent(parent)
+		return ctxmeta.ChildContextFromParent(parent)
 	})
 	async.ReplaceGlobalWithReleaseTimeout(a.asyncPool, time.Duration(a.asyncReleaseTimeout))
 	_ = ctx

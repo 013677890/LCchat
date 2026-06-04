@@ -104,6 +104,12 @@ func (h *WSHandler) ServeWS(c *gin.Context) {
 	if traceID := ctxmeta.TraceIDFromGin(c); traceID != "" {
 		connCtx = ctxmeta.WithTraceID(connCtx, traceID)
 	}
+	if spanID := ctxmeta.SpanIDFromGin(c); spanID != "" {
+		connCtx = ctxmeta.WithSpanID(connCtx, spanID)
+	}
+	if parentSpanID := ctxmeta.ParentSpanIDFromGin(c); parentSpanID != "" {
+		connCtx = ctxmeta.WithParentSpanID(connCtx, parentSpanID)
+	}
 	connCtx = ctxmeta.WithUserUUID(connCtx, session.UserUUID)
 	connCtx = ctxmeta.WithDeviceID(connCtx, session.DeviceID)
 	connCtx = ctxmeta.WithClientIP(connCtx, session.ClientIP)
