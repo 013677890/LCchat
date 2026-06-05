@@ -3,6 +3,7 @@ package svc
 import (
 	"context"
 	"sync"
+	"time"
 
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/config"
@@ -26,6 +27,10 @@ type ConnectService struct {
 	activeSyncer     *deviceactive.Syncer
 	statusQueue      chan deviceStatusTask // 设备状态 RPC 任务队列
 	statusWg         sync.WaitGroup        // 等待工作协程退出
+	// routeTTL 路由 Key 的写入 TTL。由 InitActiveSyncer 按 2×UpdateInterval 派生，
+	// 保证 TTL >= 2×心跳节流间隔，避免“节流到期才刷新”时 Key 在下一次刷新前过期造成路由黑洞。
+	// 为 0 表示未初始化（如降级/测试路径），此时回退到 defaultRouteTTL。
+	routeTTL time.Duration
 }
 
 // NewConnectService 创建业务服务实例。
@@ -105,7 +110,22 @@ func (s *ConnectService) InitActiveSyncer(cfg config.DeviceActiveConfig) error {
 	}
 
 	s.activeSyncer = syncer
+	// 路由 Key TTL 必须 >= 2×UpdateInterval：心跳刷新被节流到每 UpdateInterval 一次，
+	// TTL 需留出余量，否则 Key 可能在下一次刷新前过期，造成瞬时路由黑洞（Defect 10）。
+	s.routeTTL = 2 * cfg.UpdateInterval
+	if s.routeTTL < defaultRouteTTL {
+		s.routeTTL = defaultRouteTTL
+	}
 	return nil
+}
+
+// effectiveRouteTTL 返回实际使用的路由 Key TTL。
+// 未通过 InitActiveSyncer 初始化（降级/测试路径，无节流）时回退到 defaultRouteTTL。
+func (s *ConnectService) effectiveRouteTTL() time.Duration {
+	if s.routeTTL > 0 {
+		return s.routeTTL
+	}
+	return defaultRouteTTL
 }
 
 // ShutdownStatusWorkers 优雅关闭后台协程。

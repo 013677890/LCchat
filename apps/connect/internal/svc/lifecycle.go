@@ -21,8 +21,10 @@ const (
 	// 队列满时新任务会被丢弃（仅 log Warn），不会阻塞调用方。
 	statusQueueSize = 8192
 
-	// routeTTL 路由表默认 TTL。
-	routeTTL = 180 * time.Second
+	// defaultRouteTTL 路由表默认 TTL（下限）。
+	// 实际写入 TTL 由 ConnectService.effectiveRouteTTL() 按 2×UpdateInterval 派生，
+	// 这里作为未初始化节流器时的兜底默认值。
+	defaultRouteTTL = 180 * time.Second
 )
 
 // deviceStatusTask 表示一条设备状态更新 RPC 任务。
@@ -48,7 +50,7 @@ func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
 		_ = s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now())
 	}
 	if addr := connectRouteAddr(); addr != "" {
-		s.UpsertUserRoute(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), routeTTL)
+		s.UpsertUserRoute(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), s.effectiveRouteTTL())
 	}
 	s.updateDeviceStatusAsync(ctx, session, model.DeviceStatusOnline)
 }
@@ -58,13 +60,13 @@ func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
 func (s *ConnectService) OnHeartbeat(ctx context.Context, session *Session) {
 	if s.activeSyncer == nil {
 		if addr := connectRouteAddr(); addr != "" {
-			s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), routeTTL)
+			s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), s.effectiveRouteTTL())
 		}
 		return
 	}
 	if s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now()) {
 		if addr := connectRouteAddr(); addr != "" {
-			s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), routeTTL)
+			s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), s.effectiveRouteTTL())
 		}
 	}
 }

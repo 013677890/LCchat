@@ -74,8 +74,12 @@ func provideMessagePushGroupID() string {
 
 // provideMessagePushRouteTTL 提供在线路由读取时的过期窗口。
 // 环境变量单位为秒。
+//
+// 该值必须 >= 2×connect 的心跳节流间隔（DEVICE_ACTIVE_UPDATE_INTERVAL_SECONDS，默认 180s），
+// 否则在线设备的路由会因 activeMs 刚好越过 cutoff 而被误过滤，造成瞬时路由黑洞（Defect 10）。
+// 默认 360s 对应默认节流间隔 180s；若调小节流间隔需同步设置 MESSAGE_PUSH_ROUTE_TTL_SECONDS。
 func provideMessagePushRouteTTL() messagePushRouteTTL {
-	const defaultTTL = 180 * time.Second
+	const defaultTTL = 360 * time.Second
 
 	v := os.Getenv("MESSAGE_PUSH_ROUTE_TTL_SECONDS")
 	if v == "" {
