@@ -20,7 +20,7 @@ LCChat 是一个基于 Go 的即时通信后端项目，当前采用多服务拆
 - gRPC
 - Gin
 - GORM + MySQL
-- Redis
+- Redis Stack Server（含 RedisBloom）
 - Kafka
 - Wire 依赖注入
 - Docker Compose
@@ -41,7 +41,7 @@ docker compose up -d --build
 ```
 项目默认会启动以下基础组件与业务服务：
 - MySQL
-- Redis
+- Redis Stack Server（含 RedisBloom）
 - Kafka
 - Kafka Connect
 - MinIO
@@ -58,7 +58,7 @@ go run ./apps/group/cmd
 go run ./apps/msg/cmd
 go run ./apps/message-push/cmd
 ```
-建议先保证 MySQL、Redis、Kafka 等基础依赖已启动。
+建议先保证 MySQL、Redis Stack Server、Kafka 等基础依赖已启动。
 ## 关键环境变量
 ### 群服务
 - `GROUP_GRPC_ADDR`：group gRPC 监听地址，默认 `:9095`

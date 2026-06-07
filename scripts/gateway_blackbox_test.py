@@ -1,16 +1,16 @@
 import base64
+import http.client
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-
-import requests
-import websocket
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE_URL = os.getenv("LCCHAT_BASE_URL", "http://127.0.0.1:8088")
@@ -18,6 +18,8 @@ HOST_HEADER = os.getenv("LCCHAT_HOST_HEADER", "lcchat.local")
 REQUEST_TIMEOUT = int(os.getenv("LCCHAT_REQUEST_TIMEOUT", "10"))
 RATE_LIMIT_RETRY_COUNT = int(os.getenv("LCCHAT_RATE_LIMIT_RETRY_COUNT", "6"))
 RATE_LIMIT_RETRY_BASE_DELAY = float(os.getenv("LCCHAT_RATE_LIMIT_RETRY_BASE_DELAY", "0.25"))
+REDIS_HOST = os.getenv("LCCHAT_REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.getenv("LCCHAT_REDIS_PORT", "16379"))
 
 EXPECTED_ENDPOINTS = {
     ("GET", "/health"),
@@ -109,13 +111,202 @@ CONNECT_COVERED_ENDPOINTS: set[tuple[str, str]] = set()
 
 CONNECT_HTTP_BASE_URL = os.getenv("LCCHAT_CONNECT_HTTP_BASE_URL", "http://127.0.0.1:8081")
 CONNECT_WS_BASE_URL = os.getenv("LCCHAT_CONNECT_WS_BASE_URL", "ws://127.0.0.1:8081")
-CONNECT_WS_ORIGIN = os.getenv("LCCHAT_CONNECT_WS_ORIGIN", "http://127.0.0.1")
+CONNECT_WS_ORIGIN = os.getenv("LCCHAT_CONNECT_WS_ORIGIN", "http://127.0.0.1:8081")
 VALID_PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="
 )
 
 class TestFailure(RuntimeError):
     pass
+
+class SimpleResponse:
+    def __init__(self, status_code: int, body: bytes) -> None:
+        self.status_code = status_code
+        self.content = body
+        self.text = body.decode("utf-8", errors="replace")
+
+    def json(self) -> dict:
+        return json.loads(self.text)
+
+class SimpleRequests:
+    Response = SimpleResponse
+
+    @staticmethod
+    def request(
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        json: dict | None = None,
+        params: dict | None = None,
+        files: dict | None = None,
+        timeout: int = REQUEST_TIMEOUT,
+    ) -> SimpleResponse:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError(f"unsupported URL scheme: {parsed.scheme}")
+
+        query = parsed.query
+        if params:
+            encoded_params = urllib.parse.urlencode(params, doseq=True)
+            query = f"{query}&{encoded_params}" if query else encoded_params
+        path = urllib.parse.urlunsplit(("", "", parsed.path or "/", query, ""))
+
+        request_headers = dict(headers or {})
+        body: bytes | None = None
+        if files:
+            boundary = f"lcchat-{uuid.uuid4().hex}"
+            body = SimpleRequests._multipart_body(boundary, files)
+            request_headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        elif json is not None:
+            body = json_module_dumps(json).encode("utf-8")
+            request_headers["Content-Type"] = "application/json"
+
+        connection_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+        conn = connection_cls(parsed.hostname, parsed.port, timeout=timeout)
+        try:
+            conn.request(method.upper(), path, body=body, headers=request_headers)
+            response = conn.getresponse()
+            return SimpleResponse(response.status, response.read())
+        finally:
+            conn.close()
+
+    @staticmethod
+    def get(url: str, **kwargs) -> SimpleResponse:
+        return SimpleRequests.request("GET", url, **kwargs)
+
+    @staticmethod
+    def post(url: str, **kwargs) -> SimpleResponse:
+        return SimpleRequests.request("POST", url, **kwargs)
+
+    @staticmethod
+    def _multipart_body(boundary: str, files: dict) -> bytes:
+        chunks: list[bytes] = []
+        for field_name, file_info in files.items():
+            filename, file_obj, content_type = file_info
+            content = file_obj.read()
+            chunks.append(f"--{boundary}\r\n".encode("ascii"))
+            chunks.append(
+                f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'.encode("utf-8")
+            )
+            chunks.append(f"Content-Type: {content_type}\r\n\r\n".encode("ascii"))
+            chunks.append(content)
+            chunks.append(b"\r\n")
+        chunks.append(f"--{boundary}--\r\n".encode("ascii"))
+        return b"".join(chunks)
+
+def json_module_dumps(value: dict) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+class SimpleWebSocketConnection:
+    def __init__(self, sock: socket.socket) -> None:
+        self.sock = sock
+
+    def settimeout(self, timeout: int) -> None:
+        self.sock.settimeout(timeout)
+
+    def send_binary(self, payload: bytes) -> None:
+        self._send_frame(0x2, payload)
+
+    def recv(self):
+        while True:
+            first, second = self._read_exact(2)
+            opcode = first & 0x0F
+            masked = bool(second & 0x80)
+            length = second & 0x7F
+            if length == 126:
+                length = int.from_bytes(self._read_exact(2), "big")
+            elif length == 127:
+                length = int.from_bytes(self._read_exact(8), "big")
+            mask = self._read_exact(4) if masked else b""
+            payload = self._read_exact(length) if length else b""
+            if masked:
+                payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+            if opcode == 0x8:
+                return b""
+            if opcode == 0x9:
+                self._send_frame(0xA, payload)
+                continue
+            if opcode == 0xA:
+                continue
+            if opcode == 0x1:
+                return payload.decode("utf-8", errors="replace")
+            if opcode in {0x0, 0x2}:
+                return payload
+
+    def close(self) -> None:
+        try:
+            self._send_frame(0x8, b"")
+        finally:
+            self.sock.close()
+
+    def _send_frame(self, opcode: int, payload: bytes) -> None:
+        mask = os.urandom(4)
+        header = bytearray([0x80 | opcode])
+        length = len(payload)
+        if length < 126:
+            header.append(0x80 | length)
+        elif length <= 0xFFFF:
+            header.extend([0x80 | 126])
+            header.extend(length.to_bytes(2, "big"))
+        else:
+            header.extend([0x80 | 127])
+            header.extend(length.to_bytes(8, "big"))
+        masked_payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        self.sock.sendall(bytes(header) + mask + masked_payload)
+
+    def _read_exact(self, size: int) -> bytes:
+        chunks: list[bytes] = []
+        remaining = size
+        while remaining:
+            chunk = self.sock.recv(remaining)
+            if not chunk:
+                raise ConnectionError("websocket connection closed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
+class SimpleWebSocket:
+    @staticmethod
+    def create_connection(url: str, *, timeout: int = REQUEST_TIMEOUT, origin: str = "") -> SimpleWebSocketConnection:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme != "ws":
+            raise ValueError(f"unsupported websocket URL scheme: {parsed.scheme}")
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 80
+        path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        headers = [
+            f"GET {path} HTTP/1.1",
+            f"Host: {host}:{port}",
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            "Sec-WebSocket-Version: 13",
+            f"Sec-WebSocket-Key: {key}",
+        ]
+        if origin:
+            headers.append(f"Origin: {origin}")
+        request = "\r\n".join(headers) + "\r\n\r\n"
+
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.settimeout(timeout)
+        try:
+            sock.sendall(request.encode("ascii"))
+            response = b""
+            while b"\r\n\r\n" not in response:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            if not response.startswith(b"HTTP/1.1 101") and not response.startswith(b"HTTP/1.0 101"):
+                raise ConnectionError(f"websocket handshake failed: {response[:200]!r}")
+            return SimpleWebSocketConnection(sock)
+        except Exception:
+            sock.close()
+            raise
+
+requests = SimpleRequests
+websocket = SimpleWebSocket
 
 @dataclass
 class ResultItem:
@@ -162,7 +353,24 @@ def run_cmd(args: list[str]) -> str:
         )
     return proc.stdout.strip()
 
-def redis_set(key: str, value: str, expire_seconds: int = 600) -> None:
+def encode_redis_command(*parts: str) -> bytes:
+    encoded = [part.encode("utf-8") for part in parts]
+    payload = [f"*{len(encoded)}\r\n".encode("ascii")]
+    for part in encoded:
+        payload.append(f"${len(part)}\r\n".encode("ascii"))
+        payload.append(part)
+        payload.append(b"\r\n")
+    return b"".join(payload)
+
+def redis_set_direct(key: str, value: str, expire_seconds: int = 600) -> None:
+    with socket.create_connection((REDIS_HOST, REDIS_PORT), timeout=REQUEST_TIMEOUT) as conn:
+        conn.settimeout(REQUEST_TIMEOUT)
+        conn.sendall(encode_redis_command("SET", key, value, "EX", str(expire_seconds)))
+        response = conn.recv(1024)
+    if not response.startswith(b"+OK"):
+        raise TestFailure(f"redis SET failed: {response!r}")
+
+def redis_set_via_docker(key: str, value: str, expire_seconds: int = 600) -> None:
     run_cmd(
         [
             "docker",
@@ -178,6 +386,12 @@ def redis_set(key: str, value: str, expire_seconds: int = 600) -> None:
             str(expire_seconds),
         ]
     )
+
+def redis_set(key: str, value: str, expire_seconds: int = 600) -> None:
+    try:
+        redis_set_direct(key, value, expire_seconds)
+    except OSError:
+        redis_set_via_docker(key, value, expire_seconds)
 
 
 def build_headers(*, token: str | None = None, device_id: str | None = None) -> dict[str, str]:

@@ -30,15 +30,16 @@ services:
     networks:
       - chat-network
   redis:
-    image: ${REDIS_IMAGE:-redis:7.2}
+    image: ${REDIS_IMAGE:-redis/redis-stack-server:7.4.0-v8}
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_ARGS: "--appendonly yes"
     ports:
       - "${REDIS_PORT:-16379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping >/dev/null && redis-cli BF.ADD bf:healthcheck ok >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 20
