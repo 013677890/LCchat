@@ -43,9 +43,9 @@ type SendFriendApplyResponse struct {
 
 // GetFriendApplyListRequest 获取好友申请列表请求 DTO
 type GetFriendApplyListRequest struct {
-	Status   int32 `json:"status" binding:"omitempty,oneof=-1 0 1 2"`  // 状态(-1:全部 0:待处理 1:已同意 2:已拒绝)
-	Page     int32 `json:"page" binding:"omitempty,min=1"`             // 页码
-	PageSize int32 `json:"pageSize" binding:"omitempty,min=1,max=100"` // 每页大小
+	Status   int32 `form:"status" json:"status" binding:"omitempty,oneof=-1 0 1 2"`    // 状态(-1:全部 0:待处理 1:已同意 2:已拒绝)
+	Page     int32 `form:"page" json:"page" binding:"omitempty,min=1"`                 // 页码
+	PageSize int32 `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"` // 每页大小
 }
 
 // FriendApplyItem 好友申请信息 DTO
@@ -69,9 +69,9 @@ type GetFriendApplyListResponse struct {
 
 // GetSentApplyListRequest 获取发出的申请列表请求 DTO
 type GetSentApplyListRequest struct {
-	Status   int32 `json:"status" binding:"omitempty,oneof=-1 0 1 2"`  // 状态(-1:全部 0:待处理 1:已同意 2:已拒绝)
-	Page     int32 `json:"page" binding:"omitempty,min=1"`             // 页码
-	PageSize int32 `json:"pageSize" binding:"omitempty,min=1,max=100"` // 每页大小
+	Status   int32 `form:"status" json:"status" binding:"omitempty,oneof=-1 0 1 2"`    // 状态(-1:全部 0:待处理 1:已同意 2:已拒绝)
+	Page     int32 `form:"page" json:"page" binding:"omitempty,min=1"`                 // 页码
+	PageSize int32 `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"` // 每页大小
 }
 
 // GetSentApplyListResponse 获取发出的申请列表响应 DTO
@@ -120,9 +120,9 @@ type MarkApplyAsReadResponse struct{}
 
 // GetFriendListRequest 获取好友列表请求 DTO
 type GetFriendListRequest struct {
-	GroupTag string `json:"groupTag" binding:"omitempty"`               // 标签
-	Page     int32  `json:"page" binding:"omitempty,min=1"`             // 页码
-	PageSize int32  `json:"pageSize" binding:"omitempty,min=1,max=100"` // 每页大小
+	GroupTag string `form:"groupTag" json:"groupTag" binding:"omitempty"`               // 标签
+	Page     int32  `form:"page" json:"page" binding:"omitempty,min=1"`                 // 页码
+	PageSize int32  `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"` // 每页大小
 }
 
 // FriendItem 好友信息 DTO

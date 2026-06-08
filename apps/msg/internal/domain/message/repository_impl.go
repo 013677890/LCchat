@@ -240,8 +240,12 @@ func (r *repositoryImpl) GetBySeqRange(ctx context.Context, convId string, ancho
 		// 拉新消息：seq > anchor，按 seq 升序
 		query = query.Where("seq > ?", anchorSeq).Order("seq ASC")
 	case DirectionBackward:
-		// 拉历史：seq < anchor，按 seq 降序（最新的在前，客户端可反转）
-		query = query.Where("seq < ?", anchorSeq).Order("seq DESC")
+		// 拉历史：seq < anchor，按 seq 降序（最新的在前，客户端可反转）。
+		// anchorSeq=0 表示从最新消息开始拉取。
+		if anchorSeq > 0 {
+			query = query.Where("seq < ?", anchorSeq)
+		}
+		query = query.Order("seq DESC")
 	default:
 		// 默认拉最新
 		query = query.Order("seq DESC")

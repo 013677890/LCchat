@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -45,4 +46,34 @@ func TestRepositoryUpdateStatusWithOutbox_OutboxFailureRollsBackMessage(t *testi
 	require.NoError(t, db.Where("conv_id = ? AND msg_id = ?", "conv-1", "msg-1").First(&got).Error)
 	assert.Equal(t, int8(0), got.Status)
 	assert.Equal(t, original.Content, got.Content)
+}
+
+func TestRepositoryGetBySeqRangeBackwardAnchorZeroStartsFromLatest(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:backward-anchor-zero?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Message{}))
+
+	now := time.Now()
+	for seq := int64(1); seq <= 5; seq++ {
+		require.NoError(t, db.Create(&model.Message{
+			ConvId:      "conv-1",
+			Seq:         seq,
+			MsgId:       fmt.Sprintf("msg-%d", seq),
+			ClientMsgId: fmt.Sprintf("client-%d", seq),
+			FromUuid:    "user-a",
+			DeviceId:    "dev-1",
+			MsgType:     int16(model.MsgTypeText),
+			Content:     `{"text":"hello"}`,
+			Status:      0,
+			SendTime:    now.Add(time.Duration(seq) * time.Second),
+		}).Error)
+	}
+
+	repo := &repositoryImpl{db: db}
+	msgs, err := repo.GetBySeqRange(context.Background(), "conv-1", 0, DirectionBackward, 3, 0)
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+	assert.Equal(t, int64(5), msgs[0].Seq)
+	assert.Equal(t, int64(4), msgs[1].Seq)
+	assert.Equal(t, int64(3), msgs[2].Seq)
 }

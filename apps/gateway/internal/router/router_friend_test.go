@@ -222,7 +222,7 @@ func TestRouterFriendRoutesAndSuccess(t *testing.T) {
 		{
 			name:   "get_apply_list",
 			method: http.MethodGet,
-			target: "/api/v1/auth/friend/apply-list?Page=1&PageSize=20",
+			target: "/api/v1/auth/friend/apply-list?page=1&pageSize=20",
 			setup: func(s *fakeRouterFriendService, called *bool) {
 				s.applyListFn = func(_ context.Context, req *dto.GetFriendApplyListRequest) (*dto.GetFriendApplyListResponse, error) {
 					*called = true
@@ -234,7 +234,7 @@ func TestRouterFriendRoutesAndSuccess(t *testing.T) {
 		{
 			name:   "get_sent_apply_list",
 			method: http.MethodGet,
-			target: "/api/v1/auth/friend/apply/sent?Page=1&PageSize=20",
+			target: "/api/v1/auth/friend/apply/sent?page=1&pageSize=20",
 			setup: func(s *fakeRouterFriendService, called *bool) {
 				s.sentApplyListFn = func(_ context.Context, req *dto.GetSentApplyListRequest) (*dto.GetSentApplyListResponse, error) {
 					*called = true
@@ -283,7 +283,7 @@ func TestRouterFriendRoutesAndSuccess(t *testing.T) {
 		{
 			name:   "get_friend_list",
 			method: http.MethodGet,
-			target: "/api/v1/auth/friend/list?Page=1&PageSize=20",
+			target: "/api/v1/auth/friend/list?page=1&pageSize=20",
 			setup: func(s *fakeRouterFriendService, called *bool) {
 				s.friendListFn = func(_ context.Context, req *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error) {
 					*called = true
@@ -425,7 +425,7 @@ func TestRouterFriendParamErrors(t *testing.T) {
 		{
 			name:       "get_apply_list_invalid_query",
 			method:     http.MethodGet,
-			target:     "/api/v1/auth/friend/apply-list?Page=abc",
+			target:     "/api/v1/auth/friend/apply-list?page=abc",
 			wantStatus: http.StatusOK,
 			wantCode:   consts.CodeParamError,
 		},
@@ -505,7 +505,7 @@ func TestRouterFriendErrorMapping(t *testing.T) {
 		assert.Equal(t, consts.CodeInternalError, decodeRouterFriendCode(t, w1))
 
 		w2 := httptest.NewRecorder()
-		req2 := newAuthedRouterFriendRequest(t, http.MethodGet, "/api/v1/auth/friend/list?Page=1&PageSize=20", "")
+		req2 := newAuthedRouterFriendRequest(t, http.MethodGet, "/api/v1/auth/friend/list?page=1&pageSize=20", "")
 		r.ServeHTTP(w2, req2)
 		assert.Equal(t, http.StatusInternalServerError, w2.Code)
 		assert.Equal(t, consts.CodeInternalError, decodeRouterFriendCode(t, w2))

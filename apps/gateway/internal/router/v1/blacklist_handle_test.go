@@ -278,7 +278,7 @@ func TestBlacklistHandlerGetBlacklistList(t *testing.T) {
 	}{
 		{
 			name:       "bind_query_failed",
-			targetURL:  "/api/v1/auth/blacklist?Page=abc&PageSize=20",
+			targetURL:  "/api/v1/auth/blacklist?page=abc&pageSize=20",
 			setupSvc:   nil,
 			wantStatus: http.StatusOK,
 			wantCode:   consts.CodeParamError,
@@ -301,7 +301,7 @@ func TestBlacklistHandlerGetBlacklistList(t *testing.T) {
 		},
 		{
 			name:      "success_with_valid_query",
-			targetURL: "/api/v1/auth/blacklist?Page=1&PageSize=20",
+			targetURL: "/api/v1/auth/blacklist?page=1&pageSize=20",
 			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
 				svc.listFn = func(_ context.Context, req *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
 					*called = true
@@ -316,7 +316,7 @@ func TestBlacklistHandlerGetBlacklistList(t *testing.T) {
 		},
 		{
 			name:      "business_error_passthrough",
-			targetURL: "/api/v1/auth/blacklist?Page=1&PageSize=20",
+			targetURL: "/api/v1/auth/blacklist?page=1&pageSize=20",
 			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
 				svc.listFn = func(_ context.Context, _ *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
 					*called = true
@@ -329,7 +329,7 @@ func TestBlacklistHandlerGetBlacklistList(t *testing.T) {
 		},
 		{
 			name:      "internal_error",
-			targetURL: "/api/v1/auth/blacklist?Page=1&PageSize=20",
+			targetURL: "/api/v1/auth/blacklist?page=1&pageSize=20",
 			setupSvc: func(svc *fakeBlacklistHTTPService, called *bool) {
 				svc.listFn = func(_ context.Context, _ *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
 					*called = true

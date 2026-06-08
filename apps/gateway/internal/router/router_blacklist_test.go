@@ -147,7 +147,7 @@ func TestRouterBlacklistRoutesAndSuccess(t *testing.T) {
 		{
 			name:   "get_blacklist",
 			method: http.MethodGet,
-			target: "/api/v1/auth/blacklist?Page=1&PageSize=20",
+			target: "/api/v1/auth/blacklist?page=1&pageSize=20",
 			body:   "",
 			setup: func(s *fakeRouterBlacklistService, called *bool) {
 				s.listFn = func(_ context.Context, req *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {
@@ -243,7 +243,7 @@ func TestRouterBlacklistParamErrors(t *testing.T) {
 		{
 			name:           "get_blacklist_invalid_query",
 			method:         http.MethodGet,
-			target:         "/api/v1/auth/blacklist?Page=abc",
+			target:         "/api/v1/auth/blacklist?page=abc",
 			body:           "",
 			wantStatus:     http.StatusOK,
 			wantCode:       consts.CodeParamError,
@@ -312,7 +312,7 @@ func TestRouterBlacklistBusinessErrorMapping(t *testing.T) {
 		{
 			name:    "get_blacklist_business_error",
 			method:  http.MethodGet,
-			target:  "/api/v1/auth/blacklist?Page=1&PageSize=20",
+			target:  "/api/v1/auth/blacklist?page=1&pageSize=20",
 			body:    "",
 			bizCode: consts.CodeParamError,
 			setupSvc: func(s *fakeRouterBlacklistService, bizErr error) {
@@ -387,7 +387,7 @@ func TestRouterBlacklistInternalErrorMapping(t *testing.T) {
 		{
 			name:   "get_blacklist_internal_error",
 			method: http.MethodGet,
-			target: "/api/v1/auth/blacklist?Page=1&PageSize=20",
+			target: "/api/v1/auth/blacklist?page=1&pageSize=20",
 			body:   "",
 			setupSvc: func(s *fakeRouterBlacklistService) {
 				s.listFn = func(_ context.Context, _ *dto.GetBlacklistListRequest) (*dto.GetBlacklistListResponse, error) {

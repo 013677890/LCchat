@@ -247,7 +247,7 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 	t.Run("get_friend_apply_list_bind_failed", func(t *testing.T) {
 		h := NewFriendHandler(&fakeFriendHTTPService{})
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?Page=abc", nil)
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?page=abc", nil)
 		require.NoError(t, err)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req
@@ -270,7 +270,7 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?Page=1&PageSize=20", nil)
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?page=1&pageSize=20", nil)
 		require.NoError(t, err)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req
@@ -294,7 +294,7 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?Status=-1&Page=1&PageSize=20", nil)
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply-list?status=-1&page=1&pageSize=20", nil)
 		require.NoError(t, err)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req
@@ -318,7 +318,7 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply/sent?Page=1&PageSize=20", nil)
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply/sent?page=1&pageSize=20", nil)
 		require.NoError(t, err)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req
@@ -342,7 +342,7 @@ func TestFriendHandlerGetApplyLists(t *testing.T) {
 			},
 		})
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply/sent?Status=-1&Page=1&PageSize=20", nil)
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/apply/sent?status=-1&page=1&pageSize=20", nil)
 		require.NoError(t, err)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req
@@ -436,11 +436,12 @@ func TestFriendHandlerFriendListAndSync(t *testing.T) {
 			friendListFn: func(_ context.Context, req *dto.GetFriendListRequest) (*dto.GetFriendListResponse, error) {
 				require.Equal(t, int32(1), req.Page)
 				require.Equal(t, int32(20), req.PageSize)
+				require.Equal(t, "work", req.GroupTag)
 				return &dto.GetFriendListResponse{}, nil
 			},
 		})
 		w := httptest.NewRecorder()
-		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/list?Page=1&PageSize=20", nil)
+		req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/friend/list?page=1&pageSize=20&groupTag=work", nil)
 		require.NoError(t, err)
 		c, _ := gin.CreateTestContext(w)
 		c.Request = req

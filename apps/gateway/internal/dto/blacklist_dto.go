@@ -24,8 +24,8 @@ type RemoveBlacklistResponse struct{}
 
 // GetBlacklistListRequest 获取黑名单列表请求 DTO
 type GetBlacklistListRequest struct {
-	Page     int32 `json:"page" binding:"omitempty,min=1"`             // 页码
-	PageSize int32 `json:"pageSize" binding:"omitempty,min=1,max=100"` // 每页大小
+	Page     int32 `form:"page" json:"page" binding:"omitempty,min=1"`                 // 页码
+	PageSize int32 `form:"pageSize" json:"pageSize" binding:"omitempty,min=1,max=100"` // 每页大小
 }
 
 // GetBlacklistListResponse 获取黑名单列表响应 DTO
