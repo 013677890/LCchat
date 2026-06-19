@@ -20,6 +20,8 @@ import (
 
 // ==================== 配置 ====================
 
+const createMessageSeqRetryLimit = 2
+
 // Config 消息领域服务配置（通过 main.go 注入，支持环境变量覆盖）
 type Config struct {
 	// RecallWindow 撤回窗口时长，默认 2 分钟
@@ -142,15 +144,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 	// ulid.Make() 内部使用 sync.Pool 并发安全熵池，无需手动创建随机源
 	msgId := id.GenerateULID()
 
-	// ---- Step 5: 分配 seq ----
-	// Redis INCR 保证原子递增，同一 conv_id 下严格有序
-	// 客户端用 seq 做排序和 gap 检测
-	seq, err := s.repo.AllocSeq(ctx, convId)
-	if err != nil {
-		return nil, fmt.Errorf("CreateMessage: alloc seq failed: %w", err)
-	}
-
-	// ---- Step 6: 构造 Message 实体 ----
+	// ---- Step 5: 准备 Message 公共字段 ----
 	now := time.Now()
 
 	// at_users: proto []string → JSON string 存 DB
@@ -161,45 +155,68 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		}
 	}
 
-	msg := &model.Message{
-		ConvId:       convId,
-		Seq:          seq,
-		MsgId:        msgId,
-		ClientMsgId:  req.ClientMsgId,
-		FromUuid:     req.FromUuid,
-		DeviceId:     req.DeviceId,
-		MsgType:      int16(msgType),
-		Content:      req.Content,
-		Status:       0, // 0=正常
-		ReplyToMsgId: req.ReplyToMsgId,
-		AtUsers:      atUsersJSON,
-		SendTime:     now,
-	}
+	var msg *model.Message
+	created := false
+	for attempt := 0; attempt <= createMessageSeqRetryLimit; attempt++ {
+		// 每次重试都重新分配 seq：上一次失败的 seq 已被 DB 唯一索引证明不可用，
+		// 继续复用只会再次冲突，必须先 RepairSeq 再拿新的会话位点。
+		// Redis 计数器负责常规分配；若计数器丢失，仓储会从 DB 最大 seq 恢复。
+		seq, allocErr := s.repo.AllocSeq(ctx, convId)
+		if allocErr != nil {
+			return nil, fmt.Errorf("CreateMessage: alloc seq failed: %w", allocErr)
+		}
 
-	// ---- Step 7: 构造 msg.push outbox 事件 ----
-	payload, err := buildMsgPushOutboxPayload(ctx, req, msg)
-	if err != nil {
-		return nil, fmt.Errorf("CreateMessage: build outbox event failed: %w", err)
-	}
+		msg = &model.Message{
+			ConvId:       convId,
+			Seq:          seq,
+			MsgId:        msgId,
+			ClientMsgId:  req.ClientMsgId,
+			FromUuid:     req.FromUuid,
+			DeviceId:     req.DeviceId,
+			MsgType:      int16(msgType),
+			Content:      req.Content,
+			Status:       0, // 0=正常
+			ReplyToMsgId: req.ReplyToMsgId,
+			AtUsers:      atUsersJSON,
+			SendTime:     now,
+		}
 
-	// ---- Step 8: 落库 ----
-	if err := s.repo.CreateWithOutbox(ctx, msg, OutboxEvent{
-		EventType: msgevent.EventTypeMsgPush,
-		EntityID:  msg.ConvId,
-		Payload:   payload,
-	}); err != nil {
-		if errors.Is(err, ErrDuplicateMessage) {
-			// DB 唯一索引兜底：SETNX 降级时可能走到这里
+		payload, buildErr := buildMsgPushOutboxPayload(ctx, req, msg)
+		if buildErr != nil {
+			return nil, fmt.Errorf("CreateMessage: build outbox event failed: %w", buildErr)
+		}
+		createErr := s.repo.CreateWithOutbox(ctx, msg, OutboxEvent{
+			EventType: msgevent.EventTypeMsgPush,
+			EntityID:  msg.ConvId,
+			Payload:   payload,
+		})
+		if createErr == nil {
+			created = true
+			break
+		}
+		if errors.Is(createErr, ErrDuplicateMessage) {
+			// DB 唯一索引兜底：SETNX 降级时可能走到这里。
 			existMsg, queryErr := s.repo.GetByDuplicateKey(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId)
 			if queryErr != nil {
 				return nil, fmt.Errorf("CreateMessage: query duplicate failed: %w", queryErr)
 			}
 			return &CreateResult{Msg: existMsg, IsIdempotent: true}, nil
 		}
-		return nil, fmt.Errorf("CreateMessage: db insert failed: %w", err)
+		if errors.Is(createErr, ErrDuplicateMessageSeq) {
+			// 只有 DB 的 uidx_conv_seq 会触发该错误，说明 Redis 计数器已经落后于事实表。
+			// 先把 Redis 修到 DB 最大 seq，再进入下一轮重新 AllocSeq，最多重试有限次数避免死循环。
+			if repairErr := s.repo.RepairSeq(ctx, convId); repairErr != nil {
+				return nil, fmt.Errorf("CreateMessage: repair seq failed: %w", repairErr)
+			}
+			continue
+		}
+		return nil, fmt.Errorf("CreateMessage: db insert failed: %w", createErr)
+	}
+	if !created {
+		return nil, fmt.Errorf("CreateMessage: seq retry exhausted: %w", ErrDuplicateMessageSeq)
 	}
 
-	// ---- Step 9: 回写幂等缓存 ----
+	// ---- Step 6: 回写幂等缓存 ----
 	// 覆盖 "PROCESSING" → 实际结果 JSON，TTL 延长到 10 分钟
 	// 忽略错误：Redis 回写失败不影响主流程
 	if err := s.repo.SetIdempotentResult(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId, msg); err != nil {

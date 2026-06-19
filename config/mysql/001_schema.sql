@@ -227,7 +227,7 @@ CREATE TABLE IF NOT EXISTS `message` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_message_msg_id` (`msg_id`),
   UNIQUE KEY `uidx_sender_client` (`client_msg_id`, `from_uuid`, `device_id`),
-  KEY `idx_conv_seq` (`conv_id`, `seq`),
+  UNIQUE KEY `uidx_conv_seq` (`conv_id`, `seq`),
   KEY `idx_conv_time` (`conv_id`, `send_time`),
   KEY `idx_message_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='聊天消息';

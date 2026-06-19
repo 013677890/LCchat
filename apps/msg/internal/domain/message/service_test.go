@@ -24,6 +24,7 @@ type mockRepo struct {
 	tryAcquireFn        func(ctx context.Context, from, dev, cid string) (*model.Message, error)
 	setIdempotentFn     func(ctx context.Context, from, dev, cid string, msg *model.Message) error
 	allocSeqFn          func(ctx context.Context, convId string) (int64, error)
+	repairSeqFn         func(ctx context.Context, convId string) error
 	createFn            func(ctx context.Context, msg *model.Message) error
 	createWithOutboxFn  func(ctx context.Context, msg *model.Message, event OutboxEvent) error
 	getByDuplicateKeyFn func(ctx context.Context, from, dev, cid string) (*model.Message, error)
@@ -52,6 +53,12 @@ func (m *mockRepo) AllocSeq(ctx context.Context, convId string) (int64, error) {
 		return m.allocSeqFn(ctx, convId)
 	}
 	return 1, nil
+}
+func (m *mockRepo) RepairSeq(ctx context.Context, convId string) error {
+	if m.repairSeqFn != nil {
+		return m.repairSeqFn(ctx, convId)
+	}
+	return nil
 }
 func (m *mockRepo) Create(ctx context.Context, msg *model.Message) error {
 	if m.createFn != nil {
@@ -217,6 +224,43 @@ func TestCreateMessage_DBDuplicate_Fallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.IsIdempotent)
 	assert.Equal(t, "existing-id", result.Msg.MsgId)
+}
+
+func TestCreateMessage_DuplicateSeqRepairsAndRetries(t *testing.T) {
+	allocSeqs := []int64{1, 101}
+	allocCalls := 0
+	repairCalls := 0
+	createCalls := 0
+	var createdSeq int64
+	repo := &mockRepo{
+		allocSeqFn: func(_ context.Context, _ string) (int64, error) {
+			seq := allocSeqs[allocCalls]
+			allocCalls++
+			return seq, nil
+		},
+		repairSeqFn: func(_ context.Context, _ string) error {
+			repairCalls++
+			return nil
+		},
+		createWithOutboxFn: func(_ context.Context, msg *model.Message, _ OutboxEvent) error {
+			createCalls++
+			if createCalls == 1 {
+				return ErrDuplicateMessageSeq
+			}
+			createdSeq = msg.Seq
+			return nil
+		},
+	}
+	svc := NewService(repo)
+
+	result, err := svc.CreateMessage(context.Background(), newP2PReq())
+	require.NoError(t, err)
+	assert.False(t, result.IsIdempotent)
+	assert.Equal(t, int64(101), result.Msg.Seq)
+	assert.Equal(t, int64(101), createdSeq)
+	assert.Equal(t, 2, allocCalls)
+	assert.Equal(t, 1, repairCalls)
+	assert.Equal(t, 2, createCalls)
 }
 
 func TestCreateMessage_GroupConvId(t *testing.T) {

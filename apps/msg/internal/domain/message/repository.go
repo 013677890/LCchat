@@ -18,9 +18,13 @@ type OutboxEvent struct {
 type Repository interface {
 	// ==================== seq 分配 ====================
 
-	// AllocSeq 原子分配会话内递增序号
-	// 实现：Redis INCR msg:seq:{conv_id}
+	// AllocSeq 原子分配会话内递增序号。
+	// 实现：Redis 计数器优先；key 缺失时从 DB 最大已落库 seq 回填后再递增。
 	AllocSeq(ctx context.Context, convId string) (int64, error)
+
+	// RepairSeq 将 Redis seq 计数器修复到不小于 DB 最大已落库 seq。
+	// 用于 DB 唯一索引发现 seq 回退后，下一次 AllocSeq 能接续正确上界。
+	RepairSeq(ctx context.Context, convId string) error
 
 	// ==================== 幂等 (SETNX 锁 + 结果缓存) ====================
 
@@ -37,12 +41,13 @@ type Repository interface {
 
 	// ==================== 消息 CRUD ====================
 
-	// Create 插入一条消息
-	// 如果触发 uidx_sender_client 唯一索引冲突，返回 ErrDuplicateMessage
+	// Create 插入一条消息。
+	// 如果触发 uidx_sender_client 唯一索引冲突，返回 ErrDuplicateMessage；
+	// 如果触发 uidx_conv_seq 唯一索引冲突，返回 ErrDuplicateMessageSeq。
 	Create(ctx context.Context, msg *model.Message) error
 
 	// CreateWithOutbox 在同一 MySQL 事务中插入消息与 outbox 事件。
-	// 如果消息唯一索引冲突，返回 ErrDuplicateMessage，且不会写 outbox。
+	// 如果消息唯一索引冲突，返回对应领域错误，且不会写 outbox。
 	CreateWithOutbox(ctx context.Context, msg *model.Message, event OutboxEvent) error
 
 	// GetByDuplicateKey 通过幂等三元组查询已存在的消息（DB 唯一索引兜底）

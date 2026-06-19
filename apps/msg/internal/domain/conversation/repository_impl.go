@@ -130,7 +130,9 @@ func (r *repositoryImpl) BatchInitGroupMemberConv(ctx context.Context, memberUUI
 func (r *repositoryImpl) Upsert(ctx context.Context, conv *model.Conversation, isSender bool) error {
 	// 构造更新 map，只更新发消息时需要变更的字段
 	updates := map[string]interface{}{
-		"max_seq":          conv.MaxSeq,
+		// max_seq 必须单调递增：即使异常 seq 或乱序 workflow 到达，也不能把会话清空位点的基准写小。
+		// 使用 CASE 而非 GREATEST 是为了兼容 SQLite 单元测试，同时 MySQL 语义等价。
+		"max_seq":          gorm.Expr("CASE WHEN max_seq > ? THEN max_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq),
 		"last_msg_id":      conv.LastMsgId,
 		"last_msg_at":      conv.LastMsgAt,
 		"last_msg_preview": conv.LastMsgPrev,
@@ -139,8 +141,8 @@ func (r *repositoryImpl) Upsert(ctx context.Context, conv *model.Conversation, i
 	}
 
 	if isSender {
-		// 发送方：read_seq 追平到当前消息（自己发的消息不算未读）
-		updates["read_seq"] = conv.MaxSeq
+		// 发送方：read_seq 只能向前追平到当前消息，避免旧设备/旧 workflow 把已读位点写小。
+		updates["read_seq"] = gorm.Expr("CASE WHEN read_seq > ? THEN read_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq)
 	} else {
 		// 接收方：在数据库层面 unread_count + 1（极端并发下也安全）
 		updates["unread_count"] = gorm.Expr("unread_count + 1")
@@ -317,8 +319,12 @@ func (r *repositoryImpl) UpsertGroupConv(ctx context.Context, gc *model.GroupCon
 	err := r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "group_uuid"}},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"max_seq", "last_msg_id", "last_msg_preview", "last_msg_at",
+			DoUpdates: clause.Assignments(map[string]interface{}{
+				// 群会话热数据同样只允许 max_seq 前进，防止群列表活跃位点被异常小 seq 回退。
+				"max_seq":          gorm.Expr("CASE WHEN max_seq > ? THEN max_seq ELSE ? END", gc.MaxSeq, gc.MaxSeq),
+				"last_msg_id":      gc.LastMsgId,
+				"last_msg_preview": gc.LastMsgPrev,
+				"last_msg_at":      gc.LastMsgAt,
 			}),
 		}).Create(gc).Error
 	if err != nil {

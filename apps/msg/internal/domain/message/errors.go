@@ -10,6 +10,12 @@ var (
 	// ErrDuplicateMessage 消息重复（DB 唯一索引冲突）
 	ErrDuplicateMessage = errors.New("message: duplicate message")
 
+	// ErrDuplicateMessageSeq 会话内 seq 重复，通常表示 Redis seq 计数器丢失或回退。
+	ErrDuplicateMessageSeq = errors.New("message: duplicate message seq")
+
+	// ErrDuplicateMessageID 全局消息 ID 重复，理论上极少发生，不能按客户端幂等处理。
+	ErrDuplicateMessageID = errors.New("message: duplicate message id")
+
 	// ErrUnsupportedMsgType 消息类型不支持
 	ErrUnsupportedMsgType = errors.New("message: unsupported msg type")
 

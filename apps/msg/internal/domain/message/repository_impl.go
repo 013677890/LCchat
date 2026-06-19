@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
@@ -23,6 +24,14 @@ type repositoryImpl struct {
 	redis *redis.Client
 }
 
+const (
+	// 这些名字必须与 model/Message.go、config/mysql/001_schema.sql 保持一致，
+	// 仓储层依赖它们把 DB 唯一冲突拆成“客户端幂等”和“seq 回退”等不同业务含义。
+	duplicateKeySenderClient = "uidx_sender_client"
+	duplicateKeyConvSeq      = "uidx_conv_seq"
+	duplicateKeyMsgID        = "uk_message_msg_id"
+)
+
 // NewRepository 创建消息仓储实例
 func NewRepository(db *gorm.DB, redisClient *redis.Client) Repository {
 	return &repositoryImpl{db: db, redis: redisClient}
@@ -30,7 +39,7 @@ func NewRepository(db *gorm.DB, redisClient *redis.Client) Repository {
 
 // ==================== seq 分配 ====================
 
-// AllocSeq 通过 Redis INCR 原子分配会话内递增序号
+// AllocSeq 通过 Redis 原子分配会话内递增序号，并在计数器缺失时从 DB 回填。
 //
 // Redis Key:  msg:seq:{conv_id}
 // 数据类型:   String (integer)
@@ -39,12 +48,61 @@ func NewRepository(db *gorm.DB, redisClient *redis.Client) Repository {
 // 每次调用返回值严格 +1，保证同一会话内 seq 全局唯一且递增。
 // 客户端收到消息后按 seq 排序展示，并利用 seq gap 检测消息丢失。
 func (r *repositoryImpl) AllocSeq(ctx context.Context, convId string) (int64, error) {
+	if r.redis == nil {
+		return 0, fmt.Errorf("AllocSeq: redis client is nil")
+	}
 	key := rediskey.MsgSeqKey(convId)
-	seq, err := r.redis.Incr(ctx, key).Result()
+	// 热路径不查 DB：绝大多数情况下 Redis 计数器存在，直接在 Lua 内完成 INCR。
+	// 如果返回 -1，说明 key 缺失，必须先用 DB 最大已落库 seq 作为恢复基准。
+	seq, err := r.redis.Eval(ctx, allocExistingSeqScript, []string{key}).Int64()
 	if err != nil {
-		return 0, fmt.Errorf("AllocSeq: redis INCR %s failed: %w", key, err)
+		return 0, fmt.Errorf("AllocSeq: redis allocate %s failed: %w", key, err)
+	}
+	if seq >= 0 {
+		return seq, nil
+	}
+
+	// Redis 不是最终事实源；key 丢失时只能以 message 表中的 MAX(seq) 作为权威上界。
+	// 后续 recoverSeqScript 会在 Redis 内原子地“回填上界 + 分配下一号”。
+	maxSeq, err := r.getDBMaxSeq(ctx, convId)
+	if err != nil {
+		return 0, fmt.Errorf("AllocSeq: load db max seq failed: %w", err)
+	}
+	seq, err = r.redis.Eval(ctx, recoverSeqScript, []string{key}, maxSeq).Int64()
+	if err != nil {
+		return 0, fmt.Errorf("AllocSeq: redis recover %s failed: %w", key, err)
 	}
 	return seq, nil
+}
+
+// RepairSeq 将 Redis seq 计数器修复到不小于 DB 最大已落库 seq。
+func (r *repositoryImpl) RepairSeq(ctx context.Context, convId string) error {
+	if r.redis == nil {
+		return fmt.Errorf("RepairSeq: redis client is nil")
+	}
+	maxSeq, err := r.getDBMaxSeq(ctx, convId)
+	if err != nil {
+		return fmt.Errorf("RepairSeq: load db max seq failed: %w", err)
+	}
+	key := rediskey.MsgSeqKey(convId)
+	// RepairSeq 只修复 Redis 上界，不直接 INCR，避免一次修复操作额外消耗 seq 造成更大的空洞。
+	if err := r.redis.Eval(ctx, repairSeqScript, []string{key}, maxSeq).Err(); err != nil {
+		return fmt.Errorf("RepairSeq: redis repair %s failed: %w", key, err)
+	}
+	return nil
+}
+
+// getDBMaxSeq 查询消息事实表中的最大已落库 seq，作为 Redis 计数器恢复的权威上界。
+func (r *repositoryImpl) getDBMaxSeq(ctx context.Context, convId string) (int64, error) {
+	var maxSeq int64
+	if err := r.db.WithContext(ctx).
+		Model(&model.Message{}).
+		Where("conv_id = ?", convId).
+		Select("COALESCE(MAX(seq), 0)").
+		Scan(&maxSeq).Error; err != nil {
+		return 0, err
+	}
+	return maxSeq, nil
 }
 
 // ==================== 幂等 (SETNX 锁 + 结果缓存) ====================
@@ -164,8 +222,8 @@ func (r *repositoryImpl) SetIdempotentResult(ctx context.Context, fromUuid, devi
 // 返回 ErrDuplicateMessage，调用者应查出已有记录返回（幂等兜底逻辑）。
 func (r *repositoryImpl) Create(ctx context.Context, msg *model.Message) error {
 	if err := r.db.WithContext(ctx).Create(msg).Error; err != nil {
-		if isDuplicateKeyError(err) {
-			return ErrDuplicateMessage
+		if duplicateErr := mapDuplicateMessageError(err); duplicateErr != nil {
+			return duplicateErr
 		}
 		return fmt.Errorf("Create: db insert failed: %w", err)
 	}
@@ -179,8 +237,8 @@ func (r *repositoryImpl) CreateWithOutbox(ctx context.Context, msg *model.Messag
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(msg).Error; err != nil {
-			if isDuplicateKeyError(err) {
-				return ErrDuplicateMessage
+			if duplicateErr := mapDuplicateMessageError(err); duplicateErr != nil {
+				return duplicateErr
 			}
 			return fmt.Errorf("CreateWithOutbox: db insert failed: %w", err)
 		}
@@ -292,17 +350,15 @@ func (r *repositoryImpl) GetById(ctx context.Context, convId string, msgId strin
 // Redis 异常时降级查 DB MAX(seq)。
 func (r *repositoryImpl) GetMaxSeq(ctx context.Context, convId string) (int64, error) {
 	key := rediskey.MsgSeqKey(convId)
-	val, err := r.redis.Get(ctx, key).Int64()
-	if err == nil {
-		return val, nil
+	if r.redis != nil {
+		val, err := r.redis.Get(ctx, key).Int64()
+		if err == nil {
+			return val, nil
+		}
 	}
 
-	var maxSeq int64
-	if dbErr := r.db.WithContext(ctx).
-		Model(&model.Message{}).
-		Where("conv_id = ?", convId).
-		Select("COALESCE(MAX(seq), 0)").
-		Scan(&maxSeq).Error; dbErr != nil {
+	maxSeq, dbErr := r.getDBMaxSeq(ctx, convId)
+	if dbErr != nil {
 		return 0, fmt.Errorf("GetMaxSeq: db fallback failed: %w", dbErr)
 	}
 	return maxSeq, nil
@@ -354,27 +410,43 @@ func updateMessageStatus(db *gorm.DB, convId string, msgId string, status int8, 
 
 // ==================== 辅助方法 ====================
 
-// isDuplicateKeyError 判断 MySQL 错误是否为唯一索引冲突
+// mapDuplicateMessageError 将唯一索引冲突映射为更细粒度的领域错误。
+func mapDuplicateMessageError(err error) error {
+	if !isDuplicateKeyError(err) {
+		return nil
+	}
+	errMsg := err.Error()
+	switch {
+	case strings.Contains(errMsg, duplicateKeyConvSeq) || hasAll(errMsg, "message.conv_id", "message.seq"):
+		return ErrDuplicateMessageSeq
+	case strings.Contains(errMsg, duplicateKeyMsgID) || strings.Contains(errMsg, "message.msg_id"):
+		return ErrDuplicateMessageID
+	case strings.Contains(errMsg, duplicateKeySenderClient) || hasAll(errMsg, "message.client_msg_id", "message.from_uuid", "message.device_id"):
+		return ErrDuplicateMessage
+	default:
+		return ErrDuplicateMessage
+	}
+}
+
+// isDuplicateKeyError 判断 MySQL/SQLite 错误是否为唯一索引冲突。
 //
 // MySQL Error 1062: Duplicate entry 'xxx' for key 'uidx_sender_client'
-// GORM 不会包装此错误为特定类型，需要通过错误消息字符串匹配
+// SQLite 测试会返回 UNIQUE constraint failed，需要兼容单元测试环境。
 func isDuplicateKeyError(err error) bool {
 	if err == nil {
 		return false
 	}
 	errMsg := err.Error()
-	return len(errMsg) > 10 && (contains(errMsg, "1062") || contains(errMsg, "Duplicate entry"))
+	return strings.Contains(errMsg, "1062") ||
+		strings.Contains(errMsg, "Duplicate entry") ||
+		strings.Contains(errMsg, "UNIQUE constraint failed")
 }
 
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && searchString(s, sub)
-}
-
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
+func hasAll(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
 		}
 	}
-	return false
+	return true
 }
