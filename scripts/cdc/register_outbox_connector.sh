@@ -53,6 +53,7 @@ cat <<EOF >/tmp/outbox-connector.json
   "transforms.outbox.route.topic.replacement": "\${routedByValue}",
   "transforms.outbox.table.field.event.key": "entity_id",
   "transforms.outbox.table.field.event.payload": "payload",
+  "transforms.outbox.table.expand.json.payload": "true",
   "transforms.outbox.table.field.event.id": "id",
   "transforms.outbox.table.fields.additional.placement": "event_type:header:eventType,entity_id:header:entityId,created_at:header:createdAt"
 }
