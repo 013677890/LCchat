@@ -79,7 +79,7 @@ func (s *ConnectService) OnDisconnect(ctx context.Context, session *Session) {
 	if s.activeSyncer != nil {
 		s.activeSyncer.Delete(session.UserUUID, session.DeviceID)
 	}
-	s.RemoveUserRoute(ctx, session.UserUUID, session.DeviceID)
+	s.RemoveUserRoute(ctx, session.UserUUID, session.DeviceID, connectRouteAddr())
 	s.updateDeviceStatusAsync(ctx, session, model.DeviceStatusOffline)
 }
 

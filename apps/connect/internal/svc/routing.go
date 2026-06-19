@@ -8,7 +8,29 @@ import (
 
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/redis/go-redis/v9"
 )
+
+// removeUserRouteCAS 仅当路由 field 当前值仍指向本节点时才删除（compare-and-delete）。
+// 解决跨实例重连竞态：设备从 connect-1 重连到 connect-2 后，connect-1 的旧连接断开
+// 不能误删 connect-2 写入的新路由，否则该在线设备会在心跳节流窗口内对 message-push 不可见。
+// 路由 value 形如 "addr|activeAtMs"，因此按 "addr|" 前缀（或纯 addr 兜底）校验归属。
+// KEYS[1]=routing key  ARGV[1]=deviceID(field)  ARGV[2]=本节点地址  ARGV[3]=删除后续 TTL 秒
+// 返回 1 表示已删除，0 表示 field 不存在或已不属于本节点（不删）。
+var removeUserRouteCAS = redis.NewScript(`
+local cur = redis.call('HGET', KEYS[1], ARGV[1])
+if not cur then
+	return 0
+end
+local addr = ARGV[2]
+local prefix = addr .. '|'
+if cur == addr or string.sub(cur, 1, string.len(prefix)) == prefix then
+	redis.call('HDEL', KEYS[1], ARGV[1])
+	redis.call('EXPIRE', KEYS[1], ARGV[3])
+	return 1
+end
+return 0
+`)
 
 // UpsertUserRoute 写入用户设备路由到 Redis。
 func (s *ConnectService) UpsertUserRoute(ctx context.Context, userUUID, deviceID, connectGRPCAddr string, activeAt time.Time, ttl time.Duration) {
@@ -41,11 +63,29 @@ func (s *ConnectService) RefreshUserRouteActive(ctx context.Context, userUUID, d
 }
 
 // RemoveUserRoute 删除一个用户设备路由。
-func (s *ConnectService) RemoveUserRoute(ctx context.Context, userUUID, deviceID string) {
+// selfAddr 为本节点地址（CONNECT_SELF_GRPC_ADDR）：非空时走 Lua CAS，仅当该 field
+// 仍指向本节点才删除，避免误删设备重连到其它节点后写入的新路由（跨实例重连竞态）。
+// selfAddr 为空（降级/未配置地址）时回退到无条件删除，保持旧行为。
+func (s *ConnectService) RemoveUserRoute(ctx context.Context, userUUID, deviceID, selfAddr string) {
 	if s == nil || s.redisClient == nil || userUUID == "" || deviceID == "" {
 		return
 	}
 	key := rediskey.UserRoutingKey(userUUID)
+
+	if selfAddr = strings.TrimSpace(selfAddr); selfAddr != "" {
+		ttlSeconds := int(rediskey.DeviceActiveTTL / time.Second)
+		if err := removeUserRouteCAS.Run(ctx, s.redisClient,
+			[]string{key}, deviceID, selfAddr, ttlSeconds).Err(); err != nil {
+			logger.Warn(ctx, "CAS 删除用户设备路由失败（不阻塞）",
+				logger.String("user_uuid", userUUID),
+				logger.String("device_id", deviceID),
+				logger.String("connect_addr", selfAddr),
+				logger.ErrorField("error", err),
+			)
+		}
+		return
+	}
+
 	pipe := s.redisClient.Pipeline()
 	pipe.HDel(ctx, key, deviceID)
 	pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
