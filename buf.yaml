@@ -1,0 +1,24 @@
+# buf.yaml — buf 工作区配置（v2）。
+# 两个 include 根，对应原 protoc 的 `-I .` 与 `-I third_party`：
+#   - 根 "."：使服务间 import "proto/xxx/xxx.proto" 可解析（路径相对仓库根）。
+#   - 根 "third_party"：使 import "validate/validate.proto" 可解析。
+# third_party / web 从主模块排除：前者改由独立模块仅供 import（不参与生成），
+# 后者是前端工程（无 .proto，排除以免 buf 扫描 node_modules 拖慢编译）。
+version: v2
+modules:
+  - path: .
+    excludes:
+      - third_party
+      - web
+  - path: third_party
+lint:
+  use:
+    - STANDARD
+  # proto 文件名/包名与历史约定（package 不带版本号、目录名带前缀）不完全符合
+  # buf STANDARD，这里仅作为 `buf lint` 的参考基线，不阻断 `buf generate`。
+  except:
+    - PACKAGE_VERSION_SUFFIX
+    - PACKAGE_DIRECTORY_MATCH
+breaking:
+  use:
+    - FILE

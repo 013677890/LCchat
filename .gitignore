@@ -25,11 +25,11 @@ data/
 Thumbs.db
 
 # --- Protobuf 生成的文件 ---
-# proto 编译生成的 Go 代码（运行 make proto 时生成）
+# proto 编译生成的 Go 代码（运行 make proto / Docker builder 阶段由 buf 生成，不入库）
 *.pb.go
 *.pb.validate.go
-# --- 第三方库 ---
-third_party/
+# 注意：third_party/ 不再整体忽略——third_party/validate/validate.proto 是
+# buf generate 的 import 依赖，必须随仓库一起跟踪，否则干净克隆无法生成 pb 代码。
 
 # --- 编译缓存 ---
 .gocache/

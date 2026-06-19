@@ -1,0 +1,23 @@
+# buf.gen.yaml — 代码生成配置（v2）。
+# 三个本地插件版本与 Makefile `make tools` / go.mod 对齐：
+#   protoc-gen-go        v1.36.10
+#   protoc-gen-go-grpc   v1.6.1
+#   protoc-gen-validate-go (envoyproxy/protoc-gen-validate) v1.3.0
+# 不启用 managed 模式：沿用各 .proto 内显式声明的 go_package，
+# 配合 opt=module=... 将产物落到对应 apps/*/pb、pkg/commonpb、pkg/realtimepb。
+version: v2
+managed:
+  enabled: false
+plugins:
+  - local: protoc-gen-go
+    out: .
+    opt:
+      - module=github.com/013677890/LCchat-Backend
+  - local: protoc-gen-go-grpc
+    out: .
+    opt:
+      - module=github.com/013677890/LCchat-Backend
+  - local: protoc-gen-validate-go
+    out: .
+    opt:
+      - module=github.com/013677890/LCchat-Backend

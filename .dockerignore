@@ -16,3 +16,9 @@ ChatServer
 web/
 
 .gocache/
+
+# 忽略本地生成的 pb 代码：Docker builder 阶段用 buf 重新生成，
+# 不让宿主机已有产物进入构建上下文，保证镜像构建可复现。
+**/*.pb.go
+**/*.pb.validate.go
+
