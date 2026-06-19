@@ -7,6 +7,8 @@ import (
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestWrapCapturesStackOnlyOnce(t *testing.T) {
@@ -36,4 +38,29 @@ func TestSanitizeStripsStackAndKeepsCodeMessage(t *testing.T) {
 	assert.Equal(t, consts.GetMessage(consts.CodeInternalError), Message(clean))
 	assert.Equal(t, consts.GetMessage(consts.CodeInternalError), clean.Error())
 	assert.False(t, HasStack(clean))
+}
+
+func TestToStatusMapsBusinessErrorsToExpectedGRPCCodes(t *testing.T) {
+	tests := []struct {
+		name string
+		code int
+		want codes.Code
+	}{
+		{name: "二维码格式错误", code: consts.CodeQRCodeFormatError, want: codes.InvalidArgument},
+		{name: "二维码已过期", code: consts.CodeQRCodeExpired, want: codes.FailedPrecondition},
+		{name: "邮箱格式无效", code: consts.CodeInvalidEmail, want: codes.InvalidArgument},
+		{name: "消息类型不支持", code: consts.CodeMessageTypeNotSupport, want: codes.InvalidArgument},
+		{name: "消息发送失败", code: consts.CodeMessageSendFail, want: codes.FailedPrecondition},
+		{name: "不是群成员", code: consts.CodeNotGroupMember, want: codes.PermissionDenied},
+		{name: "设备信息无效", code: consts.CodeDeviceInfoInvalid, want: codes.InvalidArgument},
+		{name: "内部错误", code: consts.CodeInternalError, want: codes.Internal},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ToStatus(New(tt.code))
+			require.Error(t, err)
+			assert.Equal(t, tt.want, status.Code(err))
+		})
+	}
 }

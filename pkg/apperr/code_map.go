@@ -10,17 +10,22 @@ func grpcCodeForBizCode(code int) codes.Code {
 	switch code {
 	case consts.CodeParamError, consts.CodeBodyError, consts.CodeBodyTooLarge,
 		consts.CodeEmailFormatError, consts.CodePhoneFormatError,
+		consts.CodeFileFormatNotSupport, consts.CodeQRCodeFormatError,
 		consts.CodeVerifyCodeTypeInvalid, consts.CodePasswordFormatError,
 		consts.CodeNicknameFormatError, consts.CodeBirthdayFormatError,
-		consts.CodeGenderInvalid, consts.CodeRemarkTooLong, consts.CodeReasonTooLong,
+		consts.CodeGenderInvalid, consts.CodeSignatureTooLong,
+		consts.CodeRemarkTooLong, consts.CodeReasonTooLong,
 		consts.CodeTagNameInvalid, consts.CodeSourceInvalid,
+		consts.CodeInvalidEmail, consts.CodeMessageTypeNotSupport,
+		consts.CodeDeviceInfoInvalid,
 		consts.CodeConnectTokenRequired, consts.CodeConnectDeviceIDRequired,
 		consts.CodeConnectMessageFormatError, consts.CodeConnectMessageTypeNotSupport:
 		return codes.InvalidArgument
 	case consts.CodeUnauthorized, consts.CodeInvalidToken, consts.CodeTokenExpired,
 		consts.CodeVerifyCodeError, consts.CodeVerifyCodeExpire, consts.CodePasswordError:
 		return codes.Unauthenticated
-	case consts.CodePermissionDeny, consts.CodeUserDisabled, consts.CodeNoPermission,
+	case consts.CodePermissionDeny, consts.CodeUserDisabled, consts.CodeAccountDeleted,
+		consts.CodeNoPermission, consts.CodeNotGroupMember,
 		consts.CodeNoPermissionHandle, consts.CodeRecallNoPermission:
 		return codes.PermissionDenied
 	case consts.CodeResourceNotFound, consts.CodeUserNotFound, consts.CodeAccountNotFound,
@@ -31,6 +36,7 @@ func grpcCodeForBizCode(code int) codes.Code {
 	case consts.CodeUserAlreadyExist, consts.CodeNicknameAlreadyExist,
 		consts.CodeEmailAlreadyExist, consts.CodeTelephoneAlreadyExist,
 		consts.CodeAlreadyFriend, consts.CodeFriendRequestSent,
+		consts.CodeIsBlacklist,
 		consts.CodeAlreadyInBlacklist, consts.CodeDeviceAlreadyExist,
 		consts.CodeMessageRevoked, consts.CodeMessageDuplicate,
 		consts.CodeAlreadyGroupMember, consts.CodeGroupApplyAlreadyExists:
@@ -39,8 +45,10 @@ func grpcCodeForBizCode(code int) codes.Code {
 		return codes.ResourceExhausted
 	case consts.CodeMethodNotAllowed:
 		return codes.Unimplemented
-	case consts.CodePasswordSameAsOld, consts.CodeApplyNotFoundOrHandle,
+	case consts.CodePasswordSameAsOld, consts.CodeQRCodeExpired,
+		consts.CodeApplyNotFoundOrHandle,
 		consts.CodeApplyExpired, consts.CodeFriendLimitExceeded,
+		consts.CodeMessageSendFail,
 		consts.CodeMessageContentEmpty, consts.CodeMessageTooLong,
 		consts.CodeMessageDeleted, consts.CodeRecallTimeout,
 		consts.CodeGroupFull, consts.CodeGroupNameTooLong,
