@@ -28,10 +28,16 @@ type Repository interface {
 	ListGroup(ctx context.Context, ownerUuid string, updatedSince, cursorTimeMs, cursorId int64, pageSize int) ([]*model.Conversation, error)
 
 	// Upsert 创建或更新个人会话（发消息时调用）
-	//   - 按 (owner_uuid, conv_id) 唯一键 upsert
+	//   - 按 (owner_uuid, target_uuid) 唯一键 upsert
 	//   - isSender: 发送方不增加未读数；接收方在 DB 层面 unread_count + 1
 	//   - 只更新核心字段 (max_seq, last_msg_*, status)，绝不碰 mute/pin/read_seq/clear_seq
 	Upsert(ctx context.Context, conv *model.Conversation, isSender bool) error
+
+	// RepairForMessage 幂等修复个人会话投影（幂等命中/补偿路径使用）
+	//   - 缺行时按消息创建会话行
+	//   - 已有行落后时推进 max_seq/last_msg/status
+	//   - 接收方 unread_count 按 max_seq-read_seq 重算，避免重复重试时 +1
+	RepairForMessage(ctx context.Context, conv *model.Conversation, isSender bool) error
 
 	// UpdateReadSeq 更新已读位点（单调递增）
 	//   - 实现：UPDATE SET read_seq = GREATEST(read_seq, ?),

@@ -79,6 +79,44 @@ func (s *Service) UpsertForMessage(
 	targetUuid string,
 	isSender bool,
 ) error {
+	conv := buildMessageConversation(ownerUuid, msg, convType, targetUuid, isSender)
+
+	// isSender 透传给 repository，控制 ON DUPLICATE KEY UPDATE 中的 unread 逻辑
+	if err := s.repo.Upsert(ctx, conv, isSender); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RepairForMessage 幂等修复发消息产生的个人会话投影。
+//
+// 与 UpsertForMessage 的区别是：接收方未读数不做 +1，而是由仓储按 max_seq/read_seq 重算，
+// 因此可以在幂等命中、异步补偿、重复重试时安全反复执行。
+func (s *Service) RepairForMessage(
+	ctx context.Context,
+	ownerUuid string,
+	msg *model.Message,
+	convType pb.ConvType,
+	targetUuid string,
+	isSender bool,
+) error {
+	conv := buildMessageConversation(ownerUuid, msg, convType, targetUuid, isSender)
+	if !isSender {
+		conv.UnreadCount = ComputeUnreadCount(msg.Seq, 0)
+	}
+	if err := s.repo.RepairForMessage(ctx, conv, isSender); err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildMessageConversation(
+	ownerUuid string,
+	msg *model.Message,
+	convType pb.ConvType,
+	targetUuid string,
+	isSender bool,
+) *model.Conversation {
 	preview := buildLastMsgPreview(msg)
 	sendTime := msg.SendTime
 
@@ -91,24 +129,18 @@ func (s *Service) UpsertForMessage(
 		LastMsgAt:   &sendTime,
 		LastMsgPrev: preview,
 		MaxSeq:      msg.Seq,
-		Status:      0, // 重新激活已删除的会话
+		Status:      0, // 新消息会重新激活已删除的会话
 	}
 
-	// 发送方初始化时 read_seq 追平
 	if isSender {
 		conv.ReadSeq = msg.Seq
 		conv.UnreadCount = 0
 	} else {
-		// INSERT 场景（首次创建会话）时 unread_count=1
-		// UPDATE 场景会被 repo.Upsert 里的 gorm.Expr("unread_count + 1") 覆盖
+		// 普通发送路径 INSERT 时只代表“这条新消息未读”。
+		// 修复路径会在调用方覆盖为 max_seq-read_seq 语义，避免漏写后补行时少算。
 		conv.UnreadCount = 1
 	}
-
-	// isSender 透传给 repository，控制 ON DUPLICATE KEY UPDATE 中的 unread 逻辑
-	if err := s.repo.Upsert(ctx, conv, isSender); err != nil {
-		return err
-	}
-	return nil
+	return conv
 }
 
 // UpsertGroupConv 发群消息时更新群会话热数据

@@ -98,7 +98,7 @@ func (r *repositoryImpl) ListGroup(ctx context.Context, ownerUuid string, update
 }
 
 // BatchInitGroupMemberConv 批量初始化群成员 conversation 行。
-// INSERT IGNORE 语义：仅当 (owner_uuid, conv_id) 不存在时插入，已存在的跳过。
+// INSERT IGNORE 语义：仅当 (owner_uuid, target_uuid) 不存在时插入，已存在的跳过。
 func (r *repositoryImpl) BatchInitGroupMemberConv(ctx context.Context, memberUUIDs []string, groupUUID string) error {
 	if len(memberUUIDs) == 0 {
 		return nil
@@ -115,7 +115,7 @@ func (r *repositoryImpl) BatchInitGroupMemberConv(ctx context.Context, memberUUI
 	}
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "owner_uuid"}, {Name: "conv_id"}},
+			Columns:   []clause.Column{{Name: "owner_uuid"}, {Name: "target_uuid"}},
 			DoNothing: true,
 		}).CreateInBatches(convs, 100).Error
 }
@@ -150,13 +150,68 @@ func (r *repositoryImpl) Upsert(ctx context.Context, conv *model.Conversation, i
 
 	err := r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "owner_uuid"}, {Name: "conv_id"}},
+			Columns:   []clause.Column{{Name: "owner_uuid"}, {Name: "target_uuid"}},
 			DoUpdates: clause.Assignments(updates),
 		}).Create(conv).Error
 	if err != nil {
 		return fmt.Errorf("Upsert: db upsert failed: %w", err)
 	}
 	return nil
+}
+
+// RepairForMessage 幂等修复个人会话投影。
+//
+// 这条路径用于“消息事实已存在，但 conversation 派生视图可能漏写”的补偿场景：
+//   - 不使用接收方 unread_count + 1，避免幂等重试重复加未读；
+//   - 接收方未读按当前 max_seq-read_seq 重算；
+//   - 只有会话行落后于当前消息时才推进 last_msg/max_seq/status。
+func (r *repositoryImpl) RepairForMessage(ctx context.Context, conv *model.Conversation, isSender bool) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		insertResult := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "owner_uuid"}, {Name: "target_uuid"}},
+			DoNothing: true,
+		}).Create(conv)
+		if insertResult.Error != nil {
+			return fmt.Errorf("RepairForMessage: insert conversation failed: %w", insertResult.Error)
+		}
+		if insertResult.RowsAffected > 0 {
+			return nil
+		}
+
+		staleUpdates := map[string]interface{}{
+			"max_seq":          conv.MaxSeq,
+			"last_msg_id":      conv.LastMsgId,
+			"last_msg_at":      conv.LastMsgAt,
+			"last_msg_preview": conv.LastMsgPrev,
+			"status":           0,
+			"updated_at":       time.Now(),
+		}
+		if isSender {
+			staleUpdates["read_seq"] = gorm.Expr("CASE WHEN read_seq > ? THEN read_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq)
+		}
+
+		if err := tx.Model(&model.Conversation{}).
+			Where("owner_uuid = ? AND conv_id = ? AND max_seq < ?", conv.OwnerUuid, conv.ConvId, conv.MaxSeq).
+			Updates(staleUpdates).Error; err != nil {
+			return fmt.Errorf("RepairForMessage: update stale conversation failed: %w", err)
+		}
+
+		if isSender {
+			if err := tx.Model(&model.Conversation{}).
+				Where("owner_uuid = ? AND conv_id = ?", conv.OwnerUuid, conv.ConvId).
+				UpdateColumn("read_seq", gorm.Expr("CASE WHEN read_seq > ? THEN read_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq)).Error; err != nil {
+				return fmt.Errorf("RepairForMessage: repair sender read_seq failed: %w", err)
+			}
+			return nil
+		}
+
+		if err := tx.Model(&model.Conversation{}).
+			Where("owner_uuid = ? AND conv_id = ?", conv.OwnerUuid, conv.ConvId).
+			UpdateColumn("unread_count", gorm.Expr("CASE WHEN read_seq >= max_seq THEN 0 ELSE max_seq - read_seq END")).Error; err != nil {
+			return fmt.Errorf("RepairForMessage: recompute receiver unread failed: %w", err)
+		}
+		return nil
+	})
 }
 
 // UpdateReadSeq 更新已读位点（单调递增）
@@ -225,7 +280,7 @@ func (r *repositoryImpl) UpsertGroupReadSeqWithOutbox(ctx context.Context, owner
 		}
 		// 冲突（行已存在）时只单调推进 read_seq，绝不触碰 status/clear_seq/mute/pin。
 		if err := tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "owner_uuid"}, {Name: "conv_id"}},
+			Columns: []clause.Column{{Name: "owner_uuid"}, {Name: "target_uuid"}},
 			DoUpdates: clause.Assignments(map[string]interface{}{
 				"read_seq": gorm.Expr("GREATEST(read_seq, ?)", readSeq),
 			}),

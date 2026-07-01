@@ -22,6 +22,7 @@ func init() { logger.ReplaceGlobal(zap.NewNop()) }
 
 type mockRepo struct {
 	upsertFn            func(ctx context.Context, conv *model.Conversation, isSender bool) error
+	repairFn            func(ctx context.Context, conv *model.Conversation, isSender bool) error
 	upsertGroupConvFn   func(ctx context.Context, gc *model.GroupConversation) error
 	batchInitFn         func(ctx context.Context, members []string, groupUUID string) error
 	getByOwnerAndConvFn func(ctx context.Context, owner, convId string) (*model.Conversation, error)
@@ -42,6 +43,12 @@ type mockGroupMembershipQuerier struct {
 func (m *mockRepo) Upsert(ctx context.Context, conv *model.Conversation, isSender bool) error {
 	if m.upsertFn != nil {
 		return m.upsertFn(ctx, conv, isSender)
+	}
+	return nil
+}
+func (m *mockRepo) RepairForMessage(ctx context.Context, conv *model.Conversation, isSender bool) error {
+	if m.repairFn != nil {
+		return m.repairFn(ctx, conv, isSender)
 	}
 	return nil
 }
@@ -170,6 +177,33 @@ func TestUpsertForMessage_Receiver(t *testing.T) {
 
 	assert.False(t, capturedIsSender)
 	assert.Equal(t, 1, captured.UnreadCount)
+	assert.Equal(t, int64(0), captured.ReadSeq)
+}
+
+func TestRepairForMessage_ReceiverUsesDerivedUnreadOnInsert(t *testing.T) {
+	var captured *model.Conversation
+	var capturedIsSender bool
+
+	repo := &mockRepo{
+		repairFn: func(_ context.Context, conv *model.Conversation, isSender bool) error {
+			captured = conv
+			capturedIsSender = isSender
+			return nil
+		},
+	}
+	svc := NewService(repo)
+
+	now := time.Now()
+	msg := &model.Message{
+		ConvId: "p2p-a-b", MsgId: "m7", Seq: 7, FromUuid: "a",
+		Content: `{"text":"hi"}`, MsgType: 1, SendTime: now,
+	}
+	err := svc.RepairForMessage(context.Background(), "b", msg, pb.ConvType_CONV_TYPE_P2P, "a", false)
+	require.NoError(t, err)
+
+	assert.False(t, capturedIsSender)
+	assert.Equal(t, int64(7), captured.MaxSeq)
+	assert.Equal(t, 7, captured.UnreadCount)
 	assert.Equal(t, int64(0), captured.ReadSeq)
 }
 

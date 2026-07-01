@@ -9,6 +9,7 @@ import (
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/groupcli"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
@@ -71,6 +72,9 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 
 	// Step 2: 幂等命中 → 直接返回首次创建的结果
 	if result.IsIdempotent {
+		if err := w.repairIdempotentConversationProjection(ctx, req, msg); err != nil {
+			return nil, fmt.Errorf("SendMessageWorkflow: 修复幂等消息会话投影失败: %w", err)
+		}
 		return &pb.SendMessageResponse{
 			MsgId:    msg.MsgId,
 			Seq:      msg.Seq,
@@ -132,6 +136,19 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 		ConvId:   msg.ConvId,
 		SendTime: msg.SendTime.UnixMilli(),
 	}, nil
+}
+
+func (w *SendMessageWorkflow) repairIdempotentConversationProjection(ctx context.Context, req *pb.SendMessageRequest, msg *model.Message) error {
+	if req.ConvType != pb.ConvType_CONV_TYPE_P2P {
+		return nil
+	}
+	if err := w.convService.RepairForMessage(ctx, req.FromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
+		return fmt.Errorf("修复发送方会话失败: %w", err)
+	}
+	if err := w.convService.RepairForMessage(ctx, req.TargetUuid, msg, req.ConvType, req.FromUuid, false); err != nil {
+		return fmt.Errorf("修复接收方会话失败: %w", err)
+	}
+	return nil
 }
 
 func (w *SendMessageWorkflow) ensureGroupMembersConv(ctx context.Context, groupUUID string) error {
