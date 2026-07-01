@@ -166,6 +166,7 @@ services:
       KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
       AUTH_GRPC_ADDR: ":9090"
       AUTH_METRICS_ADDR: ":9190"
+      SNOWFLAKE_NODE_ID: ${AUTH_SNOWFLAKE_NODE_ID:-101}
       EMAIL_SENDER: ${EMAIL_SENDER:-2315635418@qq.com}
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-LCChat}
       EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-smtp.qq.com}
@@ -210,6 +211,7 @@ services:
       KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
       USER_GRPC_ADDR: ":9094"
       USER_METRICS_ADDR: ":9194"
+      SNOWFLAKE_NODE_ID: ${USER_SNOWFLAKE_NODE_ID:-201}
       EMAIL_SENDER: ${EMAIL_SENDER:-2315635418@qq.com}
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-LCChat}
       EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-smtp.qq.com}
@@ -290,6 +292,7 @@ services:
       KAFKA_GROUP_CACHE_GROUP_ID: group-cache-projector-group
       GROUP_GRPC_ADDR: ":9095"
       GROUP_METRICS_ADDR: ":9195"
+      SNOWFLAKE_NODE_ID: ${GROUP_SNOWFLAKE_NODE_ID:-301}
     depends_on:
       mysql:
         condition: service_healthy
@@ -329,6 +332,7 @@ services:
       RELATION_GRPC_ADDR: "relation:9093"
       MSG_GRPC_ADDR: ":9092"
       MSG_METRICS_ADDR: ":9192"
+      SNOWFLAKE_NODE_ID: ${MSG_SNOWFLAKE_NODE_ID:-401}
     depends_on:
       mysql:
         condition: service_healthy

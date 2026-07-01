@@ -87,7 +87,9 @@ func NewUserApp(
 // 约束：后台 worker 先启动，最后由 gRPC Serve 阻塞当前 goroutine，
 // 这样 main 只需要感知一个运行入口。
 func (a *UserApp) Run(ctx context.Context) error {
-	a.installProcessGlobals(ctx)
+	if err := a.installProcessGlobals(ctx); err != nil {
+		return err
+	}
 
 	if a.metricsServer != nil {
 		go func() {
@@ -205,7 +207,7 @@ func (a *UserApp) Shutdown(ctx context.Context) error {
 // installProcessGlobals 在对外提供服务前注册全局 logger / DB / Redis / 异步池等，
 // 与 Snowflake、邮件、设备在线窗口、Kafka 全局 Producer 等进程级副作用。
 // 放在 Run 而非 Wire Provider，避免在依赖装配阶段产生隐式全局状态。
-func (a *UserApp) installProcessGlobals(ctx context.Context) {
+func (a *UserApp) installProcessGlobals(ctx context.Context) error {
 	logger.ReplaceGlobal(a.logger)
 	if a.db != nil {
 		mysql.ReplaceGlobal(a.db)
@@ -217,7 +219,9 @@ func (a *UserApp) installProcessGlobals(ctx context.Context) {
 		return ctxmeta.ChildContextFromParent(parent)
 	})
 	async.ReplaceGlobalWithReleaseTimeout(a.asyncPool, a.asyncReleaseTimeout)
-	_ = util.InitSnowflake(1)
+	if err := util.InitSnowflakeFromEnv(); err != nil {
+		return fmt.Errorf("初始化 Snowflake 节点失败: %w", err)
+	}
 	util.SetEmailConfig(util.EmailConfig{
 		SMTPHost:     userGetEnv("EMAIL_SMTP_HOST", "smtp.qq.com"),
 		SMTPPort:     userGetEnvInt("EMAIL_SMTP_PORT", 465),
@@ -229,6 +233,7 @@ func (a *UserApp) installProcessGlobals(ctx context.Context) {
 		mq.SetGlobalProducer(a.kafkaProducer)
 	}
 	_ = ctx
+	return nil
 }
 
 func userGetEnv(key, defaultValue string) string {

@@ -4,6 +4,13 @@ x-app-scale: &app-scale
   deploy:
     replicas: 3
 
+# Plain Compose replicas cannot inject a different SNOWFLAKE_NODE_ID into each replica.
+# Keep services that generate Snowflake IDs singleton until they are expanded into
+# explicit per-node services or moved to an orchestrator with per-pod node assignment.
+x-id-generator-singleton: &id-generator-singleton
+  deploy:
+    replicas: 1
+
 x-connect-node: &connect-node
   build:
     context: .
@@ -54,14 +61,14 @@ services:
       - chat-network
 
   auth:
-    <<: *app-scale
+    <<: *id-generator-singleton
     ports: !reset []
     depends_on:
       kafka-topics-init:
         condition: service_completed_successfully
 
   user:
-    <<: *app-scale
+    <<: *id-generator-singleton
     ports: !reset []
     depends_on:
       kafka-topics-init:
@@ -75,14 +82,14 @@ services:
         condition: service_completed_successfully
 
   group:
-    <<: *app-scale
+    <<: *id-generator-singleton
     ports: !reset []
     depends_on:
       kafka-topics-init:
         condition: service_completed_successfully
 
   msg:
-    <<: *app-scale
+    <<: *id-generator-singleton
     ports: !reset []
     depends_on:
       kafka-topics-init:

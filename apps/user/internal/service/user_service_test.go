@@ -14,6 +14,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -228,6 +229,7 @@ func TestUserServiceUpdateAndAvatar(t *testing.T) {
 
 func TestUserServiceQRCodeDeleteAndBatch(t *testing.T) {
 	initUserSvcTestLogger()
+	require.NoError(t, util.InitSnowflake(201))
 
 	t.Run("get_qrcode_existing_token", func(t *testing.T) {
 		expireAt := time.Now().Add(12 * time.Hour)

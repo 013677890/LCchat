@@ -75,7 +75,9 @@ func NewAuthApp(
 
 // Run 启动 auth 服务的长生命周期组件。
 func (a *AuthApp) Run(ctx context.Context) error {
-	a.installProcessGlobals(ctx)
+	if err := a.installProcessGlobals(ctx); err != nil {
+		return err
+	}
 
 	if a.metricsServer != nil {
 		go func() {
@@ -165,7 +167,7 @@ func (a *AuthApp) Shutdown(ctx context.Context) error {
 }
 
 // installProcessGlobals 在服务启动前安装进程级全局依赖与配置。
-func (a *AuthApp) installProcessGlobals(ctx context.Context) {
+func (a *AuthApp) installProcessGlobals(ctx context.Context) error {
 	logger.ReplaceGlobal(a.logger)
 	if a.db != nil {
 		mysql.ReplaceGlobal(a.db)
@@ -173,7 +175,9 @@ func (a *AuthApp) installProcessGlobals(ctx context.Context) {
 	if a.redisClient != nil {
 		pkgredis.ReplaceGlobal(a.redisClient)
 	}
-	_ = util.InitSnowflake(1)
+	if err := util.InitSnowflakeFromEnv(); err != nil {
+		return fmt.Errorf("初始化 Snowflake 节点失败: %w", err)
+	}
 	util.SetEmailConfig(util.EmailConfig{
 		SMTPHost:     authGetEnv("EMAIL_SMTP_HOST", "smtp.qq.com"),
 		SMTPPort:     authGetEnvInt("EMAIL_SMTP_PORT", 465),
@@ -187,6 +191,7 @@ func (a *AuthApp) installProcessGlobals(ctx context.Context) {
 		mq.SetGlobalProducer(a.kafkaProducer)
 	}
 	_ = ctx
+	return nil
 }
 
 func authGetEnv(key, defaultValue string) string {

@@ -11,6 +11,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepb"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -303,6 +304,8 @@ func int32Ptr(value int32) *int32 {
 }
 
 func TestCreateGroupBuildsGroupAndInitialMembers(t *testing.T) {
+	require.NoError(t, util.InitSnowflake(301))
+
 	var gotGroup *model.GroupInfo
 	var gotMembers []*model.GroupMember
 	repo := &fakeGroupRepoForService{

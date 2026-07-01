@@ -216,13 +216,19 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	// AccessToken 用于短期访问授权；RefreshToken 作为设备级长期续期凭据。
 	generateTokenStartedAt := time.Now()
 	accessToken, err := util.GenerateToken(user.UserUuid, deviceID)
-	snapshot.generateTokenCost = time.Since(generateTokenStartedAt)
 	if err != nil {
+		snapshot.generateTokenCost = time.Since(generateTokenStartedAt)
 		snapshot.totalCost = time.Since(loginStartedAt)
 		logPasswordLoginFlow(ctx, "generate_token", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成访问令牌失败")
 	}
-	refreshToken := util.GenIDString()
+	refreshToken, err := util.GenerateRefreshToken()
+	snapshot.generateTokenCost = time.Since(generateTokenStartedAt)
+	if err != nil {
+		snapshot.totalCost = time.Since(loginStartedAt)
+		logPasswordLoginFlow(ctx, "generate_refresh_token", err, snapshot)
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成 RefreshToken 失败")
+	}
 
 	// 登录成功后优先写入 token，再尽力补充设备会话与在线态信息。
 	// AccessToken 写失败时不能放行，因为客户端将无法继续访问接口。
@@ -339,7 +345,10 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成访问令牌失败")
 	}
-	refreshToken := util.GenIDString()
+	refreshToken, err := util.GenerateRefreshToken()
+	if err != nil {
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成 RefreshToken 失败")
+	}
 
 	// 两类 token 都是验证码登录主链路的必要结果，任何一项失败都直接返回错误。
 	if err := s.deviceRepo.StoreAccessToken(ctx, user.UserUuid, deviceID, accessToken, util.AccessExpire); err != nil {

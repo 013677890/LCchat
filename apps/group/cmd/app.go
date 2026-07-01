@@ -16,6 +16,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/util"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -92,7 +93,9 @@ func NewGroupApp(
 //  3. 启动 group.cache Kafka 消费者；
 //  4. 启动 gRPC server 并阻塞当前 goroutine。
 func (a *GroupApp) Run(ctx context.Context) error {
-	a.installProcessGlobals(ctx)
+	if err := a.installProcessGlobals(ctx); err != nil {
+		return err
+	}
 
 	if a.metricsServer != nil {
 		go func() {
@@ -185,7 +188,7 @@ func (a *GroupApp) Shutdown(ctx context.Context) error {
 //
 // 这些都是“进程级副作用”，放在 Run 阶段统一安装，
 // 可以避免在 Wire provider 中提前污染全局状态，保证依赖装配仍然是纯构造过程。
-func (a *GroupApp) installProcessGlobals(ctx context.Context) {
+func (a *GroupApp) installProcessGlobals(ctx context.Context) error {
 	logger.ReplaceGlobal(a.logger)
 	if a.db != nil {
 		mysql.ReplaceGlobal(a.db)
@@ -197,5 +200,9 @@ func (a *GroupApp) installProcessGlobals(ctx context.Context) {
 		return ctxmeta.ChildContextFromParent(parent)
 	})
 	async.ReplaceGlobalWithReleaseTimeout(a.asyncPool, a.asyncReleaseTimeout)
+	if err := util.InitSnowflakeFromEnv(); err != nil {
+		return fmt.Errorf("初始化 Snowflake 节点失败: %w", err)
+	}
 	_ = ctx
+	return nil
 }

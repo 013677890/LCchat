@@ -68,7 +68,9 @@ func NewMsgApp(
 
 // Run 启动 msg 服务。
 func (a *MsgApp) Run(ctx context.Context) error {
-	a.installProcessGlobals(ctx)
+	if err := a.installProcessGlobals(ctx); err != nil {
+		return err
+	}
 
 	if a.metricsServer != nil {
 		go func() {
@@ -139,7 +141,7 @@ func (a *MsgApp) Shutdown(ctx context.Context) error {
 }
 
 // installProcessGlobals 在对外提供服务前注册全局 logger / DB / Redis / 异步池，并初始化 Snowflake。
-func (a *MsgApp) installProcessGlobals(ctx context.Context) {
+func (a *MsgApp) installProcessGlobals(ctx context.Context) error {
 	logger.ReplaceGlobal(a.logger)
 	if a.db != nil {
 		mysql.ReplaceGlobal(a.db)
@@ -151,6 +153,9 @@ func (a *MsgApp) installProcessGlobals(ctx context.Context) {
 		return ctxmeta.ChildContextFromParent(parent)
 	})
 	async.ReplaceGlobalWithReleaseTimeout(a.asyncPool, a.asyncReleaseTimeout)
-	_ = util.InitSnowflake(2)
+	if err := util.InitSnowflakeFromEnv(); err != nil {
+		return fmt.Errorf("初始化 Snowflake 节点失败: %w", err)
+	}
 	_ = ctx
+	return nil
 }
