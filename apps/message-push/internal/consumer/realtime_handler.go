@@ -198,6 +198,10 @@ func (h *RealtimeHandler) pushRealtimeRoutes(ctx context.Context, eventType stri
 	routes = dedupeDeviceRoutes(routes)
 	var successCount, failedCount int
 	for _, deviceRoute := range routes {
+		if ctx.Err() != nil {
+			// 处理预算到期/关停：停止继续扇出，避免对剩余设备做无谓的快失败调用。
+			break
+		}
 		pushStart := time.Now()
 		pushErr := h.sender.PushToDevice(ctx, deviceRoute.ConnectGRPCAddr, deviceRoute.UserUUID, deviceRoute.DeviceID, envelope)
 		if pushErr != nil {

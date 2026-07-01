@@ -13,6 +13,13 @@ type MySQLConfig struct {
 	ConnMaxIdle  time.Duration `json:"connMaxIdle" yaml:"connMaxIdle"`   // 连接最大空闲时间
 	ConnMaxLife  time.Duration `json:"connMaxLife" yaml:"connMaxLife"`   // 连接最长存活时间
 	LogLevel     string        `json:"logLevel" yaml:"logLevel"`         // gorm 日志级别: silent|error|warn|info
+
+	// 驱动 socket 级超时：与 ctx deadline 无关，由 go-sql-driver 在 socket 层强制执行。
+	// 这是防止「DB 挂死(半开连接/网络黑洞/长锁)导致消费者分区永久冻结」的根因兜底，
+	// 缺省由 pkg/mysql 在构建 DSN 时按需补齐；DSN 里已显式写明的值优先生效，便于运维按表/迁移调宽。
+	ConnTimeout  time.Duration `json:"connTimeout" yaml:"connTimeout"`   // 建连(dial)超时，对应 DSN timeout
+	ReadTimeout  time.Duration `json:"readTimeout" yaml:"readTimeout"`   // socket 读超时，对应 DSN readTimeout
+	WriteTimeout time.Duration `json:"writeTimeout" yaml:"writeTimeout"` // socket 写超时，对应 DSN writeTimeout
 }
 
 // DefaultMySQLConfig 返回便于本地开发的默认配置：读写同一个 DSN。
@@ -36,5 +43,10 @@ func DefaultMySQLConfig() MySQLConfig {
 		ConnMaxIdle:  10 * time.Minute,
 		ConnMaxLife:  1 * time.Hour,
 		LogLevel:     getenvString("MYSQL_LOG_LEVEL", "warn"),
+		// IM 查询应为亚秒级：读写 10s 给足余量又能把 DB 挂死收敛到秒级；建连 5s 兜住「DB 宕机时新建连接卡死」。
+		// 注意：在线 DDL / 大表迁移可能超过 readTimeout，迁移须走单独连接或临时调宽。
+		ConnTimeout:  5 * time.Second,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 }

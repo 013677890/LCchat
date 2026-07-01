@@ -26,6 +26,12 @@ var errRetriable = errors.New("message-push: retriable handle error")
 // 避免一条长期失败的消息阻塞整条消费链路。
 const (
 	handleMaxAttempts = 3
+
+	// handleAttemptTimeout 为单次处理尝试的超时预算。
+	// message-push 无 DB，单个下游已各自有界（Redis ReadTimeout、connect/group gRPC 方法级超时），
+	// 该预算用于给「群扩散逐设备串行调用」的总时长封顶，避免一条大群消息长时间占住分区。
+	// 取值偏宽：正常群扩散远达不到，仅作为病态扇出的安全上限。
+	handleAttemptTimeout = 30 * time.Second
 )
 
 var handleBackoffs = []time.Duration{
@@ -274,6 +280,11 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		failedCount  int
 	)
 	for _, deviceRoute := range routes {
+		if ctx.Err() != nil {
+			// 处理预算到期/关停：停止继续逐设备扇出，避免对剩余设备做无谓的快失败调用；
+			// 未投递设备由客户端按 seq 拉取兜底（与重试耗尽丢弃同一兜底路径）。
+			break
+		}
 		pushStart := time.Now()
 		pushErr := h.sender.PushToDevice(ctx, deviceRoute.ConnectGRPCAddr, deviceRoute.UserUUID, deviceRoute.DeviceID, envelope)
 		if pushErr != nil {
@@ -390,7 +401,11 @@ func (c *Consumer) runHandleWithRetry(ctx context.Context, payload []byte) error
 			metrics.HandleRetries.WithLabelValues("failed").Observe(float64(attempt))
 			return err
 		}
-		err := c.handler.Handle(ctx, payload)
+		// 每次尝试套一层超时预算，防止单条消息（尤其大群扇出）长时间占住分区。
+		// 仅约束本次尝试；外层 ctx 仍用于关停判断与退避，二者互不干扰。
+		attemptCtx, cancel := context.WithTimeout(ctx, handleAttemptTimeout)
+		err := c.handler.Handle(attemptCtx, payload)
+		cancel()
 		if err == nil {
 			metrics.HandleRetries.WithLabelValues("success").Observe(float64(attempt))
 			return nil

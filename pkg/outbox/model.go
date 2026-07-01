@@ -37,3 +37,31 @@ type IdempotentRecord struct {
 func (IdempotentRecord) TableName() string {
 	return "idempotent_events"
 }
+
+// DeadEvent 是消费死信记录。
+//
+// 手动提交消费者在「有界重试」预算耗尽后，把毒/持久失败的消息旁路到此表并提交 offset，
+// 从而解除队头阻塞：分区得以前进，消息不丢、可查询、可重放（重放安全由 idempotent_events 保证）。
+//
+// 表名：dead_events
+type DeadEvent struct {
+	ID             int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	Source         string    `gorm:"column:source;type:varchar(128);not null;index:idx_dead_source_status,priority:1;comment:来源消费者标识(service:topic)"`
+	Topic          string    `gorm:"column:topic;type:varchar(191);not null;comment:Kafka topic"`
+	KafkaPartition int       `gorm:"column:kafka_partition;not null;default:0;comment:Kafka 分区"`
+	KafkaOffset    int64     `gorm:"column:kafka_offset;not null;default:0;comment:Kafka offset"`
+	MsgKey         string    `gorm:"column:msg_key;type:varchar(191);not null;default:'';comment:Kafka 消息 key"`
+	EventType      string    `gorm:"column:event_type;type:varchar(128);not null;default:'';comment:事件类型(尽力解析)"`
+	Payload        []byte    `gorm:"column:payload;type:longblob;not null;comment:原始消息字节"`
+	ErrorMsg       string    `gorm:"column:error_msg;type:text;comment:最后一次失败错误"`
+	Attempts       int       `gorm:"column:attempts;not null;default:0;comment:原地重试次数"`
+	Status         string    `gorm:"column:status;type:varchar(16);not null;default:'pending';index:idx_dead_source_status,priority:2;comment:pending|replayed|discarded"`
+	FirstFailedAt  time.Time `gorm:"column:first_failed_at;not null;comment:首次失败时间"`
+	LastFailedAt   time.Time `gorm:"column:last_failed_at;not null;comment:最后失败时间"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null;comment:创建时间"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;not null;comment:更新时间"`
+}
+
+func (DeadEvent) TableName() string {
+	return "dead_events"
+}

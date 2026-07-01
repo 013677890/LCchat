@@ -158,7 +158,7 @@ services:
       - ./deploy/env/chatserver.env
     environment:
       TZ: ${TZ:-UTC}
-      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s&readTimeout=10s&writeTimeout=10s
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_USER_CREATED_TOPIC: user_created
@@ -202,7 +202,7 @@ services:
       - ./deploy/env/chatserver.env
     environment:
       TZ: ${TZ:-UTC}
-      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s&readTimeout=10s&writeTimeout=10s
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_USER_CREATED_TOPIC: user_created
@@ -246,7 +246,7 @@ services:
       - ./deploy/env/chatserver.env
     environment:
       TZ: ${TZ:-UTC}
-      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s&readTimeout=10s&writeTimeout=10s
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
@@ -283,7 +283,7 @@ services:
       - ./deploy/env/chatserver.env
     environment:
       TZ: ${TZ:-UTC}
-      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s&readTimeout=10s&writeTimeout=10s
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_GROUP_CACHE_TOPIC: group.cache
@@ -321,7 +321,7 @@ services:
       - ./deploy/env/chatserver.env
     environment:
       TZ: ${TZ:-UTC}
-      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local
+      MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s&readTimeout=10s&writeTimeout=10s
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_MSG_PUSH_TOPIC: msg.push

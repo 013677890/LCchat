@@ -6,67 +6,64 @@
 - Keep code as source of truth. Memory should point to files, summarize stable contracts, and call out traps; it should not become a stale reimplementation of the code.
 
 ## Current State
-- `project-memory.md` is already rich on service boundaries, message flow, group/relation/user/auth/connect details, Redis keys, event flows, and known implementation truths.
-- The main weakness is shape, not volume:
-  - too many different kinds of knowledge live in one file
-  - operational commands and API maps are not first-class yet
-  - known risks are present but scattered
-  - gateway HTTP route mapping is not complete enough for fast feature work
+- `project-memory.md` is now the short progressive-disclosure entrypoint.
+- First-layer topic files exist under:
+  - `services/`
+  - `flows/`
+  - `ops/`
+  - `risks/`
+- The remaining weakness is depth and freshness, not entry shape:
+  - gateway HTTP route mapping is still not first-class yet
+  - data-flow files cover message/outbox first, but not every product workflow
+  - testing map is useful but still broad
+  - detailed service notes should be extended only when code work proves a fact useful
 
 ## Target Memory Files
 - `project-memory.md`
-  - Keep as the high-level architecture and service-boundary overview.
-  - Keep only the most durable code truths and pointers to specialized memory files.
-- `watchlist.md`
+  - Keep as the one-screen entrypoint and navigation rule.
+- `services/*.md`
+  - Service ownership, read-first files, stable behavior, and service-local traps.
+- `flows/*.md`
+  - Cross-service flows and event chains.
+- `ops/runbook.md`
+  - Startup, env vars, ports, migrations, CDC, and troubleshooting.
+- `ops/testing-map.md`
+  - Build/test/generation commands and verification routing.
+- `risks/watchlist.md`
   - Known risks, mismatches, and "check this before changing" notes.
-  - Each item should include impact, trigger condition, likely files, and confidence.
-- `runbook.md`
-  - How to start services, required dependencies, env vars, ports, build/test/proto commands, and common failure checks.
-  - Include Debezium/Kafka Connect assumptions because outbox depends on them.
-- `api-map.md`
+- Future `api-map.md`
   - Gateway HTTP route to handler to downstream gRPC method.
   - Include auth requirement, timeout budget, request identity source, and aggregation behavior.
-- `data-flow.md`
+- Future flow expansions
   - Core sequence flows:
     - register -> user_created -> profile
     - login/refresh/logout/device active
-    - send message -> msg.push -> message-push -> connect -> WebSocket ACK
     - friend apply/accept/delete/blacklist
     - group create/join/review/member changes
     - account delete cleanup
-- `testing-map.md`
-  - Test/build/generation commands, test scope by service, and external dependencies needed by tests.
-  - Include proto generation and generated-code expectations.
 
 ## Priority Plan
-- P0: Split and index memory.
-  - Add `watchlist.md` with the currently known sharp edges.
-  - Add `runbook.md` skeleton from providers/env/docker-compose.
-  - Add short navigation links in `project-memory.md`.
-- P0: Complete high-risk watchlist.
-  - `user_repository.go` Redis nil dereferences despite provider saying MySQL-only fallback.
-  - `conversation` schema unique key is `(owner_uuid,target_uuid)` while repository upsert references `(owner_uuid,conv_id)`.
-  - msg seq allocation can produce gaps because Redis INCR happens before DB insert succeeds.
-  - message-push stage-1 commits offsets even after finite local retry failure.
-  - connect ACK watermark currently records conv_id only for `MSG_PUSH`.
+- P0 done: Split and index memory.
+  - `project-memory.md` is a short entrypoint.
+  - Service files exist under `services/`.
+  - `risks/watchlist.md` exists with current high-risk traps.
+  - `ops/runbook.md` and `ops/testing-map.md` exist.
+- P0 done: Capture current dead-letter/retry facts.
+  - Manual consumers with `DeadLetterSink` park to `dead_events`.
+  - `message-push` remains a custom finite retry consumer and does not use `dead_events`.
+  - MySQL socket timeout defaults are documented.
 - P1: Build `api-map.md`.
   - Read `apps/gateway/internal/router`.
   - For every route, record method/path, handler, downstream gRPC, auth requirement, timeout, aggregation/degradation notes.
   - Keep this concise and route-oriented, not implementation-heavy.
-- P1: Build `runbook.md`.
-  - Read `docker-compose.yml`, `deploy/env/chatserver.env.example`, app providers, and any Makefile/scripts.
-  - Record startup dependency order and the minimum viable local stack.
-  - Record ports, required envs, and common "service starts but feature fails" checks.
-- P1: Build `testing-map.md`.
-  - Read Makefile/scripts and common generated-code layout.
-  - Record commands already proven useful and commands that require MySQL/Redis/Kafka.
-  - Record which generated `pb` paths are ignored and should not be hand-edited.
-- P2: Build `data-flow.md`.
-  - Convert the highest-value flows into compact sequence notes or Mermaid diagrams.
-  - Prefer file references and event names over long prose.
-- P2: Trim `project-memory.md`.
-  - After specialized files exist, remove duplicated operational/API/watchlist detail from the main memory.
-  - Keep `project-memory.md` below a size that can be skimmed quickly.
+- P1: Expand flow files.
+  - Add account/profile lifecycle flow.
+  - Add friend apply/accept/delete/blacklist flow.
+  - Add group create/join/review/member-change flow.
+- P1: Deepen service files only when code work needs it.
+  - Prefer stable contracts and read-first pointers over line-by-line summaries.
+- P2: Add generated `api-map.md`.
+  - Keep route-oriented and compact.
 
 ## Writing Rules
 - Prefer code-derived facts over docs.
@@ -83,4 +80,4 @@
   - Which envs and dependencies are required to run it?
   - Which tests or generation commands should I run?
   - What known traps should I check before editing?
-- Memory files stay local-only via `.gitignore` and do not pollute normal project commits.
+- Memory files are structured so the first read is small, and deeper files are opened only on demand.
