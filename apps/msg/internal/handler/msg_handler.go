@@ -240,7 +240,7 @@ func mapMsgDomainError(_ context.Context, err error) error {
 	case errors.Is(err, msgsvc.ErrUnsupportedMsgType):
 		return apperr.New(consts.CodeMessageTypeNotSupport)
 	case errors.Is(err, msgsvc.ErrIdempotentProcessing):
-		return apperr.New(consts.CodeMessageDuplicate)
+		return apperr.New(consts.CodeMessageProcessing)
 	default:
 		return apperr.Wrap(err, consts.CodeMessageSendFail, "消息处理失败")
 	}

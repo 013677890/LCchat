@@ -43,6 +43,8 @@ func grpcCodeForBizCode(code int) codes.Code {
 		return codes.AlreadyExists
 	case consts.CodeTooManyRequests, consts.CodeSendTooFrequent:
 		return codes.ResourceExhausted
+	case consts.CodeMessageProcessing:
+		return codes.Aborted
 	case consts.CodeMethodNotAllowed:
 		return codes.Unimplemented
 	case consts.CodePasswordSameAsOld, consts.CodeQRCodeExpired,

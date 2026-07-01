@@ -21,7 +21,9 @@ func init() { logger.ReplaceGlobal(zap.NewNop()) }
 // ==================== mock Repository ====================
 
 type mockRepo struct {
-	tryAcquireFn        func(ctx context.Context, from, dev, cid string) (*model.Message, error)
+	tryAcquireFn        func(ctx context.Context, from, dev, cid string) (*IdempotentAcquireResult, error)
+	completeFn          func(ctx context.Context, from, dev, cid, token string, msg *model.Message) error
+	releaseFn           func(ctx context.Context, from, dev, cid, token string) error
 	setIdempotentFn     func(ctx context.Context, from, dev, cid string, msg *model.Message) error
 	allocSeqFn          func(ctx context.Context, convId string) (int64, error)
 	repairSeqFn         func(ctx context.Context, convId string) error
@@ -36,11 +38,23 @@ type mockRepo struct {
 	updateWithOutboxFn  func(ctx context.Context, convId, msgId string, status int8, content string, event OutboxEvent) error
 }
 
-func (m *mockRepo) TryAcquireIdempotent(ctx context.Context, from, dev, cid string) (*model.Message, error) {
+func (m *mockRepo) TryAcquireIdempotent(ctx context.Context, from, dev, cid string) (*IdempotentAcquireResult, error) {
 	if m.tryAcquireFn != nil {
 		return m.tryAcquireFn(ctx, from, dev, cid)
 	}
-	return nil, nil
+	return &IdempotentAcquireResult{LeaseToken: "lease-token"}, nil
+}
+func (m *mockRepo) CompleteIdempotentResult(ctx context.Context, from, dev, cid, token string, msg *model.Message) error {
+	if m.completeFn != nil {
+		return m.completeFn(ctx, from, dev, cid, token, msg)
+	}
+	return nil
+}
+func (m *mockRepo) ReleaseIdempotentProcessing(ctx context.Context, from, dev, cid, token string) error {
+	if m.releaseFn != nil {
+		return m.releaseFn(ctx, from, dev, cid, token)
+	}
+	return nil
 }
 func (m *mockRepo) SetIdempotentResult(ctx context.Context, from, dev, cid string, msg *model.Message) error {
 	if m.setIdempotentFn != nil {
@@ -174,8 +188,8 @@ func TestCreateMessage_Success(t *testing.T) {
 func TestCreateMessage_IdempotentHit(t *testing.T) {
 	cached := &model.Message{MsgId: "cached-id", Seq: 5}
 	repo := &mockRepo{
-		tryAcquireFn: func(_ context.Context, _, _, _ string) (*model.Message, error) {
-			return cached, nil
+		tryAcquireFn: func(_ context.Context, _, _, _ string) (*IdempotentAcquireResult, error) {
+			return &IdempotentAcquireResult{CachedMsg: cached}, nil
 		},
 	}
 	svc := NewService(repo)
@@ -188,7 +202,7 @@ func TestCreateMessage_IdempotentHit(t *testing.T) {
 
 func TestCreateMessage_IdempotentProcessing(t *testing.T) {
 	repo := &mockRepo{
-		tryAcquireFn: func(_ context.Context, _, _, _ string) (*model.Message, error) {
+		tryAcquireFn: func(_ context.Context, _, _, _ string) (*IdempotentAcquireResult, error) {
 			return nil, ErrIdempotentProcessing
 		},
 	}
@@ -199,23 +213,36 @@ func TestCreateMessage_IdempotentProcessing(t *testing.T) {
 }
 
 func TestCreateMessage_UnsupportedMsgType(t *testing.T) {
-	repo := &mockRepo{}
+	var releasedToken string
+	repo := &mockRepo{
+		releaseFn: func(_ context.Context, _, _, _ string, token string) error {
+			releasedToken = token
+			return nil
+		},
+	}
 	svc := NewService(repo)
 	req := newP2PReq()
 	req.MsgType = 999
 
 	_, err := svc.CreateMessage(context.Background(), req)
 	assert.ErrorIs(t, err, ErrUnsupportedMsgType)
+	assert.Equal(t, "lease-token", releasedToken)
 }
 
 func TestCreateMessage_DBDuplicate_Fallback(t *testing.T) {
 	existing := &model.Message{MsgId: "existing-id", Seq: 3}
+	var completedMsgID string
 	repo := &mockRepo{
 		createWithOutboxFn: func(_ context.Context, _ *model.Message, _ OutboxEvent) error {
 			return ErrDuplicateMessage
 		},
 		getByDuplicateKeyFn: func(_ context.Context, _, _, _ string) (*model.Message, error) {
 			return existing, nil
+		},
+		completeFn: func(_ context.Context, _, _, _, token string, msg *model.Message) error {
+			assert.Equal(t, "lease-token", token)
+			completedMsgID = msg.MsgId
+			return nil
 		},
 	}
 	svc := NewService(repo)
@@ -224,6 +251,45 @@ func TestCreateMessage_DBDuplicate_Fallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.IsIdempotent)
 	assert.Equal(t, "existing-id", result.Msg.MsgId)
+	assert.Equal(t, "existing-id", completedMsgID)
+}
+
+func TestCreateMessage_DBFailureReleasesProcessingLease(t *testing.T) {
+	var releasedToken string
+	repo := &mockRepo{
+		createWithOutboxFn: func(_ context.Context, _ *model.Message, _ OutboxEvent) error {
+			return errors.New("db down")
+		},
+		releaseFn: func(_ context.Context, _, _, _ string, token string) error {
+			releasedToken = token
+			return nil
+		},
+	}
+	svc := NewService(repo)
+
+	_, err := svc.CreateMessage(context.Background(), newP2PReq())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db insert failed")
+	assert.Equal(t, "lease-token", releasedToken)
+}
+
+func TestCreateMessage_CompleteFailureReleasesProcessingLease(t *testing.T) {
+	var releasedToken string
+	repo := &mockRepo{
+		completeFn: func(context.Context, string, string, string, string, *model.Message) error {
+			return errors.New("redis down")
+		},
+		releaseFn: func(_ context.Context, _, _, _ string, token string) error {
+			releasedToken = token
+			return nil
+		},
+	}
+	svc := NewService(repo)
+
+	result, err := svc.CreateMessage(context.Background(), newP2PReq())
+	require.NoError(t, err)
+	require.False(t, result.IsIdempotent)
+	assert.Equal(t, "lease-token", releasedToken)
 }
 
 func TestCreateMessage_DuplicateSeqRepairsAndRetries(t *testing.T) {

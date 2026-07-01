@@ -145,6 +145,8 @@ const (
 	CodeRecallNoPermission = 13010 // 撤回无权限
 	// 消息重复（幂等命中，返回首次结果）
 	CodeMessageDuplicate = 13011 // 消息重复
+	// 消息正在处理中（相同 client_msg_id 已有请求持有幂等租约）
+	CodeMessageProcessing = 13012 // 消息正在处理中
 )
 
 // 群组模块错误 (14xxx)
@@ -314,6 +316,7 @@ var CodeMessage = map[int]string{
 	CodeRecallTimeout:         "撤回超时",
 	CodeRecallNoPermission:    "撤回无权限",
 	CodeMessageDuplicate:      "消息重复",
+	CodeMessageProcessing:     "消息正在处理中，请稍后重试",
 	// 群组模块
 	CodeGroupNotFound:           "群组不存在",
 	CodeNotGroupMember:          "不是群成员",

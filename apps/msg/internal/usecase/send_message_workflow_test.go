@@ -19,8 +19,14 @@ type workflowMessageRepo struct {
 
 func (r *workflowMessageRepo) AllocSeq(context.Context, string) (int64, error) { return 1, nil }
 func (r *workflowMessageRepo) RepairSeq(context.Context, string) error         { return nil }
-func (r *workflowMessageRepo) TryAcquireIdempotent(context.Context, string, string, string) (*model.Message, error) {
-	return r.cached, nil
+func (r *workflowMessageRepo) TryAcquireIdempotent(context.Context, string, string, string) (*msgsvc.IdempotentAcquireResult, error) {
+	return &msgsvc.IdempotentAcquireResult{CachedMsg: r.cached}, nil
+}
+func (r *workflowMessageRepo) CompleteIdempotentResult(context.Context, string, string, string, string, *model.Message) error {
+	return nil
+}
+func (r *workflowMessageRepo) ReleaseIdempotentProcessing(context.Context, string, string, string, string) error {
+	return nil
 }
 func (r *workflowMessageRepo) SetIdempotentResult(context.Context, string, string, string, *model.Message) error {
 	return nil

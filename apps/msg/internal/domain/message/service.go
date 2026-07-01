@@ -91,9 +91,9 @@ type CreateResult struct {
 // 完整流程：
 //
 //	┌──────────────────────────────────────────────────────────────┐
-//	│ ① Redis SETNX "PROCESSING" (10s TTL)                       │
+//	│ ① Redis SETNX "PROCESSING:{token}" (10s TTL)               │
 //	│    ├─ 获取锁成功 → 继续执行                                    │
-//	│    ├─ 值为 "PROCESSING" → 并发请求，返回 ErrIdempotentProcessing │
+//	│    ├─ 值为 "PROCESSING:{token}" → 并发请求，返回 ErrIdempotentProcessing │
 //	│    ├─ 值为 JSON → 幂等命中，直接返回缓存结果                      │
 //	│    └─ Redis 异常 → 降级继续（DB 唯一索引兜底）                    │
 //	│                                                              │
@@ -116,19 +116,56 @@ type CreateResult struct {
 func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest) (*CreateResult, error) {
 	// ---- Step 1: 幂等检查（Redis SETNX） ----
 	// 三态返回：
-	//   - (nil, nil):           锁获取成功，继续创建
-	//   - (cachedMsg, nil):     幂等命中，直接返回缓存
+	//   - ({LeaseToken}, nil):  锁获取成功，继续创建
+	//   - ({CachedMsg}, nil):   幂等命中，直接返回缓存
 	//   - (nil, ErrProcessing): 并发请求正在处理
 	//   - (nil, otherErr):      Redis 异常，降级继续（DB 唯一索引兜底）
-	cachedMsg, err := s.repo.TryAcquireIdempotent(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId)
+	acquireResult, err := s.repo.TryAcquireIdempotent(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId)
 	if err != nil {
 		if errors.Is(err, ErrIdempotentProcessing) {
 			return nil, ErrIdempotentProcessing
 		}
 		// Redis 异常 → 降级：不拦截，靠 DB 唯一索引兜底
 	}
-	if cachedMsg != nil {
-		return &CreateResult{Msg: cachedMsg, IsIdempotent: true}, nil
+	if acquireResult != nil && acquireResult.CachedMsg != nil {
+		return &CreateResult{Msg: acquireResult.CachedMsg, IsIdempotent: true}, nil
+	}
+
+	leaseToken := ""
+	if acquireResult != nil {
+		leaseToken = acquireResult.LeaseToken
+	}
+	leaseResolved := leaseToken == ""
+	defer func() {
+		if leaseResolved {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		if err := s.repo.ReleaseIdempotentProcessing(cleanupCtx, req.FromUuid, req.DeviceId, req.ClientMsgId, leaseToken); err != nil {
+			logger.Warn(cleanupCtx, "创建消息：释放幂等 PROCESSING 标记失败",
+				logger.String("client_msg_id", req.ClientMsgId),
+				logger.ErrorField("error", err),
+			)
+		}
+	}()
+
+	cacheIdempotentResult := func(resultMsg *model.Message) {
+		var cacheErr error
+		if leaseToken != "" {
+			cacheErr = s.repo.CompleteIdempotentResult(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId, leaseToken, resultMsg)
+			if cacheErr == nil {
+				leaseResolved = true
+			}
+		} else {
+			cacheErr = s.repo.SetIdempotentResult(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId, resultMsg)
+		}
+		if cacheErr != nil {
+			logger.Warn(ctx, "创建消息：回写幂等缓存失败",
+				logger.String("msg_id", resultMsg.MsgId),
+				logger.ErrorField("error", cacheErr),
+			)
+		}
 	}
 
 	// ---- Step 2: 校验消息类型 ----
@@ -200,6 +237,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 			if queryErr != nil {
 				return nil, fmt.Errorf("CreateMessage: query duplicate failed: %w", queryErr)
 			}
+			cacheIdempotentResult(existMsg)
 			return &CreateResult{Msg: existMsg, IsIdempotent: true}, nil
 		}
 		if errors.Is(createErr, ErrDuplicateMessageSeq) {
@@ -217,14 +255,9 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 	}
 
 	// ---- Step 6: 回写幂等缓存 ----
-	// 覆盖 "PROCESSING" → 实际结果 JSON，TTL 延长到 10 分钟
-	// 忽略错误：Redis 回写失败不影响主流程
-	if err := s.repo.SetIdempotentResult(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId, msg); err != nil {
-		logger.Warn(ctx, "创建消息：回写幂等缓存失败",
-			logger.String("msg_id", msg.MsgId),
-			logger.ErrorField("error", err),
-		)
-	}
+	// 覆盖 "PROCESSING:{token}" → 实际结果 JSON，TTL 延长到 10 分钟。
+	// 若回写失败，defer 会尽力释放 PROCESSING，让下一次重试走 DB 唯一索引兜底。
+	cacheIdempotentResult(msg)
 
 	return &CreateResult{Msg: msg, IsIdempotent: false}, nil
 }

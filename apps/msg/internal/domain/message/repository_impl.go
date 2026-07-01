@@ -2,6 +2,8 @@ package message
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -117,19 +119,51 @@ type idempotentCacheEntry struct {
 	SendTime int64  `json:"send_time"` // unix 毫秒
 }
 
+const (
+	completeIdempotentResultScript = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	redis.call("PSETEX", KEYS[1], ARGV[3], ARGV[2])
+	return 1
+end
+return 0
+`
+	releaseIdempotentProcessingScript = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("DEL", KEYS[1])
+end
+return 0
+`
+)
+
+func newIdempotentLeaseToken() (string, error) {
+	buf := make([]byte, idempotentLeaseTokenBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate idempotent lease token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func idempotentProcessingValue(token string) string {
+	return idempotentProcessingPrefix + token
+}
+
+func isIdempotentProcessingValue(value string) bool {
+	return value == "PROCESSING" || strings.HasPrefix(value, idempotentProcessingPrefix)
+}
+
 // TryAcquireIdempotent 尝试获取幂等锁
 //
 // 实现策略 (SETNX + 三态返回)：
 //
 //	┌─────────────────────────────────────────────────┐
 //	│ SETNX msg:idempotent:{from}:{device}:{client}   │
-//	│       value="PROCESSING"  TTL=10s                │
+//	│       value="PROCESSING:{token}"  TTL=10s        │
 //	│                                                  │
-//	│ ├─ SETNX 成功 (key 不存在)                        │
-//	│ │   → return (nil, nil) 获取锁成功                 │
+//	│ ├─ SETNX 成功 (key 不存在)                         │
+//	│ │   → return ({LeaseToken: token}, nil) 获取锁成功   │
 //	│ │                                                │
 //	│ ├─ SETNX 失败 (key 已存在)                        │
-//	│ │   ├─ GET 值 = "PROCESSING"                     │
+//	│ │   ├─ GET 值 = "PROCESSING:{token}"              │
 //	│ │   │   → return (nil, ErrIdempotentProcessing)  │
 //	│ │   │     另一个请求正在处理，客户端应稍后重试         │
 //	│ │   │                                            │
@@ -140,19 +174,24 @@ type idempotentCacheEntry struct {
 //	│ └─ Redis 异常                                    │
 //	│     → return (nil, redisErr) 降级到 DB 兜底        │
 //	└─────────────────────────────────────────────────┘
-func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, deviceId, clientMsgId string) (*model.Message, error) {
+func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, deviceId, clientMsgId string) (*IdempotentAcquireResult, error) {
 	key := rediskey.MsgIdempotentKey(fromUuid, deviceId, clientMsgId)
+	token, err := newIdempotentLeaseToken()
+	if err != nil {
+		return nil, err
+	}
+	processingValue := idempotentProcessingValue(token)
 
-	// SETNX "PROCESSING" with 10s TTL
+	// SETNX "PROCESSING:{token}" with 10s TTL
 	// 10 秒 TTL 是防止处理中途崩溃导致锁永远不释放的保险措施
-	ok, err := r.redis.SetNX(ctx, key, idempotentProcessing, time.Duration(idempotentLockTTLSec)*time.Second).Result()
+	ok, err := r.redis.SetNX(ctx, key, processingValue, time.Duration(idempotentLockTTLSec)*time.Second).Result()
 	if err != nil {
 		return nil, fmt.Errorf("TryAcquireIdempotent: redis SETNX failed: %w", err)
 	}
 
 	if ok {
 		// SETNX 成功 → 锁获取成功，调用者可以继续执行消息创建
-		return nil, nil
+		return &IdempotentAcquireResult{LeaseToken: token}, nil
 	}
 
 	// SETNX 失败 → key 已存在，读取当前值判断状态
@@ -161,8 +200,8 @@ func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, dev
 		return nil, fmt.Errorf("TryAcquireIdempotent: redis GET failed: %w", err)
 	}
 
-	if val == idempotentProcessing {
-		// 值为 "PROCESSING"：另一个请求正在处理中
+	if isIdempotentProcessingValue(val) {
+		// 值为 "PROCESSING:{token}"：另一个请求正在处理中
 		// 客户端收到此错误后应短暂等待后重试
 		return nil, ErrIdempotentProcessing
 	}
@@ -182,7 +221,39 @@ func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, dev
 		ConvId:   entry.ConvId,
 		SendTime: time.UnixMilli(entry.SendTime),
 	}
-	return msg, nil
+	return &IdempotentAcquireResult{CachedMsg: msg}, nil
+}
+
+// CompleteIdempotentResult 将本请求持有的 "PROCESSING:{token}" 标记替换为实际结果。
+func (r *repositoryImpl) CompleteIdempotentResult(ctx context.Context, fromUuid, deviceId, clientMsgId, token string, msg *model.Message) error {
+	if token == "" {
+		return fmt.Errorf("CompleteIdempotentResult: empty lease token")
+	}
+	key := rediskey.MsgIdempotentKey(fromUuid, deviceId, clientMsgId)
+	data, err := marshalIdempotentResult(msg)
+	if err != nil {
+		return err
+	}
+	if err := r.redis.Eval(ctx, completeIdempotentResultScript, []string{key},
+		idempotentProcessingValue(token),
+		string(data),
+		rediskey.MsgIdempotentTTL.Milliseconds(),
+	).Err(); err != nil {
+		return fmt.Errorf("CompleteIdempotentResult: redis CAS SET failed: %w", err)
+	}
+	return nil
+}
+
+// ReleaseIdempotentProcessing 仅当 token 匹配时释放本请求持有的 PROCESSING 标记。
+func (r *repositoryImpl) ReleaseIdempotentProcessing(ctx context.Context, fromUuid, deviceId, clientMsgId, token string) error {
+	if token == "" {
+		return nil
+	}
+	key := rediskey.MsgIdempotentKey(fromUuid, deviceId, clientMsgId)
+	if err := r.redis.Eval(ctx, releaseIdempotentProcessingScript, []string{key}, idempotentProcessingValue(token)).Err(); err != nil {
+		return fmt.Errorf("ReleaseIdempotentProcessing: redis CAS DEL failed: %w", err)
+	}
+	return nil
 }
 
 // SetIdempotentResult 将 "PROCESSING" 标记替换为实际结果
@@ -195,7 +266,19 @@ func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, dev
 // - 后续请求会走 DB 唯一索引兜底
 func (r *repositoryImpl) SetIdempotentResult(ctx context.Context, fromUuid, deviceId, clientMsgId string, msg *model.Message) error {
 	key := rediskey.MsgIdempotentKey(fromUuid, deviceId, clientMsgId)
+	data, err := marshalIdempotentResult(msg)
+	if err != nil {
+		return err
+	}
 
+	// SET (覆盖) + 新 TTL = 10 分钟
+	if err := r.redis.Set(ctx, key, string(data), rediskey.MsgIdempotentTTL).Err(); err != nil {
+		return fmt.Errorf("SetIdempotentResult: redis SET failed: %w", err)
+	}
+	return nil
+}
+
+func marshalIdempotentResult(msg *model.Message) ([]byte, error) {
 	entry := idempotentCacheEntry{
 		MsgId:    msg.MsgId,
 		Seq:      msg.Seq,
@@ -204,14 +287,9 @@ func (r *repositoryImpl) SetIdempotentResult(ctx context.Context, fromUuid, devi
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("SetIdempotentResult: marshal failed: %w", err)
+		return nil, fmt.Errorf("marshal idempotent result: %w", err)
 	}
-
-	// SET (覆盖) + 新 TTL = 10 分钟
-	if err := r.redis.Set(ctx, key, string(data), rediskey.MsgIdempotentTTL).Err(); err != nil {
-		return fmt.Errorf("SetIdempotentResult: redis SET failed: %w", err)
-	}
-	return nil
+	return data, nil
 }
 
 // ==================== 消息 CRUD ====================

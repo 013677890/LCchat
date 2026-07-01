@@ -13,6 +13,14 @@ type OutboxEvent struct {
 	Payload   string
 }
 
+// IdempotentAcquireResult 表示一次幂等锁尝试的结果。
+type IdempotentAcquireResult struct {
+	// CachedMsg 非空表示已经存在成功结果，可直接作为幂等命中返回。
+	CachedMsg *model.Message
+	// LeaseToken 非空表示本请求抢到了 PROCESSING 租约，后续成功/失败必须带 token 做 CAS。
+	LeaseToken string
+}
+
 // Repository 消息领域仓储接口
 // 职责：消息表 CRUD + Redis seq 分配 + 幂等锁
 type Repository interface {
@@ -30,13 +38,20 @@ type Repository interface {
 
 	// TryAcquireIdempotent 尝试获取幂等锁（Redis SETNX）
 	// 返回值：
-	//   - (nil, nil):  锁获取成功，可以继续执行消息创建
-	//   - (msg, nil):  已有处理结果（命中缓存），直接返回 msg
+	//   - ({LeaseToken: token}, nil): 锁获取成功，可以继续执行消息创建
+	//   - ({CachedMsg: msg}, nil):    已有处理结果（命中缓存），直接返回 msg
 	//   - (nil, ErrIdempotentProcessing): 另一个请求正在处理中
 	//   - (nil, other): Redis 异常（降级到 DB 唯一索引兜底）
-	TryAcquireIdempotent(ctx context.Context, fromUuid, deviceId, clientMsgId string) (*model.Message, error)
+	TryAcquireIdempotent(ctx context.Context, fromUuid, deviceId, clientMsgId string) (*IdempotentAcquireResult, error)
 
-	// SetIdempotentResult 将 "PROCESSING" 标记替换为实际结果，TTL 延长至 10 分钟
+	// CompleteIdempotentResult 将本请求持有的 "PROCESSING:{token}" 标记替换为实际结果。
+	CompleteIdempotentResult(ctx context.Context, fromUuid, deviceId, clientMsgId, token string, msg *model.Message) error
+
+	// ReleaseIdempotentProcessing 仅当 token 匹配时释放本请求持有的 PROCESSING 标记。
+	ReleaseIdempotentProcessing(ctx context.Context, fromUuid, deviceId, clientMsgId, token string) error
+
+	// SetIdempotentResult 直接写入实际结果，TTL 延长至 10 分钟。
+	// 仅用于未持有 Redis lease 的 DB 唯一索引兜底路径。
 	SetIdempotentResult(ctx context.Context, fromUuid, deviceId, clientMsgId string, msg *model.Message) error
 
 	// ==================== 消息 CRUD ====================
