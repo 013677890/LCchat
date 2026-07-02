@@ -24,9 +24,10 @@ func NewRecallMessageWorkflow(msgService *msgsvc.Service) *RecallMessageWorkflow
 	}
 }
 
-// Execute 执行撤回消息的完整流程
-func (w *RecallMessageWorkflow) Execute(ctx context.Context, req *pb.RecallMessageRequest) (*pb.RecallMessageResponse, error) {
-	if _, err := w.msgService.RecallMessage(ctx, req.ConvId, req.MsgId, req.OperatorUuid); err != nil {
+// Execute 执行撤回消息的完整流程。
+// operatorUuid 是鉴权主体，由 handler 从 gRPC metadata（ctxmeta）解析后显式传入。
+func (w *RecallMessageWorkflow) Execute(ctx context.Context, operatorUuid string, req *pb.RecallMessageRequest) (*pb.RecallMessageResponse, error) {
+	if _, err := w.msgService.RecallMessage(ctx, req.ConvId, req.MsgId, operatorUuid); err != nil {
 		return nil, fmt.Errorf("RecallMessageWorkflow: 撤回失败: %w", err)
 	}
 

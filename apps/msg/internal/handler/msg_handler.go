@@ -48,15 +48,13 @@ func (h *MsgHandler) SendMessage(ctx context.Context, req *pb.SendMessageRequest
 	if err != nil {
 		return nil, err
 	}
-	if req.FromUuid != "" && req.FromUuid != userUUID {
-		return nil, apperr.New(consts.CodePermissionDeny)
-	}
-	req.FromUuid = userUUID
-	if deviceID := ctxmeta.DeviceID(ctx); deviceID != "" {
-		req.DeviceId = deviceID
+	// device_id 是幂等三元组的一元，metadata 缺失时无法保证重复请求去重，直接拒绝。
+	deviceID := ctxmeta.DeviceID(ctx)
+	if deviceID == "" {
+		return nil, apperr.New(consts.CodeParamError)
 	}
 
-	resp, err := h.sendMessageWorkflow.Execute(ctx, req)
+	resp, err := h.sendMessageWorkflow.Execute(ctx, userUUID, deviceID, req)
 	if err != nil {
 		return nil, mapMsgDomainError(ctx, err)
 	}
@@ -65,13 +63,12 @@ func (h *MsgHandler) SendMessage(ctx context.Context, req *pb.SendMessageRequest
 
 // RecallMessage 撤回消息。
 func (h *MsgHandler) RecallMessage(ctx context.Context, req *pb.RecallMessageRequest) (*pb.RecallMessageResponse, error) {
-	operatorUUID, err := requireOwnerUUID(ctx, req.OperatorUuid)
+	operatorUUID, err := authenticatedUserUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req.OperatorUuid = operatorUUID
 
-	resp, err := h.recallMessageWorkflow.Execute(ctx, req)
+	resp, err := h.recallMessageWorkflow.Execute(ctx, operatorUUID, req)
 	if err != nil {
 		return nil, mapMsgDomainError(ctx, err)
 	}
@@ -80,13 +77,12 @@ func (h *MsgHandler) RecallMessage(ctx context.Context, req *pb.RecallMessageReq
 
 // MarkRead 标记会话已读。
 func (h *MsgHandler) MarkRead(ctx context.Context, req *pb.MarkReadRequest) (*pb.MarkReadResponse, error) {
-	ownerUUID, err := requireOwnerUUID(ctx, req.OwnerUuid)
+	ownerUUID, err := authenticatedUserUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req.OwnerUuid = ownerUUID
 
-	resp, err := h.markReadWorkflow.Execute(ctx, req)
+	resp, err := h.markReadWorkflow.Execute(ctx, ownerUUID, req)
 	if err != nil {
 		return nil, mapConvDomainError(ctx, err)
 	}
@@ -147,11 +143,10 @@ func (h *MsgHandler) GetMessagesByIds(ctx context.Context, req *pb.GetMessagesBy
 
 // GetConversations 获取用户会话列表。
 func (h *MsgHandler) GetConversations(ctx context.Context, req *pb.GetConversationsRequest) (*pb.GetConversationsResponse, error) {
-	ownerUUID, err := requireOwnerUUID(ctx, req.OwnerUuid)
+	ownerUUID, err := authenticatedUserUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req.OwnerUuid = ownerUUID
 
 	items, hasMore, nextCursor, err := h.convService.GetConversations(ctx, ownerUUID, req.UpdatedSince, req.Cursor, int(req.PageSize))
 	if err != nil {
@@ -162,11 +157,10 @@ func (h *MsgHandler) GetConversations(ctx context.Context, req *pb.GetConversati
 
 // DeleteConversation 逻辑删除会话。
 func (h *MsgHandler) DeleteConversation(ctx context.Context, req *pb.DeleteConversationRequest) (*pb.DeleteConversationResponse, error) {
-	ownerUUID, err := requireOwnerUUID(ctx, req.OwnerUuid)
+	ownerUUID, err := authenticatedUserUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req.OwnerUuid = ownerUUID
 
 	err = h.convService.DeleteConversation(ctx, ownerUUID, req.ConvId)
 	if err != nil {
@@ -181,11 +175,10 @@ func (h *MsgHandler) DeleteConversation(ctx context.Context, req *pb.DeleteConve
 
 // UpdateConversationSettings 更新会话设置。
 func (h *MsgHandler) UpdateConversationSettings(ctx context.Context, req *pb.UpdateConvSettingsRequest) (*pb.UpdateConvSettingsResponse, error) {
-	ownerUUID, err := requireOwnerUUID(ctx, req.OwnerUuid)
+	ownerUUID, err := authenticatedUserUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req.OwnerUuid = ownerUUID
 
 	err = h.convService.UpdateSettings(ctx, ownerUUID, req.ConvId, req.Mute, req.Pin)
 	if err != nil {
@@ -197,23 +190,14 @@ func (h *MsgHandler) UpdateConversationSettings(ctx context.Context, req *pb.Upd
 	return &pb.UpdateConvSettingsResponse{}, nil
 }
 
+// authenticatedUserUUID 从 gRPC metadata（经 ctxmeta 注入）解析鉴权主体。
+// 所有 RPC 的操作者身份统一来源于此，请求体不携带身份字段。
 func authenticatedUserUUID(ctx context.Context) (string, error) {
 	userUUID := ctxmeta.UserUUID(ctx)
 	if userUUID == "" {
 		return "", apperr.New(consts.CodeUnauthorized)
 	}
 	return userUUID, nil
-}
-
-func requireOwnerUUID(ctx context.Context, requestedOwnerUUID string) (string, error) {
-	ownerUUID, err := authenticatedUserUUID(ctx)
-	if err != nil {
-		return "", err
-	}
-	if requestedOwnerUUID != "" && requestedOwnerUUID != ownerUUID {
-		return "", apperr.New(consts.CodePermissionDeny)
-	}
-	return ownerUUID, nil
 }
 
 func (h *MsgHandler) requireConversationAccess(ctx context.Context, ownerUUID, convID string) (int64, error) {

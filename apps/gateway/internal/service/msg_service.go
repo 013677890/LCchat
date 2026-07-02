@@ -4,10 +4,13 @@ import (
 	"context"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
-	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 )
 
 // MsgServiceImpl 消息服务实现
+//
+// 操作者身份（user_uuid/device_id）不再写入请求体：
+// 出站 gRPC 由 grpcx MetadataUnaryClientInterceptor 统一从 ctx 注入 metadata，
+// msg-service 服务端经 MetadataUnaryInterceptor 落回 ctx 后自行解析鉴权主体。
 type MsgServiceImpl struct {
 	msgClient pb.MsgServiceClient
 }
@@ -21,9 +24,7 @@ func NewMsgService(msgClient pb.MsgServiceClient) MsgService {
 
 // SendMessage 发送消息
 func (s *MsgServiceImpl) SendMessage(ctx context.Context, req *dto.SendMessageRequest) (*dto.SendMessageResponse, error) {
-	userUUID := ctxmeta.UserUUID(ctx)
-	deviceID := ctxmeta.DeviceID(ctx)
-	protoReq := dto.ConvertToProtoSendMessageRequest(req, userUUID, deviceID)
+	protoReq := dto.ConvertToProtoSendMessageRequest(req)
 	resp, err := s.msgClient.SendMessage(ctx, protoReq)
 	if err != nil {
 		return nil, err
@@ -53,16 +54,14 @@ func (s *MsgServiceImpl) GetMessagesByIds(ctx context.Context, req *dto.GetMessa
 
 // RecallMessage 撤回消息
 func (s *MsgServiceImpl) RecallMessage(ctx context.Context, req *dto.RecallMessageRequest) error {
-	userUUID := ctxmeta.UserUUID(ctx)
-	protoReq := dto.ConvertToProtoRecallMessageRequest(req, userUUID)
+	protoReq := dto.ConvertToProtoRecallMessageRequest(req)
 	_, err := s.msgClient.RecallMessage(ctx, protoReq)
 	return err
 }
 
 // GetConversations 获取会话列表
 func (s *MsgServiceImpl) GetConversations(ctx context.Context, req *dto.GetConversationsRequest) (*dto.GetConversationsResponse, error) {
-	userUUID := ctxmeta.UserUUID(ctx)
-	protoReq := dto.ConvertToProtoGetConversationsRequest(req, userUUID)
+	protoReq := dto.ConvertToProtoGetConversationsRequest(req)
 	resp, err := s.msgClient.GetConversations(ctx, protoReq)
 	if err != nil {
 		return nil, err
@@ -72,8 +71,7 @@ func (s *MsgServiceImpl) GetConversations(ctx context.Context, req *dto.GetConve
 
 // MarkRead 标记会话已读
 func (s *MsgServiceImpl) MarkRead(ctx context.Context, req *dto.MarkReadRequest) (*dto.MarkReadResponse, error) {
-	userUUID := ctxmeta.UserUUID(ctx)
-	protoReq := dto.ConvertToProtoMarkReadRequest(req, userUUID)
+	protoReq := dto.ConvertToProtoMarkReadRequest(req)
 	resp, err := s.msgClient.MarkRead(ctx, protoReq)
 	if err != nil {
 		return nil, err
@@ -83,16 +81,14 @@ func (s *MsgServiceImpl) MarkRead(ctx context.Context, req *dto.MarkReadRequest)
 
 // DeleteConversation 删除会话
 func (s *MsgServiceImpl) DeleteConversation(ctx context.Context, req *dto.DeleteConversationRequest) error {
-	userUUID := ctxmeta.UserUUID(ctx)
-	protoReq := dto.ConvertToProtoDeleteConversationRequest(req, userUUID)
+	protoReq := dto.ConvertToProtoDeleteConversationRequest(req)
 	_, err := s.msgClient.DeleteConversation(ctx, protoReq)
 	return err
 }
 
 // UpdateConversationSettings 更新会话设置
 func (s *MsgServiceImpl) UpdateConversationSettings(ctx context.Context, req *dto.UpdateConvSettingsRequest) error {
-	userUUID := ctxmeta.UserUUID(ctx)
-	protoReq := dto.ConvertToProtoUpdateConvSettingsRequest(req, userUUID)
+	protoReq := dto.ConvertToProtoUpdateConvSettingsRequest(req)
 	_, err := s.msgClient.UpdateConversationSettings(ctx, protoReq)
 	return err
 }

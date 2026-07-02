@@ -9,6 +9,10 @@ import "proto/msg/msg_common.proto";
 
 // MsgService 定义消息服务对外暴露的 RPC 能力。
 // 调用方：Gateway（HTTP → gRPC 转发）、Connect（Kafka 消费后回查）等。
+//
+// 鉴权主体约定：所有 RPC 的操作者身份（user_uuid / device_id）一律从 gRPC metadata
+// 读取（由 grpcx MetadataUnaryClientInterceptor 注入、MetadataUnaryInterceptor 落入 ctx，
+// 业务侧通过 pkg/ctxmeta 获取），请求体不再携带鉴权主体字段。
 service MsgService {
   // ==================== 消息发送 ====================
 
@@ -79,10 +83,9 @@ service MsgService {
 // ==================== 消息发送 ====================
 
 message SendMessageRequest {
-  // from_uuid: 发送者 UUID（从 JWT 中提取，Gateway 填充）。
-  string from_uuid = 1 [(validate.rules).string.min_len = 1];
-  // device_id: 发送设备 ID（用于幂等三元组）。
-  string device_id = 2 [(validate.rules).string.min_len = 1];
+  // 发送者 UUID 与设备 ID 从 gRPC metadata 获取（幂等三元组的前两元），不在请求体传递。
+  reserved 1, 2;
+  reserved "from_uuid", "device_id";
   // conv_type: 会话类型。defined_only 防止传入未定义的枚举值。
   ConvType conv_type = 3 [(validate.rules).enum = {defined_only: true, not_in: [0]}];
   // target_uuid: 单聊为对端 UUID，群聊为群 UUID。
@@ -166,9 +169,9 @@ message RecallMessageRequest {
   string conv_id = 1 [(validate.rules).string.min_len = 1];
   // msg_id: 要撤回的消息 ID。
   string msg_id = 2 [(validate.rules).string.min_len = 1];
-  // operator_uuid: 撤回操作者 UUID（从 JWT 中提取）。
-  // 当前仅支持消息发送者本人。
-  string operator_uuid = 3 [(validate.rules).string.min_len = 1];
+  // 撤回操作者 UUID 从 gRPC metadata 获取，不在请求体传递。
+  reserved 3;
+  reserved "operator_uuid";
 }
 
 message RecallMessageResponse {}
@@ -176,8 +179,9 @@ message RecallMessageResponse {}
 // ==================== 会话列表 ====================
 
 message GetConversationsRequest {
-  // owner_uuid: 会话归属用户 UUID（从 JWT 中提取）。
-  string owner_uuid = 1 [(validate.rules).string.min_len = 1];
+  // 会话归属用户 UUID 从 gRPC metadata 获取，不在请求体传递。
+  reserved 1;
+  reserved "owner_uuid";
   // updated_since: 增量同步起始时间（unix 毫秒），传 0 表示全量拉取。
   int64 updated_since = 2;
   // page_size: 分页大小，默认 50，上限 200。
@@ -200,8 +204,9 @@ message GetConversationsResponse {
 message MarkReadRequest {
   // conv_id: 会话 ID。
   string conv_id = 1 [(validate.rules).string.min_len = 1];
-  // owner_uuid: 会话归属用户 UUID。
-  string owner_uuid = 2 [(validate.rules).string.min_len = 1];
+  // 会话归属用户 UUID 从 gRPC metadata 获取，不在请求体传递。
+  reserved 2;
+  reserved "owner_uuid";
   // read_seq: 必填。客户端当前已读到的最大 seq。
   // 服务端逻辑：
   // 1. 更新该用户的 read_seq = max(DB.read_seq, req.read_seq)；
@@ -220,8 +225,9 @@ message MarkReadResponse {
 message DeleteConversationRequest {
   // conv_id: 会话 ID。
   string conv_id = 1 [(validate.rules).string.min_len = 1];
-  // owner_uuid: 会话归属用户 UUID。
-  string owner_uuid = 2 [(validate.rules).string.min_len = 1];
+  // 会话归属用户 UUID 从 gRPC metadata 获取，不在请求体传递。
+  reserved 2;
+  reserved "owner_uuid";
 }
 
 message DeleteConversationResponse {}
@@ -229,8 +235,9 @@ message DeleteConversationResponse {}
 message UpdateConvSettingsRequest {
   // conv_id: 会话 ID。
   string conv_id = 1 [(validate.rules).string.min_len = 1];
-  // owner_uuid: 会话归属用户 UUID。
-  string owner_uuid = 2 [(validate.rules).string.min_len = 1];
+  // 会话归属用户 UUID 从 gRPC metadata 获取，不在请求体传递。
+  reserved 2;
+  reserved "owner_uuid";
   // 以下字段使用 optional 语义：只更新传入的字段，未传入的保持不变。
   // mute: 免打扰开关。
   optional bool mute = 3;

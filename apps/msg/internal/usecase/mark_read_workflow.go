@@ -25,8 +25,9 @@ func NewMarkReadWorkflow(convService *convsvc.Service) *MarkReadWorkflow {
 }
 
 // Execute 执行标记已读的完整流程。
-func (w *MarkReadWorkflow) Execute(ctx context.Context, req *pb.MarkReadRequest) (*pb.MarkReadResponse, error) {
-	unreadCount, err := w.convService.MarkRead(ctx, req.OwnerUuid, req.ConvId, req.ReadSeq)
+// ownerUuid 是鉴权主体，由 handler 从 gRPC metadata（ctxmeta）解析后显式传入。
+func (w *MarkReadWorkflow) Execute(ctx context.Context, ownerUuid string, req *pb.MarkReadRequest) (*pb.MarkReadResponse, error) {
+	unreadCount, err := w.convService.MarkRead(ctx, ownerUuid, req.ConvId, req.ReadSeq)
 	if err != nil {
 		return nil, fmt.Errorf("MarkReadWorkflow: 标记已读失败: %w", err)
 	}

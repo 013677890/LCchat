@@ -30,8 +30,9 @@ type SendMessageWorkflow struct {
 }
 
 // PermissionChecker 校验发送者是否有权限向目标会话发送消息。
+// fromUuid 是鉴权主体，由 handler 从 gRPC metadata 解析后传入。
 type PermissionChecker interface {
-	CheckCanSend(ctx context.Context, req *pb.SendMessageRequest) error
+	CheckCanSend(ctx context.Context, fromUuid string, req *pb.SendMessageRequest) error
 }
 
 // NewSendMessageWorkflow 创建发送消息用例
@@ -49,13 +50,14 @@ func NewSendMessageWorkflow(
 	}
 }
 
-// Execute 执行发送消息的完整流程
-func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRequest) (*pb.SendMessageResponse, error) {
+// Execute 执行发送消息的完整流程。
+// fromUuid / deviceId 是鉴权主体，由 handler 从 gRPC metadata（ctxmeta）解析后显式传入。
+func (w *SendMessageWorkflow) Execute(ctx context.Context, fromUuid, deviceId string, req *pb.SendMessageRequest) (*pb.SendMessageResponse, error) {
 	// ============================================================
 	// Step 0: 跨服务权限校验（好友/黑名单/群成员）
 	// ============================================================
 	if w.permissionChecker != nil {
-		if err := w.permissionChecker.CheckCanSend(ctx, req); err != nil {
+		if err := w.permissionChecker.CheckCanSend(ctx, fromUuid, req); err != nil {
 			return nil, fmt.Errorf("SendMessageWorkflow: 发送权限校验失败: %w", err)
 		}
 	}
@@ -63,7 +65,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	// ============================================================
 	// Step 1: 消息领域 → 幂等检查 + ULID + conv_id + seq + message/outbox 同事务落库
 	// ============================================================
-	result, err := w.msgService.CreateMessage(ctx, req)
+	result, err := w.msgService.CreateMessage(ctx, fromUuid, deviceId, req)
 	if err != nil {
 		return nil, fmt.Errorf("SendMessageWorkflow: 创建消息失败: %w", err)
 	}
@@ -72,7 +74,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 
 	// Step 2: 幂等命中 → 直接返回首次创建的结果
 	if result.IsIdempotent {
-		if err := w.repairIdempotentConversationProjection(ctx, req, msg); err != nil {
+		if err := w.repairIdempotentConversationProjection(ctx, fromUuid, req, msg); err != nil {
 			return nil, fmt.Errorf("SendMessageWorkflow: 修复幂等消息会话投影失败: %w", err)
 		}
 		return &pb.SendMessageResponse{
@@ -86,7 +88,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	// ============================================================
 	// Step 3: 会话领域 → Upsert 发送方会话
 	// ============================================================
-	if err := w.convService.UpsertForMessage(ctx, req.FromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
+	if err := w.convService.UpsertForMessage(ctx, fromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
 		logger.Warn(ctx, "发送消息：更新发送方会话失败（不阻断）",
 			logger.String("conv_id", msg.ConvId),
 			logger.ErrorField("error", err),
@@ -98,7 +100,7 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	// ============================================================
 	if req.ConvType == pb.ConvType_CONV_TYPE_P2P {
 		// 单聊写扩散：为接收方 upsert 会话 (isSender=false → unread + 1)
-		if err := w.convService.UpsertForMessage(ctx, req.TargetUuid, msg, req.ConvType, req.FromUuid, false); err != nil {
+		if err := w.convService.UpsertForMessage(ctx, req.TargetUuid, msg, req.ConvType, fromUuid, false); err != nil {
 			logger.Warn(ctx, "发送消息：更新接收方会话失败（不阻断）",
 				logger.String("conv_id", msg.ConvId),
 				logger.String("receiver", req.TargetUuid),
@@ -138,14 +140,14 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, req *pb.SendMessageRe
 	}, nil
 }
 
-func (w *SendMessageWorkflow) repairIdempotentConversationProjection(ctx context.Context, req *pb.SendMessageRequest, msg *model.Message) error {
+func (w *SendMessageWorkflow) repairIdempotentConversationProjection(ctx context.Context, fromUuid string, req *pb.SendMessageRequest, msg *model.Message) error {
 	if req.ConvType != pb.ConvType_CONV_TYPE_P2P {
 		return nil
 	}
-	if err := w.convService.RepairForMessage(ctx, req.FromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
+	if err := w.convService.RepairForMessage(ctx, fromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
 		return fmt.Errorf("修复发送方会话失败: %w", err)
 	}
-	if err := w.convService.RepairForMessage(ctx, req.TargetUuid, msg, req.ConvType, req.FromUuid, false); err != nil {
+	if err := w.convService.RepairForMessage(ctx, req.TargetUuid, msg, req.ConvType, fromUuid, false); err != nil {
 		return fmt.Errorf("修复接收方会话失败: %w", err)
 	}
 	return nil

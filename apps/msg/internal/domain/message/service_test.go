@@ -141,10 +141,14 @@ func (m *mockRoleQuerier) QueryMemberRole(ctx context.Context, groupUUID, userUU
 
 // ==================== CreateMessage ====================
 
+// 鉴权主体已从请求体移除，测试中作为显式参数传入 CreateMessage。
+const (
+	testFromUUID = "user_aaa"
+	testDeviceID = "dev1"
+)
+
 func newP2PReq() *pb.SendMessageRequest {
 	return &pb.SendMessageRequest{
-		FromUuid:    "user_aaa",
-		DeviceId:    "dev1",
 		ConvType:    pb.ConvType_CONV_TYPE_P2P,
 		TargetUuid:  "user_bbb",
 		ClientMsgId: "cmid-1",
@@ -163,7 +167,7 @@ func TestCreateMessage_Success(t *testing.T) {
 	}
 	svc := NewService(repo)
 
-	result, err := svc.CreateMessage(context.Background(), newP2PReq())
+	result, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, newP2PReq())
 	require.NoError(t, err)
 	assert.False(t, result.IsIdempotent)
 	assert.Equal(t, "p2p-user_aaa-user_bbb", result.Msg.ConvId)
@@ -194,7 +198,7 @@ func TestCreateMessage_IdempotentHit(t *testing.T) {
 	}
 	svc := NewService(repo)
 
-	result, err := svc.CreateMessage(context.Background(), newP2PReq())
+	result, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, newP2PReq())
 	require.NoError(t, err)
 	assert.True(t, result.IsIdempotent)
 	assert.Equal(t, "cached-id", result.Msg.MsgId)
@@ -208,7 +212,7 @@ func TestCreateMessage_IdempotentProcessing(t *testing.T) {
 	}
 	svc := NewService(repo)
 
-	_, err := svc.CreateMessage(context.Background(), newP2PReq())
+	_, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, newP2PReq())
 	assert.ErrorIs(t, err, ErrIdempotentProcessing)
 }
 
@@ -224,7 +228,7 @@ func TestCreateMessage_UnsupportedMsgType(t *testing.T) {
 	req := newP2PReq()
 	req.MsgType = 999
 
-	_, err := svc.CreateMessage(context.Background(), req)
+	_, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, req)
 	assert.ErrorIs(t, err, ErrUnsupportedMsgType)
 	assert.Equal(t, "lease-token", releasedToken)
 }
@@ -247,7 +251,7 @@ func TestCreateMessage_DBDuplicate_Fallback(t *testing.T) {
 	}
 	svc := NewService(repo)
 
-	result, err := svc.CreateMessage(context.Background(), newP2PReq())
+	result, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, newP2PReq())
 	require.NoError(t, err)
 	assert.True(t, result.IsIdempotent)
 	assert.Equal(t, "existing-id", result.Msg.MsgId)
@@ -267,7 +271,7 @@ func TestCreateMessage_DBFailureReleasesProcessingLease(t *testing.T) {
 	}
 	svc := NewService(repo)
 
-	_, err := svc.CreateMessage(context.Background(), newP2PReq())
+	_, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, newP2PReq())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db insert failed")
 	assert.Equal(t, "lease-token", releasedToken)
@@ -286,7 +290,7 @@ func TestCreateMessage_CompleteFailureReleasesProcessingLease(t *testing.T) {
 	}
 	svc := NewService(repo)
 
-	result, err := svc.CreateMessage(context.Background(), newP2PReq())
+	result, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, newP2PReq())
 	require.NoError(t, err)
 	require.False(t, result.IsIdempotent)
 	assert.Equal(t, "lease-token", releasedToken)
@@ -319,7 +323,7 @@ func TestCreateMessage_DuplicateSeqRepairsAndRetries(t *testing.T) {
 	}
 	svc := NewService(repo)
 
-	result, err := svc.CreateMessage(context.Background(), newP2PReq())
+	result, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, newP2PReq())
 	require.NoError(t, err)
 	assert.False(t, result.IsIdempotent)
 	assert.Equal(t, int64(101), result.Msg.Seq)
@@ -336,7 +340,7 @@ func TestCreateMessage_GroupConvId(t *testing.T) {
 	req.ConvType = pb.ConvType_CONV_TYPE_GROUP
 	req.TargetUuid = "group-uuid-123"
 
-	result, err := svc.CreateMessage(context.Background(), req)
+	result, err := svc.CreateMessage(context.Background(), testFromUUID, testDeviceID, req)
 	require.NoError(t, err)
 	assert.Equal(t, "group-uuid-123", result.Msg.ConvId)
 }

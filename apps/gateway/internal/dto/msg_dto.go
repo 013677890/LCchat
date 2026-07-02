@@ -25,15 +25,13 @@ type SendMessageResponse struct {
 	SendTime int64  `json:"sendTime"`
 }
 
-// ConvertToProtoSendMessageRequest 将发送消息 DTO 转换为 Protobuf 请求
-// fromUUID 和 deviceID 由 Gateway 从 JWT context 注入
-func ConvertToProtoSendMessageRequest(dto *SendMessageRequest, fromUUID, deviceID string) *msgpb.SendMessageRequest {
+// ConvertToProtoSendMessageRequest 将发送消息 DTO 转换为 Protobuf 请求。
+// 发送者身份（user_uuid/device_id）由 gRPC metadata 携带，不在请求体传递。
+func ConvertToProtoSendMessageRequest(dto *SendMessageRequest) *msgpb.SendMessageRequest {
 	if dto == nil {
 		return nil
 	}
 	return &msgpb.SendMessageRequest{
-		FromUuid:     fromUUID,
-		DeviceId:     deviceID,
 		ConvType:     msgpb.ConvType(dto.ConvType),
 		TargetUuid:   dto.TargetUUID,
 		ClientMsgId:  dto.ClientMsgID,
@@ -141,16 +139,15 @@ type RecallMessageRequest struct {
 	MsgID  string `json:"msgId" binding:"required,min=1"`
 }
 
-// ConvertToProtoRecallMessageRequest 将撤回消息 DTO 转换为 Protobuf 请求
-// operatorUUID 由 Gateway 从 JWT context 注入
-func ConvertToProtoRecallMessageRequest(dto *RecallMessageRequest, operatorUUID string) *msgpb.RecallMessageRequest {
+// ConvertToProtoRecallMessageRequest 将撤回消息 DTO 转换为 Protobuf 请求。
+// 操作者身份由 gRPC metadata 携带，不在请求体传递。
+func ConvertToProtoRecallMessageRequest(dto *RecallMessageRequest) *msgpb.RecallMessageRequest {
 	if dto == nil {
 		return nil
 	}
 	return &msgpb.RecallMessageRequest{
-		ConvId:       dto.ConvID,
-		MsgId:        dto.MsgID,
-		OperatorUuid: operatorUUID,
+		ConvId: dto.ConvID,
+		MsgId:  dto.MsgID,
 	}
 }
 
@@ -170,14 +167,13 @@ type GetConversationsResponse struct {
 	NextCursor    string                 `json:"nextCursor"`
 }
 
-// ConvertToProtoGetConversationsRequest 将获取会话列表 DTO 转换为 Protobuf 请求
-// ownerUUID 由 Gateway 从 JWT context 注入
-func ConvertToProtoGetConversationsRequest(dto *GetConversationsRequest, ownerUUID string) *msgpb.GetConversationsRequest {
+// ConvertToProtoGetConversationsRequest 将获取会话列表 DTO 转换为 Protobuf 请求。
+// 会话归属用户身份由 gRPC metadata 携带，不在请求体传递。
+func ConvertToProtoGetConversationsRequest(dto *GetConversationsRequest) *msgpb.GetConversationsRequest {
 	if dto == nil {
 		return nil
 	}
 	return &msgpb.GetConversationsRequest{
-		OwnerUuid:    ownerUUID,
 		UpdatedSince: dto.UpdatedSince,
 		PageSize:     dto.PageSize,
 		Cursor:       dto.Cursor,
@@ -209,16 +205,15 @@ type MarkReadResponse struct {
 	UnreadCount int32 `json:"unreadCount"`
 }
 
-// ConvertToProtoMarkReadRequest 将标记已读 DTO 转换为 Protobuf 请求
-// ownerUUID 由 Gateway 从 JWT context 注入
-func ConvertToProtoMarkReadRequest(dto *MarkReadRequest, ownerUUID string) *msgpb.MarkReadRequest {
+// ConvertToProtoMarkReadRequest 将标记已读 DTO 转换为 Protobuf 请求。
+// 会话归属用户身份由 gRPC metadata 携带，不在请求体传递。
+func ConvertToProtoMarkReadRequest(dto *MarkReadRequest) *msgpb.MarkReadRequest {
 	if dto == nil {
 		return nil
 	}
 	return &msgpb.MarkReadRequest{
-		ConvId:    dto.ConvID,
-		OwnerUuid: ownerUUID,
-		ReadSeq:   dto.ReadSeq,
+		ConvId:  dto.ConvID,
+		ReadSeq: dto.ReadSeq,
 	}
 }
 
@@ -239,15 +234,14 @@ type DeleteConversationRequest struct {
 	ConvID string `json:"convId"`
 }
 
-// ConvertToProtoDeleteConversationRequest 将删除会话 DTO 转换为 Protobuf 请求
-// ownerUUID 由 Gateway 从 JWT context 注入
-func ConvertToProtoDeleteConversationRequest(dto *DeleteConversationRequest, ownerUUID string) *msgpb.DeleteConversationRequest {
+// ConvertToProtoDeleteConversationRequest 将删除会话 DTO 转换为 Protobuf 请求。
+// 会话归属用户身份由 gRPC metadata 携带，不在请求体传递。
+func ConvertToProtoDeleteConversationRequest(dto *DeleteConversationRequest) *msgpb.DeleteConversationRequest {
 	if dto == nil {
 		return nil
 	}
 	return &msgpb.DeleteConversationRequest{
-		ConvId:    dto.ConvID,
-		OwnerUuid: ownerUUID,
+		ConvId: dto.ConvID,
 	}
 }
 
@@ -260,15 +254,14 @@ type UpdateConvSettingsRequest struct {
 	Pin    *bool  `json:"pin"`
 }
 
-// ConvertToProtoUpdateConvSettingsRequest 将更新会话设置 DTO 转换为 Protobuf 请求
-// ownerUUID 由 Gateway 从 JWT context 注入
-func ConvertToProtoUpdateConvSettingsRequest(dto *UpdateConvSettingsRequest, ownerUUID string) *msgpb.UpdateConvSettingsRequest {
+// ConvertToProtoUpdateConvSettingsRequest 将更新会话设置 DTO 转换为 Protobuf 请求。
+// 会话归属用户身份由 gRPC metadata 携带，不在请求体传递。
+func ConvertToProtoUpdateConvSettingsRequest(dto *UpdateConvSettingsRequest) *msgpb.UpdateConvSettingsRequest {
 	if dto == nil {
 		return nil
 	}
 	req := &msgpb.UpdateConvSettingsRequest{
-		ConvId:    dto.ConvID,
-		OwnerUuid: ownerUUID,
+		ConvId: dto.ConvID,
 	}
 	if dto.Mute != nil {
 		req.Mute = dto.Mute

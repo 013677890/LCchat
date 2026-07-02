@@ -38,15 +38,16 @@ func NewPermissionChecker(relationConn, groupConn *grpc.ClientConn) *PermissionC
 }
 
 // CheckCanSend 校验发送者是否允许向目标会话发送消息。
-func (c *PermissionChecker) CheckCanSend(ctx context.Context, req *msgpb.SendMessageRequest) error {
-	if req == nil || req.FromUuid == "" || req.TargetUuid == "" {
+// fromUUID 是鉴权主体，由调用方从 gRPC metadata 解析后传入。
+func (c *PermissionChecker) CheckCanSend(ctx context.Context, fromUUID string, req *msgpb.SendMessageRequest) error {
+	if req == nil || fromUUID == "" || req.TargetUuid == "" {
 		return apperr.New(consts.CodeParamError)
 	}
 	switch req.ConvType {
 	case msgpb.ConvType_CONV_TYPE_P2P:
-		return c.checkP2P(ctx, req.FromUuid, req.TargetUuid)
+		return c.checkP2P(ctx, fromUUID, req.TargetUuid)
 	case msgpb.ConvType_CONV_TYPE_GROUP:
-		return c.checkGroup(ctx, req.FromUuid, req.TargetUuid)
+		return c.checkGroup(ctx, fromUUID, req.TargetUuid)
 	default:
 		return apperr.New(consts.CodeParamError)
 	}

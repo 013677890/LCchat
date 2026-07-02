@@ -16,7 +16,7 @@ domain 不直接依赖其他 domain；msg-service 不直接写 `msg.push` Kafka�
 
 ## 消息发送主流程
 
-1. gateway 调用 msg `SendMessage`。
+1. gateway 调用 msg `SendMessage`。操作者身份（`from_uuid`/`device_id`）经 gRPC metadata 传递，请求体不含身份字段；msg handler 从 `ctxmeta` 解析后显式传给 usecase/domain。
 2. usecase 调用权限检查器：
    - 单聊校验好友和黑名单。
    - 群聊校验成员、角色、全员禁言、单人禁言。

@@ -118,6 +118,8 @@ HTTP 返回的 `GroupInfoDTO` 与 proto 群资料响应字段对应：`group_uui
 
 ### 7.1 `MsgService`
 
+所有 RPC 的操作者身份（`user_uuid`/`device_id`）经 gRPC metadata 传递（`pkg/ctxmeta`），请求消息不含鉴权主体字段（原字段号已 reserved）。
+
 | RPC | 说明 |
 | --- | --- |
 | `SendMessage` | 发送单聊/群聊消息，幂等落库并触发下行事件。 |

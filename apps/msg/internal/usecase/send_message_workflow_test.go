@@ -130,11 +130,9 @@ func TestSendMessageWorkflowIdempotentHitRepairsP2PConversationProjection(t *tes
 	convService := convsvc.NewService(convRepo)
 	workflow := NewSendMessageWorkflow(msgService, convService, nil, nil)
 
-	resp, err := workflow.Execute(context.Background(), &pb.SendMessageRequest{
-		FromUuid:    "a",
+	resp, err := workflow.Execute(context.Background(), "a", "dev-1", &pb.SendMessageRequest{
 		TargetUuid:  "b",
 		ConvType:    pb.ConvType_CONV_TYPE_P2P,
-		DeviceId:    "dev-1",
 		ClientMsgId: "client-9",
 		MsgType:     int32(model.MsgTypeText),
 		Content:     `{"text":"hello"}`,

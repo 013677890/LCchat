@@ -78,7 +78,7 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 
 ## 发送消息链路
 
-1. Gateway 从 JWT 和 `X-Device-ID` 注入 `from_uuid` 和 `device_id`。
+1. 操作者身份（`user_uuid`/`device_id`）由 gateway 侧 gRPC metadata 携带（`grpcx` 客户端拦截器从 ctx 注入），请求体不含身份字段；msg handler 经 `ctxmeta` 解析鉴权主体。
 2. msg usecase 调用权限检查：
    - 单聊校验好友/黑名单关系；
    - 群聊校验群成员、群状态、禁言等权限。

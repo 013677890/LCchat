@@ -113,14 +113,16 @@ type CreateResult struct {
 //	│                                                              │
 //	│ ⑦ 返回 CreateResult{Msg, IsIdempotent: false}                │
 //	└──────────────────────────────────────────────────────────────┘
-func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest) (*CreateResult, error) {
+//
+// fromUuid / deviceId 是鉴权主体，由 handler 从 gRPC metadata（ctxmeta）解析后显式传入。
+func (s *Service) CreateMessage(ctx context.Context, fromUuid, deviceId string, req *pb.SendMessageRequest) (*CreateResult, error) {
 	// ---- Step 1: 幂等检查（Redis SETNX） ----
 	// 三态返回：
 	//   - ({LeaseToken}, nil):  锁获取成功，继续创建
 	//   - ({CachedMsg}, nil):   幂等命中，直接返回缓存
 	//   - (nil, ErrProcessing): 并发请求正在处理
 	//   - (nil, otherErr):      Redis 异常，降级继续（DB 唯一索引兜底）
-	acquireResult, err := s.repo.TryAcquireIdempotent(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId)
+	acquireResult, err := s.repo.TryAcquireIdempotent(ctx, fromUuid, deviceId, req.ClientMsgId)
 	if err != nil {
 		if errors.Is(err, ErrIdempotentProcessing) {
 			return nil, ErrIdempotentProcessing
@@ -142,7 +144,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 		defer cancel()
-		if err := s.repo.ReleaseIdempotentProcessing(cleanupCtx, req.FromUuid, req.DeviceId, req.ClientMsgId, leaseToken); err != nil {
+		if err := s.repo.ReleaseIdempotentProcessing(cleanupCtx, fromUuid, deviceId, req.ClientMsgId, leaseToken); err != nil {
 			logger.Warn(cleanupCtx, "创建消息：释放幂等 PROCESSING 标记失败",
 				logger.String("client_msg_id", req.ClientMsgId),
 				logger.ErrorField("error", err),
@@ -153,12 +155,12 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 	cacheIdempotentResult := func(resultMsg *model.Message) {
 		var cacheErr error
 		if leaseToken != "" {
-			cacheErr = s.repo.CompleteIdempotentResult(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId, leaseToken, resultMsg)
+			cacheErr = s.repo.CompleteIdempotentResult(ctx, fromUuid, deviceId, req.ClientMsgId, leaseToken, resultMsg)
 			if cacheErr == nil {
 				leaseResolved = true
 			}
 		} else {
-			cacheErr = s.repo.SetIdempotentResult(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId, resultMsg)
+			cacheErr = s.repo.SetIdempotentResult(ctx, fromUuid, deviceId, req.ClientMsgId, resultMsg)
 		}
 		if cacheErr != nil {
 			logger.Warn(ctx, "创建消息：回写幂等缓存失败",
@@ -175,7 +177,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 	}
 
 	// ---- Step 3: 计算 conv_id ----
-	convId := computeConvId(req.ConvType, req.FromUuid, req.TargetUuid)
+	convId := computeConvId(req.ConvType, fromUuid, req.TargetUuid)
 
 	// ---- Step 4: 生成 ULID msg_id ----
 	// ulid.Make() 内部使用 sync.Pool 并发安全熵池，无需手动创建随机源
@@ -208,8 +210,8 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 			Seq:          seq,
 			MsgId:        msgId,
 			ClientMsgId:  req.ClientMsgId,
-			FromUuid:     req.FromUuid,
-			DeviceId:     req.DeviceId,
+			FromUuid:     fromUuid,
+			DeviceId:     deviceId,
 			MsgType:      int16(msgType),
 			Content:      req.Content,
 			Status:       0, // 0=正常
@@ -233,7 +235,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *pb.SendMessageRequest)
 		}
 		if errors.Is(createErr, ErrDuplicateMessage) {
 			// DB 唯一索引兜底：SETNX 降级时可能走到这里。
-			existMsg, queryErr := s.repo.GetByDuplicateKey(ctx, req.FromUuid, req.DeviceId, req.ClientMsgId)
+			existMsg, queryErr := s.repo.GetByDuplicateKey(ctx, fromUuid, deviceId, req.ClientMsgId)
 			if queryErr != nil {
 				return nil, fmt.Errorf("CreateMessage: query duplicate failed: %w", queryErr)
 			}
@@ -271,11 +273,11 @@ func buildMsgPushOutboxPayload(ctx context.Context, req *pb.SendMessageRequest, 
 	return msgevent.EncodeMsgPush(&pb.MsgPushEvent{
 		EventId:      id.GenerateULID(),
 		ReceiverUuid: req.TargetUuid,
-		DeviceId:     req.DeviceId,
+		DeviceId:     msg.DeviceId,
 		Type:         "MSG_PUSH",
 		ConvType:     req.ConvType,
 		Data:         msgItemData,
-		FromUuid:     req.FromUuid,
+		FromUuid:     msg.FromUuid,
 		TraceId:      ctxmeta.TraceID(ctx),
 		ServerTs:     msg.SendTime.UnixMilli(),
 		Seq:          msg.Seq,

@@ -90,9 +90,9 @@ func TestGatewayMsgServiceSendMessage(t *testing.T) {
 
 		client := &fakeGatewayMsgClient{
 			sendMessageFn: func(_ context.Context, req *msgpb.SendMessageRequest) (*msgpb.SendMessageResponse, error) {
-				assert.Equal(t, "u-from", req.FromUuid)
-				assert.Equal(t, "dev-1", req.DeviceId)
+				// 身份由 gRPC metadata 携带（客户端拦截器注入），请求体只承载业务字段。
 				assert.Equal(t, "c1", req.ClientMsgId)
+				assert.Equal(t, "u-to", req.TargetUuid)
 				return &msgpb.SendMessageResponse{
 					MsgId:    "m1",
 					Seq:      10,
@@ -159,7 +159,6 @@ func TestGatewayMsgServiceRecallMessage(t *testing.T) {
 		ctx := ctxmeta.WithUserUUID(context.Background(), "op-1")
 		client := &fakeGatewayMsgClient{
 			recallMessageFn: func(_ context.Context, req *msgpb.RecallMessageRequest) (*msgpb.RecallMessageResponse, error) {
-				assert.Equal(t, "op-1", req.OperatorUuid)
 				assert.Equal(t, "conv-1", req.ConvId)
 				assert.Equal(t, "m1", req.MsgId)
 				return nil, wantErr
