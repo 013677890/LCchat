@@ -24,7 +24,29 @@
       "Bash(go run *)",
       "Bash(echo \"=== BUILD EXIT: $? ===\")",
       "Bash(go vet *)",
-      "Bash(echo \"=== VET EXIT: $? ===\")"
+      "Bash(echo \"=== VET EXIT: $? ===\")",
+      "Bash(xargs ls -lh)",
+      "Bash(awk '{print $4}')",
+      "Bash(xargs -I{} du -k \"{}\")",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(go fmt *)",
+      "Bash(gofmt:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git rm --cached:*)",
+      "Bash(make proto)",
+      "Bash(make tools)",
+      "Bash(python scripts/gateway_blackbox_test.py)",
+      "Bash(grep -iE \"^cmd\\(\\\\.exe\\)?$|__pycache__|\\\\.pyc$|package-lock\")",
+      "Bash(PATH=__CMDSUB_OUTPUT__/bin:__TRACKED_VAR__ buf generate --path proto)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(echo \"=== VET: $? ===\")",
+      "Bash(echo \"=== EXIT: $? ===\")"
     ]
   }
 }
