@@ -308,6 +308,195 @@ class SimpleWebSocket:
 requests = SimpleRequests
 websocket = SimpleWebSocket
 
+def proto_encode_varint(value: int) -> bytes:
+    chunks: list[int] = []
+    value = int(value)
+    while value >= 0x80:
+        chunks.append((value & 0x7F) | 0x80)
+        value >>= 7
+    chunks.append(value & 0x7F)
+    return bytes(chunks)
+
+def proto_string_field(field_num: int, value: str) -> bytes:
+    if not value:
+        return b""
+    data = value.encode("utf-8")
+    return proto_encode_varint(field_num << 3 | 2) + proto_encode_varint(len(data)) + data
+
+def proto_bytes_field(field_num: int, value: bytes) -> bytes:
+    if not value:
+        return b""
+    return proto_encode_varint(field_num << 3 | 2) + proto_encode_varint(len(value)) + value
+
+def proto_int_field(field_num: int, value: int) -> bytes:
+    if not value:
+        return b""
+    return proto_encode_varint(field_num << 3 | 0) + proto_encode_varint(value)
+
+def proto_bool_field(field_num: int, value: bool) -> bytes:
+    if not value:
+        return b""
+    return proto_encode_varint(field_num << 3 | 0) + b"\x01"
+
+def proto_read_varint(data: bytes, idx: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    while shift < 64:
+        if idx >= len(data):
+            raise ValueError("unexpected eof while reading varint")
+        byte = data[idx]
+        idx += 1
+        value |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return value, idx
+        shift += 7
+    raise ValueError("varint overflow")
+
+def proto_read_bytes(data: bytes, idx: int) -> tuple[bytes, int]:
+    length, idx = proto_read_varint(data, idx)
+    end = idx + length
+    if end > len(data):
+        raise ValueError("unexpected eof while reading bytes")
+    return data[idx:end], end
+
+def parse_proto_fields(data: bytes) -> dict[int, list[bytes | int]]:
+    fields: dict[int, list[bytes | int]] = {}
+    idx = 0
+    while idx < len(data):
+        key, idx = proto_read_varint(data, idx)
+        field_num = key >> 3
+        wire_type = key & 0x7
+        if wire_type == 0:
+            value, idx = proto_read_varint(data, idx)
+        elif wire_type == 1:
+            end = idx + 8
+            if end > len(data):
+                raise ValueError("unexpected eof while reading fixed64")
+            value = data[idx:end]
+            idx = end
+        elif wire_type == 2:
+            value, idx = proto_read_bytes(data, idx)
+        elif wire_type == 5:
+            end = idx + 4
+            if end > len(data):
+                raise ValueError("unexpected eof while reading fixed32")
+            value = data[idx:end]
+            idx = end
+        else:
+            raise ValueError(f"unsupported wire type: {wire_type}")
+        fields.setdefault(field_num, []).append(value)
+    return fields
+
+def proto_first_bytes(fields: dict[int, list[bytes | int]], field_num: int) -> bytes:
+    values = fields.get(field_num) or []
+    if not values or not isinstance(values[0], (bytes, bytearray)):
+        return b""
+    return bytes(values[0])
+
+def proto_first_string(fields: dict[int, list[bytes | int]], field_num: int) -> str:
+    return proto_first_bytes(fields, field_num).decode("utf-8", errors="replace")
+
+def proto_first_int(fields: dict[int, list[bytes | int]], field_num: int) -> int:
+    values = fields.get(field_num) or []
+    if not values or not isinstance(values[0], int):
+        return 0
+    return int(values[0])
+
+def parse_message_envelope(frame: bytes) -> dict:
+    fields = parse_proto_fields(frame)
+    return {
+        "type": proto_first_string(fields, 1),
+        "data": proto_first_bytes(fields, 2),
+        "seq": proto_first_int(fields, 3),
+        "server_ts": proto_first_int(fields, 4),
+        "trace_id": proto_first_string(fields, 5),
+        "ack_required": bool(proto_first_int(fields, 6)),
+    }
+
+def marshal_message_envelope(msg_type: str, data: bytes, seq: int = 0) -> bytes:
+    return (
+        proto_string_field(1, msg_type)
+        + proto_bytes_field(2, data)
+        + proto_int_field(3, seq)
+        + proto_int_field(4, int(time.time() * 1000))
+    )
+
+def parse_msg_item(data: bytes) -> dict:
+    fields = parse_proto_fields(data)
+    return {
+        "msg_id": proto_first_string(fields, 1),
+        "client_msg_id": proto_first_string(fields, 2),
+        "conv_id": proto_first_string(fields, 3),
+        "seq": proto_first_int(fields, 4),
+        "from_uuid": proto_first_string(fields, 5),
+        "msg_type": proto_first_int(fields, 6),
+        "content": proto_first_string(fields, 7),
+        "status": proto_first_int(fields, 8),
+    }
+
+def parse_recall_notice(data: bytes) -> dict:
+    fields = parse_proto_fields(data)
+    return {
+        "conv_id": proto_first_string(fields, 1),
+        "msg_id": proto_first_string(fields, 2),
+        "operator": proto_first_string(fields, 3),
+        "recall_time": proto_first_int(fields, 4),
+    }
+
+def parse_message_ack_ack(data: bytes) -> dict:
+    fields = parse_proto_fields(data)
+    return {
+        "conv_id": proto_first_string(fields, 1),
+        "seq": proto_first_int(fields, 2),
+    }
+
+def marshal_message_ack(conv_id: str, seq: int, msg_id: str) -> bytes:
+    return proto_string_field(1, conv_id) + proto_int_field(2, seq) + proto_string_field(3, msg_id)
+
+def open_ws(token: str, device_id: str) -> SimpleWebSocketConnection:
+    ws_url = f"{CONNECT_WS_BASE_URL}/ws?token={token}&device_id={device_id}"
+    ws = websocket.create_connection(ws_url, timeout=REQUEST_TIMEOUT, origin=CONNECT_WS_ORIGIN)
+    ws.settimeout(REQUEST_TIMEOUT)
+    return ws
+
+def wait_for_ws_envelope(
+    ws: SimpleWebSocketConnection,
+    expected_type: str,
+    name: str,
+    predicate=None,
+    timeout: float = 20.0,
+) -> dict:
+    deadline = time.time() + timeout
+    last_detail = "no frame received"
+    while time.time() < deadline:
+        try:
+            frame = ws.recv()
+        except socket.timeout:
+            last_detail = "socket timeout"
+            continue
+        if not isinstance(frame, (bytes, bytearray)) or not frame:
+            last_detail = f"non-binary frame: {frame!r}"
+            continue
+        try:
+            envelope = parse_message_envelope(bytes(frame))
+        except Exception as exc:  # noqa: BLE001
+            last_detail = f"unparseable frame: {exc}"
+            continue
+        if envelope.get("type") != expected_type:
+            last_detail = f"type={envelope.get('type')}"
+            continue
+        if predicate is not None and not predicate(envelope):
+            last_detail = f"type={expected_type}, predicate=false"
+            continue
+        return envelope
+    raise TestFailure(f"{name} timeout: {last_detail}")
+
+def ack_ws_message(ws: SimpleWebSocketConnection, envelope: dict, item: dict) -> None:
+    if not envelope.get("ack_required"):
+        return
+    ack = marshal_message_ack(item["conv_id"], int(item["seq"]), item["msg_id"])
+    ws.send_binary(marshal_message_envelope("MSG_ACK", ack, int(item["seq"])))
+
 @dataclass
 class ResultItem:
     name: str
@@ -510,6 +699,155 @@ def test_connect_interfaces(recorder: Recorder, token: str, device_id: str) -> N
         recorder.ok("connect-ws", "heartbeat_ack")
     finally:
         ws.close()
+
+def test_websocket_message_delivery(
+    recorder: Recorder,
+    token_a: str,
+    token_b: str,
+    device_b: str,
+    user_a: str,
+    user_b: str,
+    suffix: str,
+) -> None:
+    ws_b = open_ws(token_b, device_b)
+    try:
+        time.sleep(0.2)
+
+        p2p_client_msg_id = f"ws-p2p-{suffix}"
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/messages/send",
+            token=token_a,
+            json_body={
+                "clientMsgId": p2p_client_msg_id,
+                "convType": 1,
+                "targetUuid": user_b,
+                "msgType": 1,
+                "content": json.dumps({"text": "hello ws p2p"}),
+            },
+        )
+        p2p_data = ensure_success("ws-p2p-send", response, body)
+        p2p_conv_id = p2p_data["convId"]
+        p2p_msg_id = p2p_data["msgId"]
+        recorder.ok("ws-p2p-send", p2p_msg_id)
+
+        def p2p_push_matches(envelope: dict) -> bool:
+            item = parse_msg_item(envelope["data"])
+            return item.get("msg_id") == p2p_msg_id and item.get("conv_id") == p2p_conv_id
+
+        p2p_push = wait_for_ws_envelope(ws_b, "MSG_PUSH", "wait ws p2p push", p2p_push_matches)
+        p2p_item = parse_msg_item(p2p_push["data"])
+        if p2p_item.get("from_uuid") != user_a or p2p_item.get("content") != json.dumps({"text": "hello ws p2p"}):
+            raise TestFailure(f"ws p2p push payload mismatch: {p2p_item}")
+        recorder.ok("ws-p2p-receive", f"{p2p_msg_id}@seq{p2p_item.get('seq')}")
+
+        ack_ws_message(ws_b, p2p_push, p2p_item)
+        if p2p_push.get("ack_required"):
+            def p2p_ack_matches(envelope: dict) -> bool:
+                ack = parse_message_ack_ack(envelope["data"])
+                return ack.get("conv_id") == p2p_conv_id and ack.get("seq") == p2p_item.get("seq")
+
+            wait_for_ws_envelope(ws_b, "MSG_ACK_ACK", "wait ws p2p ack", p2p_ack_matches)
+            recorder.ok("ws-p2p-ack", str(p2p_item.get("seq")))
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/messages/recall",
+            token=token_a,
+            json_body={"convId": p2p_conv_id, "msgId": p2p_msg_id},
+        )
+        ensure_success("ws-p2p-recall", response, body)
+        recorder.ok("ws-p2p-recall", p2p_msg_id)
+
+        def p2p_recall_matches(envelope: dict) -> bool:
+            notice = parse_recall_notice(envelope["data"])
+            return notice.get("msg_id") == p2p_msg_id and notice.get("conv_id") == p2p_conv_id
+
+        wait_for_ws_envelope(ws_b, "MSG_RECALL", "wait ws p2p recall", p2p_recall_matches)
+        recorder.ok("ws-p2p-recall-receive", p2p_msg_id)
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/groups",
+            token=token_a,
+            json_body={"name": f"ws-group-{suffix}", "avatar": f"https://example.com/{suffix}/ws-group.png"},
+        )
+        group_uuid = ensure_success("ws-group-create", response, body)["groupUuid"]
+        recorder.ok("ws-group-create", group_uuid)
+
+        response, body = request_json(
+            "POST",
+            f"/api/v1/auth/groups/{group_uuid}/members",
+            route_path="/api/v1/auth/groups/:groupUuid/members",
+            token=token_a,
+            json_body={"userUuids": [user_b]},
+        )
+        ensure_success("ws-group-add-member", response, body)
+        recorder.ok("ws-group-add-member", user_b)
+
+        group_client_msg_id = f"ws-group-{suffix}"
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/messages/send",
+            token=token_a,
+            json_body={
+                "clientMsgId": group_client_msg_id,
+                "convType": 2,
+                "targetUuid": group_uuid,
+                "msgType": 1,
+                "content": json.dumps({"text": "hello ws group"}),
+            },
+        )
+        group_data = ensure_success("ws-group-send", response, body)
+        group_conv_id = group_data["convId"]
+        group_msg_id = group_data["msgId"]
+        recorder.ok("ws-group-send", group_msg_id)
+
+        def group_push_matches(envelope: dict) -> bool:
+            item = parse_msg_item(envelope["data"])
+            return item.get("msg_id") == group_msg_id and item.get("conv_id") == group_conv_id
+
+        group_push = wait_for_ws_envelope(ws_b, "MSG_PUSH", "wait ws group push", group_push_matches)
+        group_item = parse_msg_item(group_push["data"])
+        if group_item.get("from_uuid") != user_a or group_item.get("content") != json.dumps({"text": "hello ws group"}):
+            raise TestFailure(f"ws group push payload mismatch: {group_item}")
+        recorder.ok("ws-group-receive", f"{group_msg_id}@seq{group_item.get('seq')}")
+
+        ack_ws_message(ws_b, group_push, group_item)
+        if group_push.get("ack_required"):
+            def group_ack_matches(envelope: dict) -> bool:
+                ack = parse_message_ack_ack(envelope["data"])
+                return ack.get("conv_id") == group_conv_id and ack.get("seq") == group_item.get("seq")
+
+            wait_for_ws_envelope(ws_b, "MSG_ACK_ACK", "wait ws group ack", group_ack_matches)
+            recorder.ok("ws-group-ack", str(group_item.get("seq")))
+
+        response, body = request_json(
+            "POST",
+            "/api/v1/auth/messages/recall",
+            token=token_a,
+            json_body={"convId": group_conv_id, "msgId": group_msg_id},
+        )
+        ensure_success("ws-group-recall", response, body)
+        recorder.ok("ws-group-recall", group_msg_id)
+
+        def group_recall_matches(envelope: dict) -> bool:
+            notice = parse_recall_notice(envelope["data"])
+            return notice.get("msg_id") == group_msg_id and notice.get("conv_id") == group_conv_id
+
+        wait_for_ws_envelope(ws_b, "MSG_RECALL", "wait ws group recall", group_recall_matches)
+        recorder.ok("ws-group-recall-receive", group_msg_id)
+
+        response, body = request_json(
+            "DELETE",
+            f"/api/v1/auth/groups/{group_uuid}",
+            route_path="/api/v1/auth/groups/:groupUuid",
+            token=token_a,
+        )
+        ensure_success("ws-group-dismiss", response, body)
+        recorder.ok("ws-group-dismiss", group_uuid)
+    finally:
+        ws_b.close()
 
 def test_group_interfaces(recorder: Recorder, token_a: str, token_b: str, user_a: str, user_b: str, suffix: str) -> None:
     group1_name = f"grp-mgmt-{suffix}"
@@ -1335,6 +1673,8 @@ def main() -> int:
         friend_version = data.get("latestVersion", friend_version)
         friend_cursor = data.get("nextCursor", "")
         recorder.ok("friend-sync", friend_cursor or str(friend_version))
+
+        test_websocket_message_delivery(recorder, token_a1, token_b1, device_b1, user_a, user_b, suffix)
 
         response, body = request_json(
             "POST",

@@ -442,7 +442,7 @@ services:
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_MSG_PUSH_TOPIC: msg.push
-      KAFKA_MSG_PUSH_GROUP_ID: message-push-consumer-group
+      KAFKA_MSG_PUSH_GROUP_ID: lcchat-compose-message-push-consumer-group
       GROUP_GRPC_ADDR: group:9095
       MESSAGE_PUSH_HTTP_ADDR: ":8084"
     depends_on:
@@ -481,6 +481,8 @@ services:
         code=$$(curl -s -o /dev/null -w "%{http_code}" http://gateway:8080/api/v1/auth/blacklist)
         test "$$code" = "401"
         echo "[blackbox] auth middleware smoke check passed"
+    networks:
+      - chat-network
 networks:
   chat-network:
     driver: bridge

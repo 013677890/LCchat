@@ -45,6 +45,9 @@ cat <<EOF >/tmp/outbox-connector.json
   "include.schema.changes": "false",
   "snapshot.mode": "when_needed",
   "tombstones.on.delete": "false",
+  "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+  "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+  "value.converter.schemas.enable": "false",
   "schema.history.internal.kafka.bootstrap.servers": "${BOOTSTRAP_SERVERS}",
   "schema.history.internal.kafka.topic": "${SCHEMA_HISTORY_TOPIC}",
   "transforms": "outbox",
@@ -53,7 +56,7 @@ cat <<EOF >/tmp/outbox-connector.json
   "transforms.outbox.route.topic.replacement": "\${routedByValue}",
   "transforms.outbox.table.field.event.key": "entity_id",
   "transforms.outbox.table.field.event.payload": "payload",
-  "transforms.outbox.table.expand.json.payload": "true",
+  "transforms.outbox.table.expand.json.payload": "false",
   "transforms.outbox.table.field.event.id": "id",
   "transforms.outbox.table.fields.additional.placement": "event_type:header:eventType,entity_id:header:entityId,created_at:header:createdAt"
 }
