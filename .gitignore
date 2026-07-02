@@ -16,6 +16,8 @@ data/
 *.dylib
 /ChatServer
 .gotmp
+# 根目录误产出的无扩展名 Linux 二进制（注意锚定根目录，不能裸写 cmd，否则会误伤 apps/*/cmd 源码目录）
+/cmd
 
 # --- 日志文件 ---
 *.log
