@@ -6,6 +6,7 @@ data/
 .vscode/
 .idea/
 .agents/
+.claude/
 
 # --- 构建与临时文件 ---
 # 编译生成的二进制文件 (Windows/Linux/Mac)
