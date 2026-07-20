@@ -497,7 +497,7 @@ func TestGatewayFriendServiceBatchGetSimpleUserInfo(t *testing.T) {
 
 	t.Run("empty_input", func(t *testing.T) {
 		svc := NewFriendService(&fakeGatewayFriendClient{})
-		result, err := svc.(*FriendServiceImpl).batchGetSimpleUserInfo(context.Background(), nil)
+		result, err := batchGetSimpleUserInfo(context.Background(), svc.(*FriendServiceImpl).userClient, nil)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		assert.Empty(t, result)
@@ -524,7 +524,7 @@ func TestGatewayFriendServiceBatchGetSimpleUserInfo(t *testing.T) {
 			uuids = append(uuids, fmt.Sprintf("u-%03d", i))
 		}
 
-		result, err := svc.(*FriendServiceImpl).batchGetSimpleUserInfo(context.Background(), uuids)
+		result, err := batchGetSimpleUserInfo(context.Background(), svc.(*FriendServiceImpl).userClient, uuids)
 		require.NoError(t, err)
 		require.Len(t, result, 206) // u-dup + 205 unique
 		assert.Equal(t, 3, calls)
@@ -554,7 +554,7 @@ func TestGatewayFriendServiceBatchGetSimpleUserInfo(t *testing.T) {
 			uuids = append(uuids, fmt.Sprintf("u-%03d", i))
 		}
 
-		result, err := svc.(*FriendServiceImpl).batchGetSimpleUserInfo(context.Background(), uuids)
+		result, err := batchGetSimpleUserInfo(context.Background(), svc.(*FriendServiceImpl).userClient, uuids)
 		require.Error(t, err)
 		require.Len(t, result, 100)
 		assert.Equal(t, "n-u-000", result["u-000"].Nickname)

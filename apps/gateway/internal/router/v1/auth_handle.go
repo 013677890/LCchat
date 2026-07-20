@@ -4,7 +4,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/result"
@@ -66,14 +65,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// 4. 调用服务层处理业务逻辑（依赖注入）
 	loginResp, err := h.authService.Login(ctx, &req, deviceID)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如密码错误、账号锁定等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -104,14 +96,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	registerResp, err := h.authService.Register(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如密码错误、账号锁定等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -142,14 +127,7 @@ func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	sendVerifyCodeResp, err := h.authService.SendVerifyCode(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如验证码发送失败等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -189,14 +167,7 @@ func (h *AuthHandler) LoginByCode(c *gin.Context) {
 	// 4. 调用服务层处理业务逻辑（依赖注入）
 	loginResp, err := h.authService.LoginByCode(ctx, &req, deviceID)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如验证码错误、用户不存在等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -227,14 +198,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	_, err := h.authService.Logout(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -265,14 +229,7 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	_, err := h.authService.ResetPassword(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如验证码错误、用户不存在等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -322,14 +279,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	// 5. 调用服务层处理业务逻辑（依赖注入）
 	resp, err := h.authService.RefreshToken(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如Token无效、已过期等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -360,14 +310,7 @@ func (h *AuthHandler) VerifyCode(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	resp, err := h.authService.VerifyCode(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如验证码错误、已过期等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 

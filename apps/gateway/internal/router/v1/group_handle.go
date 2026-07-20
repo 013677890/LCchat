@@ -4,7 +4,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/gin-gonic/gin"
@@ -34,7 +33,7 @@ func (h *GroupHandler) CreateGroup(c *gin.Context) {
 	}
 	resp, err := h.groupService.CreateGroup(ctx, &req)
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -45,7 +44,7 @@ func (h *GroupHandler) GetGroupList(c *gin.Context) {
 	ctx := middleware.NewContextWithGin(c)
 	resp, err := h.groupService.GetGroupList(ctx)
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -61,7 +60,7 @@ func (h *GroupHandler) GetGroupInfo(c *gin.Context) {
 	}
 	resp, err := h.groupService.GetGroupInfo(ctx, &dto.GetGroupInfoRequest{GroupUUID: groupUUID})
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -82,7 +81,7 @@ func (h *GroupHandler) UpdateGroupInfo(c *gin.Context) {
 	}
 	req.GroupUUID = groupUUID
 	if err := h.groupService.UpdateGroupInfo(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -103,7 +102,7 @@ func (h *GroupHandler) UpdateGroupNotice(c *gin.Context) {
 	}
 	req.GroupUUID = groupUUID
 	if err := h.groupService.UpdateGroupNotice(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -124,7 +123,7 @@ func (h *GroupHandler) TransferGroupOwner(c *gin.Context) {
 	}
 	req.GroupUUID = groupUUID
 	if err := h.groupService.TransferGroupOwner(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -147,7 +146,7 @@ func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	req.UserUUID = userUUID
 	if err := h.groupService.UpdateMemberRole(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -169,7 +168,7 @@ func (h *GroupHandler) ApplyJoinGroup(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	resp, err := h.groupService.ApplyJoinGroup(ctx, &req)
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -184,7 +183,7 @@ func (h *GroupHandler) CancelJoinGroupApplication(c *gin.Context) {
 		return
 	}
 	if err := h.groupService.CancelJoinGroupApplication(ctx, &dto.CancelJoinGroupApplicationRequest{GroupUUID: groupUUID}); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -200,7 +199,7 @@ func (h *GroupHandler) GetMyJoinGroupApplication(c *gin.Context) {
 	}
 	resp, err := h.groupService.GetMyJoinGroupApplication(ctx, &dto.GetMyJoinGroupApplicationRequest{GroupUUID: groupUUID})
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -217,7 +216,7 @@ func (h *GroupHandler) ListMyJoinGroupApplications(c *gin.Context) {
 	}
 	resp, err := h.groupService.ListMyJoinGroupApplications(ctx, &req)
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -240,7 +239,7 @@ func (h *GroupHandler) ReviewJoinGroup(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	req.ApplyID = applyID
 	if err := h.groupService.ReviewJoinGroup(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -255,7 +254,7 @@ func (h *GroupHandler) DismissGroup(c *gin.Context) {
 		return
 	}
 	if err := h.groupService.DismissGroup(ctx, &dto.DismissGroupRequest{GroupUUID: groupUUID}); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -276,7 +275,7 @@ func (h *GroupHandler) AddMember(c *gin.Context) {
 	}
 	req.GroupUUID = groupUUID
 	if err := h.groupService.AddMember(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -291,7 +290,7 @@ func (h *GroupHandler) LeaveGroup(c *gin.Context) {
 		return
 	}
 	if err := h.groupService.LeaveGroup(ctx, &dto.LeaveGroupRequest{GroupUUID: groupUUID}); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -311,7 +310,7 @@ func (h *GroupHandler) RemoveMember(c *gin.Context) {
 		UserUUID:  userUUID,
 	})
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -327,7 +326,7 @@ func (h *GroupHandler) GetMemberList(c *gin.Context) {
 	}
 	resp, err := h.groupService.GetMemberList(ctx, &dto.GetGroupMemberListRequest{GroupUUID: groupUUID})
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -349,7 +348,7 @@ func (h *GroupHandler) SearchGroupMembers(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	resp, err := h.groupService.SearchGroupMembers(ctx, &req)
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -365,7 +364,7 @@ func (h *GroupHandler) SearchGroups(c *gin.Context) {
 	}
 	resp, err := h.groupService.SearchGroups(ctx, &req)
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -386,7 +385,7 @@ func (h *GroupHandler) UpdateMyGroupNickname(c *gin.Context) {
 	}
 	req.GroupUUID = groupUUID
 	if err := h.groupService.UpdateMyGroupNickname(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -409,7 +408,7 @@ func (h *GroupHandler) UpdateGroupMemberNickname(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	req.UserUUID = userUUID
 	if err := h.groupService.UpdateGroupMemberNickname(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -432,7 +431,7 @@ func (h *GroupHandler) MuteGroupMember(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	req.UserUUID = userUUID
 	if err := h.groupService.MuteGroupMember(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -453,7 +452,7 @@ func (h *GroupHandler) UpdateGroupMuteSetting(c *gin.Context) {
 	}
 	req.GroupUUID = groupUUID
 	if err := h.groupService.UpdateGroupMuteSetting(ctx, &req); err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, nil)
@@ -475,7 +474,7 @@ func (h *GroupHandler) ListJoinRequests(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	resp, err := h.groupService.ListJoinRequests(ctx, &req)
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -498,7 +497,7 @@ func (h *GroupHandler) ListReviewedJoinRequests(c *gin.Context) {
 	req.GroupUUID = groupUUID
 	resp, err := h.groupService.ListReviewedJoinRequests(ctx, &req)
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -514,7 +513,7 @@ func (h *GroupHandler) GetJoinRequestPendingCount(c *gin.Context) {
 	}
 	resp, err := h.groupService.GetJoinRequestPendingCount(ctx, &dto.GetJoinRequestPendingCountRequest{GroupUUID: groupUUID})
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
@@ -530,18 +529,8 @@ func (h *GroupHandler) GetGroupMemberIDs(c *gin.Context) {
 	}
 	resp, err := h.groupService.GetGroupMemberIDs(ctx, &dto.GetGroupMemberIDsRequest{GroupUUID: groupUUID})
 	if err != nil {
-		handleGroupError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 	result.Success(c, resp)
-}
-
-// handleGroupError 统一把下游 group-service 错误转换成 HTTP 响应。
-func handleGroupError(c *gin.Context, err error) {
-	code := utils.ExtractErrorCode(err)
-	if consts.IsNonServerError(code) {
-		result.Fail(c, nil, code)
-		return
-	}
-	result.FailServer(c, err, consts.CodeInternalError)
 }

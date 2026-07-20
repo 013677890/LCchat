@@ -4,7 +4,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 
@@ -43,12 +42,7 @@ func (h *MsgHandler) SendMessage(c *gin.Context) {
 
 	resp, err := h.msgService.SendMessage(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -82,12 +76,7 @@ func (h *MsgHandler) PullMessages(c *gin.Context) {
 
 	resp, err := h.msgService.PullMessages(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -114,12 +103,7 @@ func (h *MsgHandler) GetMessagesByIds(c *gin.Context) {
 
 	resp, err := h.msgService.GetMessagesByIds(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -146,12 +130,7 @@ func (h *MsgHandler) RecallMessage(c *gin.Context) {
 
 	err := h.msgService.RecallMessage(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -184,12 +163,7 @@ func (h *MsgHandler) GetConversations(c *gin.Context) {
 
 	resp, err := h.msgService.GetConversations(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -216,12 +190,7 @@ func (h *MsgHandler) MarkRead(c *gin.Context) {
 
 	resp, err := h.msgService.MarkRead(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -252,12 +221,7 @@ func (h *MsgHandler) DeleteConversation(c *gin.Context) {
 
 	err := h.msgService.DeleteConversation(ctx, req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -288,12 +252,7 @@ func (h *MsgHandler) UpdateConversationSettings(c *gin.Context) {
 
 	err := h.msgService.UpdateConversationSettings(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 

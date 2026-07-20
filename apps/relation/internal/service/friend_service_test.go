@@ -362,7 +362,7 @@ func TestRelationFriendServiceSendFriendApply(t *testing.T) {
 				},
 			}
 
-			svc := NewFriendService(nil, nil, friendRepo, applyRepo, blacklistRepo)
+			svc := NewFriendService(friendRepo, applyRepo, blacklistRepo, nil)
 			resp, err := svc.SendFriendApply(tt.ctx, tt.req)
 
 			if tt.wantErr != 0 {
@@ -384,7 +384,7 @@ func TestRelationFriendServiceHandleFriendApply(t *testing.T) {
 	repoErr := errors.New("repo failed")
 
 	t.Run("apply_not_found", func(t *testing.T) {
-		svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{})
+		svc := NewFriendService(&fakeFriendRepoForService{}, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{}, nil)
 		err := svc.HandleFriendApply(withRelationUserUUID("u1"), &pb.HandleFriendApplyRequest{ApplyId: 1, Action: 1})
 		requireRelationBizCode(t, err, consts.CodeApplyNotFoundOrHandle)
 	})
@@ -395,7 +395,7 @@ func TestRelationFriendServiceHandleFriendApply(t *testing.T) {
 				return &model.ApplyRequest{Id: 1, ApplicantUuid: "u2", TargetUuid: "u3"}, nil
 			},
 		}
-		svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{})
+		svc := NewFriendService(&fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{}, nil)
 		err := svc.HandleFriendApply(withRelationUserUUID("u1"), &pb.HandleFriendApplyRequest{ApplyId: 1, Action: 1})
 		requireRelationBizCode(t, err, consts.CodeNoPermission)
 	})
@@ -408,7 +408,7 @@ func TestRelationFriendServiceHandleFriendApply(t *testing.T) {
 				return &model.ApplyRequest{Id: 1, ApplicantUuid: "u2", TargetUuid: "u1"}, nil
 			},
 		}
-		svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{})
+		svc := NewFriendService(&fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{}, nil)
 		err := svc.HandleFriendApply(withRelationUserUUID("u1"), &pb.HandleFriendApplyRequest{ApplyId: 1, Action: 99})
 		requireRelationBizCode(t, err, consts.CodeParamError)
 		assert.False(t, getByIDCalled)
@@ -429,7 +429,7 @@ func TestRelationFriendServiceHandleFriendApply(t *testing.T) {
 				return false, nil
 			},
 		}
-		svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{})
+		svc := NewFriendService(&fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{}, nil)
 		err := svc.HandleFriendApply(withRelationUserUUID("u1"), &pb.HandleFriendApplyRequest{ApplyId: 1, Action: 1, Remark: "buddy"})
 		require.NoError(t, err)
 		assert.True(t, called)
@@ -444,7 +444,7 @@ func TestRelationFriendServiceHandleFriendApply(t *testing.T) {
 				return repository.ErrApplyNotFound
 			},
 		}
-		svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{})
+		svc := NewFriendService(&fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{}, nil)
 		err := svc.HandleFriendApply(withRelationUserUUID("u1"), &pb.HandleFriendApplyRequest{ApplyId: 1, Action: 2})
 		require.NoError(t, err)
 	})
@@ -458,7 +458,7 @@ func TestRelationFriendServiceHandleFriendApply(t *testing.T) {
 				return repoErr
 			},
 		}
-		svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{})
+		svc := NewFriendService(&fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{}, nil)
 		err := svc.HandleFriendApply(withRelationUserUUID("u1"), &pb.HandleFriendApplyRequest{ApplyId: 1, Action: 2})
 		requireRelationBizCode(t, err, consts.CodeInternalError)
 	})
@@ -484,7 +484,7 @@ func TestRelationFriendServiceSyncFriendListCursor(t *testing.T) {
 				}}, nextCursor, true, nil
 			},
 		}
-		svc := NewFriendService(nil, nil, friendRepo, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{})
+		svc := NewFriendService(friendRepo, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{}, nil)
 		resp, err := svc.SyncFriendList(withRelationUserUUID("u1"), &pb.SyncFriendListRequest{
 			Version: 999,
 			Limit:   1,
@@ -505,7 +505,7 @@ func TestRelationFriendServiceSyncFriendListCursor(t *testing.T) {
 				return nil, repository.FriendSyncCursor{}, false, nil
 			},
 		}
-		svc := NewFriendService(nil, nil, friendRepo, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{})
+		svc := NewFriendService(friendRepo, &fakeApplyRepoForService{}, &fakeBlacklistRepoForService{}, nil)
 		resp, err := svc.SyncFriendList(withRelationUserUUID("u1"), &pb.SyncFriendListRequest{Cursor: "bad-cursor"})
 		require.Nil(t, resp)
 		requireRelationBizCode(t, err, consts.CodeParamError)
@@ -521,7 +521,7 @@ func TestRelationFriendServiceGetUnreadApplyCountDegrade(t *testing.T) {
 			return 0, errors.New("redis failed")
 		},
 	}
-	svc := NewFriendService(nil, nil, &fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{})
+	svc := NewFriendService(&fakeFriendRepoForService{}, applyRepo, &fakeBlacklistRepoForService{}, nil)
 	resp, err := svc.GetUnreadApplyCount(withRelationUserUUID("u1"), &pb.GetUnreadApplyCountRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, resp)

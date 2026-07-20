@@ -4,7 +4,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 
@@ -46,14 +45,7 @@ func (h *FriendHandler) SendFriendApply(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	applyResp, err := h.friendService.SendFriendApply(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如用户不存在、已经是好友等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -94,14 +86,7 @@ func (h *FriendHandler) GetFriendApplyList(c *gin.Context) {
 	// 3. 调用服务层处理业务逻辑（依赖注入）
 	applyListResp, err := h.friendService.GetFriendApplyList(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -142,14 +127,7 @@ func (h *FriendHandler) GetSentApplyList(c *gin.Context) {
 	// 3. 调用服务层处理业务逻辑（依赖注入）
 	sentListResp, err := h.friendService.GetSentApplyList(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -180,14 +158,7 @@ func (h *FriendHandler) HandleFriendApply(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	_, err := h.friendService.HandleFriendApply(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如申请不存在、无权限等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -209,14 +180,7 @@ func (h *FriendHandler) GetUnreadApplyCount(c *gin.Context) {
 	// 1. 调用服务层处理业务逻辑（依赖注入）
 	unreadResp, err := h.friendService.GetUnreadApplyCount(ctx, &dto.GetUnreadApplyCountRequest{})
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -253,14 +217,7 @@ func (h *FriendHandler) MarkApplyAsRead(c *gin.Context) {
 	// 3. 调用服务层处理业务逻辑（依赖注入）
 	_, err := h.friendService.MarkApplyAsRead(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -301,14 +258,7 @@ func (h *FriendHandler) GetFriendList(c *gin.Context) {
 	// 3. 调用服务层处理业务逻辑（依赖注入）
 	friendListResp, err := h.friendService.GetFriendList(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -344,14 +294,7 @@ func (h *FriendHandler) SyncFriendList(c *gin.Context) {
 	// 3. 调用服务层处理业务逻辑（依赖注入）
 	syncResp, err := h.friendService.SyncFriendList(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -382,14 +325,7 @@ func (h *FriendHandler) DeleteFriend(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	_, err := h.friendService.DeleteFriend(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如好友不存在等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -420,14 +356,7 @@ func (h *FriendHandler) SetFriendRemark(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	_, err := h.friendService.SetFriendRemark(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -458,14 +387,7 @@ func (h *FriendHandler) SetFriendTag(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	_, err := h.friendService.SetFriendTag(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -504,14 +426,7 @@ func (h *FriendHandler) CheckIsFriend(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	checkResp, err := h.friendService.CheckIsFriend(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -550,14 +465,7 @@ func (h *FriendHandler) GetRelationStatus(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	relationResp, err := h.friendService.GetRelationStatus(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 

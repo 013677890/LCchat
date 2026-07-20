@@ -6,7 +6,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
@@ -71,7 +70,7 @@ func (s *FriendServiceImpl) GetFriendApplyList(ctx context.Context, req *dto.Get
 		}
 	}
 
-	userMap, err := s.batchGetSimpleUserInfo(ctx, applicantUUIDs)
+	userMap, err := batchGetSimpleUserInfo(ctx, s.userClient, applicantUUIDs)
 	if err != nil {
 		logger.Warn(ctx, "批量获取申请人信息失败，降级返回",
 			logger.Int("count", len(applicantUUIDs)),
@@ -124,7 +123,7 @@ func (s *FriendServiceImpl) GetSentApplyList(ctx context.Context, req *dto.GetSe
 		}
 	}
 
-	userMap, err := s.batchGetSimpleUserInfo(ctx, targetUUIDs)
+	userMap, err := batchGetSimpleUserInfo(ctx, s.userClient, targetUUIDs)
 	if err != nil {
 		logger.Warn(ctx, "批量获取目标用户信息失败，降级返回",
 			logger.Int("count", len(targetUUIDs)),
@@ -230,7 +229,7 @@ func (s *FriendServiceImpl) GetFriendList(ctx context.Context, req *dto.GetFrien
 		}
 	}
 
-	userMap, err := s.batchGetSimpleUserInfo(ctx, peerUUIDs)
+	userMap, err := batchGetSimpleUserInfo(ctx, s.userClient, peerUUIDs)
 	if err != nil {
 		logger.Warn(ctx, "批量获取好友信息失败，降级返回",
 			logger.Int("count", len(peerUUIDs)),
@@ -286,7 +285,7 @@ func (s *FriendServiceImpl) SyncFriendList(ctx context.Context, req *dto.SyncFri
 		peerUUIDs = append(peerUUIDs, change.UUID)
 	}
 
-	userMap, err := s.batchGetSimpleUserInfo(ctx, peerUUIDs)
+	userMap, err := batchGetSimpleUserInfo(ctx, s.userClient, peerUUIDs)
 	if err != nil {
 		logger.Warn(ctx, "批量获取好友信息失败，降级返回",
 			logger.Int("count", len(peerUUIDs)),
@@ -393,51 +392,4 @@ func (s *FriendServiceImpl) GetRelationStatus(ctx context.Context, req *dto.GetR
 
 	// 3. gRPC 调用成功，返回结果
 	return dto.ConvertGetRelationStatusResponseFromProto(grpcResp), nil
-}
-
-// batchGetSimpleUserInfo 批量获取用户信息（含去重与分片）
-// 失败时返回错误，由调用方决定是否降级
-func (s *FriendServiceImpl) batchGetSimpleUserInfo(ctx context.Context, uuids []string) (map[string]*dto.SimpleUserInfo, error) {
-	const batchSize = 100
-	result := make(map[string]*dto.SimpleUserInfo)
-	if len(uuids) == 0 {
-		return result, nil
-	}
-
-	// 去重
-	unique := make([]string, 0, len(uuids))
-	seen := make(map[string]struct{}, len(uuids))
-	for _, uuid := range uuids {
-		if uuid == "" {
-			continue
-		}
-		if _, ok := seen[uuid]; ok {
-			continue
-		}
-		seen[uuid] = struct{}{}
-		unique = append(unique, uuid)
-	}
-
-	for i := 0; i < len(unique); i += batchSize {
-		end := i + batchSize
-		if end > len(unique) {
-			end = len(unique)
-		}
-
-		grpcResp, err := s.userClient.BatchGetProfile(ctx, &userpb.BatchGetProfileRequest{
-			UserUuids: unique[i:end],
-		})
-		if err != nil {
-			return result, err
-		}
-
-		for _, user := range grpcResp.Users {
-			if user == nil || user.Uuid == "" {
-				continue
-			}
-			result[user.Uuid] = dto.ConvertSimpleUserInfoFromProto(user)
-		}
-	}
-
-	return result, nil
 }

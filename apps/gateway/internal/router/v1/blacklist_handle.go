@@ -4,7 +4,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 
@@ -43,12 +42,7 @@ func (h *BlacklistHandler) AddBlacklist(c *gin.Context) {
 
 	resp, err := h.blacklistService.AddBlacklist(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -79,12 +73,7 @@ func (h *BlacklistHandler) RemoveBlacklist(c *gin.Context) {
 
 	resp, err := h.blacklistService.RemoveBlacklist(ctx, req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -119,12 +108,7 @@ func (h *BlacklistHandler) GetBlacklistList(c *gin.Context) {
 
 	resp, err := h.blacklistService.GetBlacklistList(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -159,12 +143,7 @@ func (h *BlacklistHandler) CheckIsBlacklist(c *gin.Context) {
 
 	resp, err := h.blacklistService.CheckIsBlacklist(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 

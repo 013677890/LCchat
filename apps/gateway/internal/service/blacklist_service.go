@@ -6,7 +6,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	relationpb "github.com/013677890/LCchat-Backend/apps/relation/pb"
-	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
@@ -71,7 +70,7 @@ func (s *BlacklistServiceImpl) GetBlacklistList(ctx context.Context, req *dto.Ge
 		}
 	}
 
-	userMap, err := s.batchGetSimpleUserInfo(ctx, uuids)
+	userMap, err := batchGetSimpleUserInfo(ctx, s.userClient, uuids)
 	if err != nil {
 		logger.Warn(ctx, "批量获取黑名单用户信息失败，降级返回",
 			logger.Int("count", len(uuids)),
@@ -91,52 +90,6 @@ func (s *BlacklistServiceImpl) GetBlacklistList(ctx context.Context, req *dto.Ge
 	}
 
 	return resp, nil
-}
-
-// batchGetSimpleUserInfo 批量获取用户信息（含去重与分片）
-// 失败时返回错误，由调用方决定是否降级
-func (s *BlacklistServiceImpl) batchGetSimpleUserInfo(ctx context.Context, uuids []string) (map[string]*dto.SimpleUserInfo, error) {
-	const batchSize = 100
-	result := make(map[string]*dto.SimpleUserInfo)
-	if len(uuids) == 0 {
-		return result, nil
-	}
-
-	unique := make([]string, 0, len(uuids))
-	seen := make(map[string]struct{}, len(uuids))
-	for _, uuid := range uuids {
-		if uuid == "" {
-			continue
-		}
-		if _, ok := seen[uuid]; ok {
-			continue
-		}
-		seen[uuid] = struct{}{}
-		unique = append(unique, uuid)
-	}
-
-	for i := 0; i < len(unique); i += batchSize {
-		end := i + batchSize
-		if end > len(unique) {
-			end = len(unique)
-		}
-
-		grpcResp, err := s.userClient.BatchGetProfile(ctx, &userpb.BatchGetProfileRequest{
-			UserUuids: unique[i:end],
-		})
-		if err != nil {
-			return result, err
-		}
-
-		for _, user := range grpcResp.Users {
-			if user == nil || user.Uuid == "" {
-				continue
-			}
-			result[user.Uuid] = dto.ConvertSimpleUserInfoFromProto(user)
-		}
-	}
-
-	return result, nil
 }
 
 // CheckIsBlacklist 判断是否拉黑

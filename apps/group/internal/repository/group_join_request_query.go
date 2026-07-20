@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+
 	"github.com/013677890/LCchat-Backend/model"
 	"gorm.io/gorm"
 )
@@ -97,19 +98,10 @@ func (r *groupRepositoryImpl) ListReviewedJoinRequests(ctx context.Context, grou
 	if err := r.ensureGroupNormal(ctx, groupUUID); err != nil {
 		return nil, 0, err
 	}
-	var operator model.GroupMember
 	// 审批记录属于管理视角数据，只允许管理员及以上角色读取，避免普通成员窥视审批历史。
-	if err := r.db.WithContext(ctx).
-		Select("role").
-		Where("group_uuid = ? AND user_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, operatorUUID, memberStatusNormal).
-		Take(&operator).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, 0, ErrNoPermission
-		}
-		return nil, 0, WrapDBError(err)
-	}
-	if operator.Role < memberRoleAdmin {
-		return nil, 0, ErrNoPermission
+	// 统一入口同时约束正常成员状态与软删除标记，避免两个列表接口以后出现权限规则漂移。
+	if _, err := r.ensureActiveMemberRole(ctx, groupUUID, operatorUUID, memberRoleAdmin); err != nil {
+		return nil, 0, err
 	}
 	// 这里显式排除“申请人主动撤销”，保证审批记录只保留管理员真正处理过的历史。
 	statuses := []int8{joinRequestStatusApproved, joinRequestStatusRejected}

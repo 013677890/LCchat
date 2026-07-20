@@ -10,7 +10,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
 	pkgminio "github.com/013677890/LCchat-Backend/pkg/minio"
 	"github.com/013677890/LCchat-Backend/pkg/result"
@@ -45,14 +44,7 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	// 1. 调用服务层处理业务逻辑（依赖注入）
 	profileResp, err := h.userService.GetProfile(ctx)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如用户不存在等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -87,14 +79,7 @@ func (h *UserHandler) GetOtherProfile(c *gin.Context) {
 	// 3. 调用服务层处理业务逻辑（依赖注入）
 	profileResp, err := h.userService.GetOtherProfile(ctx, req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如用户不存在等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -146,14 +131,7 @@ func (h *UserHandler) SearchUser(c *gin.Context) {
 	// 4. 调用服务层处理业务逻辑（依赖注入）
 	searchResp, err := h.userService.SearchUser(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -184,14 +162,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	err := h.userService.ChangePassword(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如旧密码错误、新密码与旧密码相同）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -228,14 +199,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	// 3. 调用服务层处理业务逻辑（依赖注入）
 	profileResp, err := h.userService.UpdateProfile(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如昵称已被使用等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -266,14 +230,7 @@ func (h *UserHandler) ChangeEmail(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	emailResp, err := h.userService.ChangeEmail(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如邮箱已被使用、验证码错误等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -358,14 +315,7 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 	// 7. 调用服务层更新数据库
 	avatarURL, err := h.userService.UploadAvatar(ctx, uploadResult.URL)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -409,14 +359,7 @@ func (h *UserHandler) BatchGetProfile(c *gin.Context) {
 	// 3. 调用服务层处理业务逻辑（依赖注入）
 	batchResp, err := h.userService.BatchGetProfile(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -438,14 +381,7 @@ func (h *UserHandler) GetQRCode(c *gin.Context) {
 	// 1. 调用服务层处理业务逻辑（依赖注入）
 	qrcodeResp, err := h.userService.GetQRCode(ctx)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -476,14 +412,7 @@ func (h *UserHandler) ParseQRCode(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	parseResp, err := h.userService.ParseQRCode(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如二维码已过期、二维码格式错误等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -514,14 +443,7 @@ func (h *UserHandler) DeleteAccount(c *gin.Context) {
 	// 2. 调用服务层处理业务逻辑（依赖注入）
 	deleteResp, err := h.userService.DeleteAccount(ctx, &req)
 	if err != nil {
-		// 检查是否为业务错误
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			// 业务逻辑失败（如密码错误等）
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 

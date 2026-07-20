@@ -839,18 +839,9 @@ func (r *groupRepositoryImpl) ListJoinRequests(ctx context.Context, groupUUID, o
 	if err := r.ensureGroupNormal(ctx, groupUUID); err != nil {
 		return nil, 0, err
 	}
-	var operator model.GroupMember
-	if err := r.db.WithContext(ctx).
-		Select("role").
-		Where("group_uuid = ? AND user_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, operatorUUID, memberStatusNormal).
-		Take(&operator).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, 0, ErrNoPermission
-		}
-		return nil, 0, WrapDBError(err)
-	}
-	if operator.Role < memberRoleAdmin {
-		return nil, 0, ErrNoPermission
+	// 待审批列表属于管理视角数据，统一复用成员角色校验，确保有效成员、软删除和最低角色规则一致。
+	if _, err := r.ensureActiveMemberRole(ctx, groupUUID, operatorUUID, memberRoleAdmin); err != nil {
+		return nil, 0, err
 	}
 	cachedItems, cacheHit, cacheErr := r.getGroupJoinRequestsFromCache(ctx, groupUUID)
 	if cacheErr != nil {

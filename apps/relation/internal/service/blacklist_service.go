@@ -10,36 +10,24 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/013677890/LCchat-Backend/pkg/util"
-
-	goredis "github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 type blacklistServiceImpl struct {
-	db                *gorm.DB
-	redisClient       *goredis.Client
 	blacklistRepo     repository.IBlacklistRepository
-	friendRepo        repository.IFriendRepository
 	realtimePublisher realtimepush.Publisher
 }
 
 // NewBlacklistService 创建黑名单服务实例。
 //
-// 当前最小实现只依赖 relation 域自己的黑名单仓储即可闭环；friendRepo 先保留在结构体中，
-// 便于后续如果需要联动好友关系规则时直接扩展，而不用再次调整依赖注入图。
+// 当前黑名单流程只通过 IBlacklistRepository 读写关系事实，并在成功后发布实时通知。
+// 构造器不预留尚未使用的数据库、Redis 或好友仓储依赖；后续若出现真实规则再按用途显式引入。
 func NewBlacklistService(
-	db *gorm.DB,
-	redisClient *goredis.Client,
 	blacklistRepo repository.IBlacklistRepository,
-	friendRepo repository.IFriendRepository,
-	publishers ...realtimepush.Publisher,
+	realtimePublisher realtimepush.Publisher,
 ) IBlacklistService {
 	return &blacklistServiceImpl{
-		db:                db,
-		redisClient:       redisClient,
 		blacklistRepo:     blacklistRepo,
-		friendRepo:        friendRepo,
-		realtimePublisher: selectRelationRealtimePublisher(publishers),
+		realtimePublisher: realtimePublisher,
 	}
 }
 

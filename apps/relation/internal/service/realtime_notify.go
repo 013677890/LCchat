@@ -13,23 +13,13 @@ import (
 const relationRealtimePublishTimeout = 2 * time.Second
 
 const (
-	friendChangeAdded           = "friend_added"
-	friendChangeDeleted         = "friend_deleted"
-	friendChangeRemarkUpdated   = "remark_updated"
-	friendChangeTagUpdated      = "tag_updated"
-	friendChangeBlacklistAdded  = "blacklist_added"
+	friendChangeAdded            = "friend_added"
+	friendChangeDeleted          = "friend_deleted"
+	friendChangeRemarkUpdated    = "remark_updated"
+	friendChangeTagUpdated       = "tag_updated"
+	friendChangeBlacklistAdded   = "blacklist_added"
 	friendChangeBlacklistRemoved = "blacklist_removed"
 )
-
-// selectRelationRealtimePublisher 取第一个非空实时提醒生产者，保持测试构造可按需省略。
-func selectRelationRealtimePublisher(publishers []realtimepush.Publisher) realtimepush.Publisher {
-	for _, publisher := range publishers {
-		if publisher != nil {
-			return publisher
-		}
-	}
-	return nil
-}
 
 // publishFriendApplyCreated 通知目标用户收到新的好友申请。
 func (s *friendServiceImpl) publishFriendApplyCreated(ctx context.Context, applyID int64, applicantUUID, targetUUID string) {

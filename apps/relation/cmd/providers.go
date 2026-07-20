@@ -160,6 +160,8 @@ var relationInfraProviderSet = wire.NewSet(
 	provideRelationGRPCServer,
 	provideRelationGRPCListener,
 	provideRelationRealtimePushProducer,
+	// 仅向 Wire 声明现有实现关系，不创建额外包装对象；服务运行时仍直接持有同一个 Producer 实例。
+	wire.Bind(new(realtimepush.Publisher), new(*realtimepush.Producer)),
 )
 
 var relationRepositoryProviderSet = wire.NewSet(

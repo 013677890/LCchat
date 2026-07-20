@@ -4,7 +4,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/gateway/internal/utils"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 
@@ -35,11 +34,7 @@ func (h *DeviceHandler) GetDeviceList(c *gin.Context) {
 
 	resp, err := h.deviceService.GetDeviceList(ctx)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -65,11 +60,7 @@ func (h *DeviceHandler) KickDevice(c *gin.Context) {
 	req := &dto.KickDeviceRequest{DeviceID: deviceID}
 	resp, err := h.deviceService.KickDevice(ctx, req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -95,11 +86,7 @@ func (h *DeviceHandler) GetOnlineStatus(c *gin.Context) {
 	req := &dto.GetOnlineStatusRequest{UserUUID: userUUID}
 	resp, err := h.deviceService.GetOnlineStatus(ctx, req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 
@@ -134,11 +121,7 @@ func (h *DeviceHandler) BatchGetOnlineStatus(c *gin.Context) {
 
 	resp, err := h.deviceService.BatchGetOnlineStatus(ctx, &req)
 	if err != nil {
-		if consts.IsNonServerError(utils.ExtractErrorCode(err)) {
-			result.Fail(c, nil, utils.ExtractErrorCode(err))
-			return
-		}
-		result.FailServer(c, err, consts.CodeInternalError)
+		handleServiceError(c, err)
 		return
 	}
 

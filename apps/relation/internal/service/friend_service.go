@@ -13,14 +13,9 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/013677890/LCchat-Backend/pkg/util"
-
-	goredis "github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 type friendServiceImpl struct {
-	db                *gorm.DB
-	redisClient       *goredis.Client
 	friendRepo        repository.IFriendRepository
 	applyRepo         repository.IApplyRepository
 	blacklistRepo     repository.IBlacklistRepository
@@ -29,26 +24,23 @@ type friendServiceImpl struct {
 
 // NewFriendService 创建好友服务实例。
 //
-// relation-service 当前仍处于拆分中的最小可运行阶段，因此 service 层主要承担：
+// service 层只持有完成好友业务编排所需的三个仓储及实时通知发布器，不直接访问数据库或 Redis。
+// 这样可以让依赖边界与实际职责一致，同时保持既有仓储调用顺序和错误映射不变：
 //  1. 参数与权限校验；
 //  2. 仓储调用编排；
 //  3. 业务错误到统一错误码的映射；
 //  4. relation proto 响应对象的组装。
 func NewFriendService(
-	db *gorm.DB,
-	redisClient *goredis.Client,
 	friendRepo repository.IFriendRepository,
 	applyRepo repository.IApplyRepository,
 	blacklistRepo repository.IBlacklistRepository,
-	publishers ...realtimepush.Publisher,
+	realtimePublisher realtimepush.Publisher,
 ) IFriendService {
 	return &friendServiceImpl{
-		db:                db,
-		redisClient:       redisClient,
 		friendRepo:        friendRepo,
 		applyRepo:         applyRepo,
 		blacklistRepo:     blacklistRepo,
-		realtimePublisher: selectRelationRealtimePublisher(publishers),
+		realtimePublisher: realtimePublisher,
 	}
 }
 

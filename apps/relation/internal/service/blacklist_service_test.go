@@ -12,7 +12,6 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 )
 
 func TestRelationBlacklistServiceAddBlacklist(t *testing.T) {
@@ -52,7 +51,7 @@ func TestRelationBlacklistServiceAddBlacklist(t *testing.T) {
 					return tt.addErr
 				},
 			}
-			svc := NewBlacklistService((*gorm.DB)(nil), nil, repo, &fakeFriendRepoForService{})
+			svc := NewBlacklistService(repo, nil)
 			err := svc.AddBlacklist(tt.ctx, tt.req)
 			if tt.wantErr != 0 {
 				requireRelationBizCode(t, err, tt.wantErr)
@@ -100,7 +99,7 @@ func TestRelationBlacklistServiceRemoveBlacklist(t *testing.T) {
 					return tt.removeErr
 				},
 			}
-			svc := NewBlacklistService((*gorm.DB)(nil), nil, repo, &fakeFriendRepoForService{})
+			svc := NewBlacklistService(repo, nil)
 			err := svc.RemoveBlacklist(tt.ctx, tt.req)
 			if tt.wantErr != 0 {
 				requireRelationBizCode(t, err, tt.wantErr)
@@ -123,7 +122,7 @@ func TestRelationBlacklistServiceGetBlacklistList(t *testing.T) {
 			return []*model.UserRelation{{PeerUuid: "u2", UpdatedAt: mustUnixMilli(now)}}, 1, nil
 		},
 	}
-	svc := NewBlacklistService((*gorm.DB)(nil), nil, repo, &fakeFriendRepoForService{})
+	svc := NewBlacklistService(repo, nil)
 	resp, err := svc.GetBlacklistList(withRelationUserUUID("u1"), &pb.GetBlacklistListRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.Items, 1)
@@ -141,7 +140,7 @@ func TestRelationBlacklistServiceCheckIsBlacklist(t *testing.T) {
 			return true, nil
 		},
 	}
-	svc := NewBlacklistService((*gorm.DB)(nil), nil, repo, &fakeFriendRepoForService{})
+	svc := NewBlacklistService(repo, nil)
 	resp, err := svc.CheckIsBlacklist(context.Background(), &pb.CheckIsBlacklistRequest{UserUuid: "u1", TargetUuid: "u2"})
 	require.NoError(t, err)
 	require.NotNil(t, resp)

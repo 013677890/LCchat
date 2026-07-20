@@ -271,7 +271,7 @@ func TestGatewayBlacklistServiceBatchGetSimpleUserInfoChunking(t *testing.T) {
 	}
 	svc := &BlacklistServiceImpl{userClient: client}
 
-	result, err := svc.batchGetSimpleUserInfo(context.Background(), uuids)
+	result, err := batchGetSimpleUserInfo(context.Background(), svc.userClient, uuids)
 	require.NoError(t, err)
 	require.Len(t, calls, 3)
 	assert.Len(t, calls[0], 100)
@@ -294,7 +294,7 @@ func TestGatewayBlacklistServiceBatchGetSimpleUserInfoEmptyInput(t *testing.T) {
 	}
 	svc := &BlacklistServiceImpl{userClient: client}
 
-	result, err := svc.batchGetSimpleUserInfo(context.Background(), nil)
+	result, err := batchGetSimpleUserInfo(context.Background(), svc.userClient, nil)
 	require.NoError(t, err)
 	assert.Empty(t, result)
 	assert.Equal(t, 0, calls)
@@ -325,7 +325,7 @@ func TestGatewayBlacklistServiceBatchGetSimpleUserInfoPartialError(t *testing.T)
 	}
 	svc := &BlacklistServiceImpl{userClient: client}
 
-	result, err := svc.batchGetSimpleUserInfo(context.Background(), uuids)
+	result, err := batchGetSimpleUserInfo(context.Background(), svc.userClient, uuids)
 	require.Error(t, err)
 	assert.Len(t, result, 100)
 	assert.Equal(t, "nick-u-000", result["u-000"].Nickname)
