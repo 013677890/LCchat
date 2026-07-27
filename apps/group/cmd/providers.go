@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/consumer"
@@ -102,9 +104,59 @@ func provideGroupGRPCShutdownTimeout() groupGRPCShutdownTimeout {
 	return groupGRPCShutdownTimeout(10 * time.Second)
 }
 
+// provideGroupCacheReconcilerConfig 解析唯一受支持的对账配置契约。
+//
+// interval 直接使用 Go duration（例如 10m、30s），不再同时接受旧式“裸秒数”；
+// 非法显式配置会让服务启动失败，避免运维以为对账已启用、实际却悄悄回落默认值。
+func provideGroupCacheReconcilerConfig() (consumer.CacheReconcilerConfig, error) {
+	cfg := consumer.CacheReconcilerConfig{
+		Interval:  10 * time.Minute,
+		BatchSize: 100,
+	}
+	if raw := os.Getenv("GROUP_CACHE_RECONCILE_INTERVAL"); raw != "" {
+		interval, err := time.ParseDuration(raw)
+		if err != nil || interval <= 0 {
+			return consumer.CacheReconcilerConfig{}, fmt.Errorf(
+				"GROUP_CACHE_RECONCILE_INTERVAL 必须是正数 Go duration: %q",
+				raw,
+			)
+		}
+		cfg.Interval = interval
+	}
+	if raw := os.Getenv("GROUP_CACHE_RECONCILE_BATCH_SIZE"); raw != "" {
+		batchSize, err := strconv.Atoi(raw)
+		if err != nil || batchSize <= 0 {
+			return consumer.CacheReconcilerConfig{}, fmt.Errorf(
+				"GROUP_CACHE_RECONCILE_BATCH_SIZE 必须是正整数: %q",
+				raw,
+			)
+		}
+		cfg.BatchSize = batchSize
+	}
+	return cfg, nil
+}
+
+func provideGroupCacheReconciler(
+	projectorRepo repository.IGroupCacheProjectorRepository,
+	cfg consumer.CacheReconcilerConfig,
+) (*consumer.CacheReconciler, error) {
+	return consumer.NewCacheReconciler(projectorRepo, cfg)
+}
+
 // provideGroupRealtimePushProducer 构造 group-service 的实时提醒生产者。
 func provideGroupRealtimePushProducer(cfg config.KafkaConfig) *realtimepush.Producer {
 	return realtimepush.NewKafkaTopicProducer(cfg.Brokers, cfg.RealtimePushTopic)
+}
+
+// provideGroupService 显式把单个 realtime producer 绑定到 service 的可变参数构造器。
+//
+// Wire 会把 variadic 参数视为 []Publisher，无法自行推断“把这个 producer 作为唯一
+// 元素传入”；保留薄 wrapper 可让 wire_gen.go 始终由 go generate 可靠再生。
+func provideGroupService(
+	groupRepo repository.IGroupRepository,
+	producer *realtimepush.Producer,
+) service.IGroupService {
+	return service.NewGroupService(groupRepo, producer)
 }
 
 // provideGroupCacheProjector 构造 group.cache 投影消费者。
@@ -171,6 +223,7 @@ var groupInfraProviderSet = wire.NewSet(
 	provideGroupGRPCAddress,
 	provideGroupMetricsAddress,
 	provideGroupGRPCShutdownTimeout,
+	provideGroupCacheReconcilerConfig,
 	provideGroupRealtimePushProducer,
 	provideGroupMetricsServer,
 	provideGroupRegistration,
@@ -187,7 +240,7 @@ var groupRepositoryProviderSet = wire.NewSet(
 // service / handler 先只保留单一入口，后续若群审批、群角色拆成独立 service，
 // 可以继续沿用相同 provider set 模式扩展。
 var groupServiceProviderSet = wire.NewSet(
-	service.NewGroupService,
+	provideGroupService,
 )
 
 var groupHandlerProviderSet = wire.NewSet(
@@ -198,6 +251,7 @@ var groupAppProviderSet = wire.NewSet(
 	groupInfraProviderSet,
 	groupRepositoryProviderSet,
 	provideGroupCacheProjector,
+	provideGroupCacheReconciler,
 	groupServiceProviderSet,
 	groupHandlerProviderSet,
 	NewGroupApp,

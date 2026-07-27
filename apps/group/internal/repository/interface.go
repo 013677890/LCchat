@@ -2,9 +2,10 @@ package repository
 
 import (
 	"context"
+	"time"
+
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
-	"time"
 )
 
 // GroupInfoUpdates 描述群资料更新意图。
@@ -125,8 +126,13 @@ type IGroupCacheProjectorRepository interface {
 	// 约束：
 	//  1. 该方法只负责缓存投影，不做业务权限判断；
 	//  2. 遇到 Redis 可重试错误时直接返回 error，由 Kafka 手动提交模式负责重试；
-	//  3. payload 非法时返回明确错误，交给上层决定是否跳过。
+	//  3. payload 非法时返回 ErrInvalidProjectorPayload，上层必须标记永久错误并立即落死信。
 	ApplyGroupCacheEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error
+	// ReconcileGroupCache 从 MySQL 权威快照重建指定群的资料、成员、待审批申请
+	// 以及历史成员对应的用户群反向索引；所有写入仍受 cache_version 栅栏保护。
+	ReconcileGroupCache(ctx context.Context, groupUUID string) error
+	// ListGroupCacheReconcileTargets 使用 ID 游标分页扫描群聚合，供周期对账任务调用。
+	ListGroupCacheReconcileTargets(ctx context.Context, afterID int64, limit int) ([]GroupCacheReconcileTarget, error)
 }
 
 // GroupCacheProjectorRepository 是 IGroupCacheProjectorRepository 的语义化别名。

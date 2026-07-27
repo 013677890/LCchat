@@ -148,9 +148,6 @@ func (r *groupRepositoryImpl) UpdateMyGroupNickname(ctx context.Context, groupUU
 	if err != nil {
 		return err
 	}
-	if changedMember != nil {
-		r.upsertGroupMemberCacheAsync(ctx, groupUUID, changedMember)
-	}
 	return nil
 }
 
@@ -212,9 +209,6 @@ func (r *groupRepositoryImpl) UpdateGroupMemberNickname(ctx context.Context, gro
 	if err != nil {
 		return err
 	}
-	if changedMember != nil {
-		r.upsertGroupMemberCacheAsync(ctx, groupUUID, changedMember)
-	}
 	return nil
 }
 
@@ -272,9 +266,6 @@ func (r *groupRepositoryImpl) MuteGroupMember(ctx context.Context, groupUUID, op
 	})
 	if err != nil {
 		return err
-	}
-	if changedMember != nil {
-		r.upsertGroupMemberCacheAsync(ctx, groupUUID, changedMember)
 	}
 	return nil
 }

@@ -9,7 +9,6 @@ package main
 import (
 	"github.com/013677890/LCchat-Backend/apps/group/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
-	"github.com/013677890/LCchat-Backend/apps/group/internal/service"
 )
 
 // Injectors from wire.go:
@@ -39,8 +38,8 @@ func initializeGroupApp() (*GroupApp, error) {
 	}
 	iGroupRepository := repository.NewGroupRepository(db, client)
 	kafkaConfig := provideGroupKafkaConfig()
-	realtimePushProducer := provideGroupRealtimePushProducer(kafkaConfig)
-	iGroupService := service.NewGroupService(iGroupRepository, realtimePushProducer)
+	producer := provideGroupRealtimePushProducer(kafkaConfig)
+	iGroupService := provideGroupService(iGroupRepository, producer)
 	groupHandler := handler.NewGroupHandler(iGroupService)
 	registrationFunc := provideGroupRegistration(groupHandler)
 	mainGroupGRPCAddress := provideGroupGRPCAddress()
@@ -62,7 +61,15 @@ func initializeGroupApp() (*GroupApp, error) {
 	mainGroupAsyncReleaseTimeout := provideGroupAsyncReleaseTimeout(asyncConfig)
 	iGroupCacheProjectorRepository := repository.NewGroupCacheProjectorRepository(db, client)
 	cacheProjector := provideGroupCacheProjector(kafkaConfig, iGroupCacheProjectorRepository, db)
-	groupApp, err := NewGroupApp(logger, server, builtServer, listener, mainGroupGRPCShutdownTimeout, pool, mainGroupAsyncReleaseTimeout, cacheProjector, realtimePushProducer, db, client)
+	cacheReconcilerConfig, err := provideGroupCacheReconcilerConfig()
+	if err != nil {
+		return nil, err
+	}
+	cacheReconciler, err := provideGroupCacheReconciler(iGroupCacheProjectorRepository, cacheReconcilerConfig)
+	if err != nil {
+		return nil, err
+	}
+	groupApp, err := NewGroupApp(logger, server, builtServer, listener, mainGroupGRPCShutdownTimeout, pool, mainGroupAsyncReleaseTimeout, cacheProjector, cacheReconciler, producer, db, client)
 	if err != nil {
 		return nil, err
 	}

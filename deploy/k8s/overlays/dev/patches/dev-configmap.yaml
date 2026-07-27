@@ -31,6 +31,8 @@ data:
   KAFKA_REALTIME_PUSH_GROUP_ID: realtime-push-consumer-group
   KAFKA_GROUP_CACHE_TOPIC: group.cache
   KAFKA_GROUP_CACHE_GROUP_ID: group-cache-projector-group
+  GROUP_CACHE_RECONCILE_INTERVAL: 10m
+  GROUP_CACHE_RECONCILE_BATCH_SIZE: "100"
 
   MINIO_ENDPOINT: minio:9000
   MINIO_BUCKET: chatserver

@@ -51,6 +51,12 @@ const (
 	UserGroupListTTL = 24 * time.Hour
 	// UserGroupListEmptyTTL 用户群列表空值缓存 TTL
 	UserGroupListEmptyTTL = 5 * time.Minute
+	// UserGroupReconcileLeaseTTL 限制同一用户在缓存命中时触发权威对账的频率。
+	//
+	// 用户群反向索引即使结构和版本都合法，也可能因为人工误写或极端故障多出一个
+	// DB 从未存在的关系；这种污染无法仅靠校验缓存格式发现。命中路径至多每小时
+	// 触发一次后台对账，在修复可达性与 MySQL 负载之间取得平衡。
+	UserGroupReconcileLeaseTTL = 1 * time.Hour
 )
 
 // ==================== Bloom Filter Key ====================
@@ -157,9 +163,28 @@ func GroupInfoKey(groupUUID string) string {
 	return fmt.Sprintf("group:info:%s", groupUUID)
 }
 
-// UserGroupListKey 生成用户群列表缓存 Key: group:user_groups:{user_uuid}
+// UserGroupListKey 生成用户群列表缓存 Key: group:user_groups:{user_uuid}。
+//
+// UUID 外层花括号是 Redis Cluster hash tag；它保证该 ZSet 与
+// UserGroupVersionKey 的版本 Hash 落在同一 slot，二者才能由一段 Lua 原子更新。
 func UserGroupListKey(userUUID string) string {
-	return fmt.Sprintf("group:user_groups:%s", userUUID)
+	return fmt.Sprintf("group:user_groups:{%s}", userUUID)
+}
+
+// UserGroupVersionKey 生成用户群反向索引的逐群版本 Key。
+//
+// Hash field 为 group_uuid，值为该群最后一次影响此用户成员关系的 projection_version；
+// 删除成员时仍保留版本 tombstone，防止更旧的 member_added 事件把群重新加回来。
+func UserGroupVersionKey(userUUID string) string {
+	return fmt.Sprintf("group:user_group_versions:{%s}", userUUID)
+}
+
+// UserGroupReconcileLeaseKey 生成用户群列表命中后对账的租约 Key。
+//
+// 该 String 只负责限频，不参与投影原子更新；沿用 userUUID hash tag 便于 Redis Cluster
+// 运维时把同一用户的相关 Key 归到同一 slot。
+func UserGroupReconcileLeaseKey(userUUID string) string {
+	return fmt.Sprintf("group:user_groups_reconcile_lease:{%s}", userUUID)
 }
 
 // ==================== Gateway Key 构造函数 ====================

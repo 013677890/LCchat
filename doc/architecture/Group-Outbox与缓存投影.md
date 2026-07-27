@@ -1,79 +1,142 @@
 # Group-Outbox 与缓存投影
 
-group 服务使用 Outbox + Debezium + Kafka + Redis projector 维护群缓存。该链路用于把群写模型的最终事实异步投影到 Redis，避免写请求直接承担复杂缓存更新和跨服务传播成本。
+group 服务使用 MySQL Outbox、Debezium、Kafka 和 Redis projector 维护群缓存。MySQL 是唯一权威事实；Kafka projector 是正常写链路中唯一的 Redis 投影者，读 miss 与周期对账只允许用带数据库版本的完整快照修复缓存。
 
-## 目标
+## 1. 一致性边界
 
-- 群写操作和事件落库在同一 MySQL 事务内完成。
-- 同一个群的缓存事件以 `group_uuid` 为 key，保证同群事件按分区有序。
-- projector 只投影缓存，不做业务权限判断。
-- Redis 写失败时允许重试，非法 payload 跳过，避免阻塞分区。
+- 群业务表、`groups.cache_version` 和 `outbox_events` 在同一个 MySQL 事务内提交或回滚。
+- 每写一条 `group.cache` 事件，`cache_version` 都先递增一次；同一事务写两条事件时分别获得 `N+1`、`N+2`。
+- `entity_id` 固定为 `group_uuid`，作为 Kafka key；同群正常消费顺序仍由单分区顺序保证。
+- Redis 还会在 Lua 内比较 `projection_version`。因此重复事件、乱序事件、消费者部分成功后重试以及晚到的读回填都不能覆盖更高版本。
+- 业务写请求提交后不再直接异步 patch Redis，避免“请求协程 patch”和 Kafka projector 两个无序写者互相覆盖。
 
-## 写入侧
+## 2. 严格事件契约
 
-group repository 在关键写操作中调用 `insertGroupCacheEvent`，事件类型固定为 `group.cache`，`entity_id` 固定为 `group_uuid`。
+`group.cache` 当前只接受 `schema_version=2`，基础字段如下：
 
-| 动作 | 事件 Action | 主要 payload |
+| 字段 | 约束 |
+| --- | --- |
+| `schema_version` | 必须精确等于 `2`。缺失、旧版本和未来未知版本都拒绝。 |
+| `projection_version` | 必须大于 `0`，取自同事务递增后的 `groups.cache_version`。 |
+| `event_id` | 必填，用于 `idempotent_events` 消费幂等。 |
+| `action` | 必须是当前代码声明的 action。 |
+| `group_uuid` | 必填，同时作为 Outbox `entity_id` 和 Kafka key。 |
+
+解码器只接受顶层 JSON Object，并启用未知字段拒绝。它不再支持 JSON 字符串、`payload`、`after`、`data` 等旧包装，也不会把缺失版本解释为 `0`。Debezium EventRouter 因此固定配置：
+
+```text
+transforms.outbox.table.expand.json.payload=true
+```
+
+常见 action：
+
+| 动作 | Action | 主要 payload |
 | --- | --- | --- |
-| 建群 | `group_created` | 群快照、初始成员快照、成员 UUID 列表。 |
-| 新增或恢复成员 | `member_added` | 群快照、成员快照、用户 UUID 列表。 |
-| 移除成员或退群 | `member_removed` | 群快照、目标用户 UUID。 |
-| 解散群 | `group_dismissed` | 群快照、活跃成员 UUID 列表。 |
+| 建群 | `group_created` | 群快照、初始成员快照、与成员集合完全一致的 `user_uuids`。 |
+| 新增或恢复成员 | `member_added` | 群快照、成员快照、与成员集合完全一致的 `user_uuids`。 |
+| 移除成员或退群 | `member_removed` | 群快照、目标 `user_uuid`。 |
+| 解散群 | `group_dismissed` | 终态群快照、活跃成员 UUID。 |
 | 更新群资料 | `group_info_updated` | 最新群快照。 |
-| 转让群主 | `owner_transferred` | 群快照、老群主和新群主成员快照。 |
-| 更新成员角色 | `member_role_updated` | 群快照、目标成员快照。 |
-| 更新群名片 | `member_profile_updated` | 群快照、目标成员快照。 |
-| 单人禁言 | `member_muted` | 群快照、目标成员禁言快照。 |
-| 全员禁言 | `group_mute_setting_updated` | 群快照。 |
-| 创建入群申请 | `join_request_created` | 申请快照。 |
-| 审批入群申请 | `join_request_reviewed` | 申请快照。 |
-| 撤销入群申请 | `join_request_canceled` | 申请快照。 |
+| 转让群主 | `owner_transferred` | 群快照、老群主和新群主最终成员快照；新群主角色必须为 owner，旧群主必须降为 member。 |
+| 更新成员角色/名片/禁言 | `member_role_updated` / `member_profile_updated` / `member_muted` | 群快照、受影响成员最终快照。 |
+| 更新全员禁言 | `group_mute_setting_updated` | 最新群快照。 |
+| 创建/审批/撤销入群申请 | `join_request_created` / `join_request_reviewed` / `join_request_canceled` | 申请快照。 |
 
-## CDC 到 Kafka
+## 3. 完整链路
 
-1. group 在业务事务内写群表和 `outbox_events`。
-2. Debezium 监听 `outbox_events`。
-3. EventRouter 按 `event_type=group.cache` 路由到 Kafka `group.cache`。
-4. Kafka key 使用 `entity_id`，也就是 `group_uuid`。
+```text
+group gRPC 写请求
+  -> MySQL 事务
+       -> groups / group_members / group_join_requests
+       -> groups.cache_version = cache_version + 1
+       -> outbox_events(event_type=group.cache, entity_id=group_uuid)
+  -> Debezium EventRouter(expand JSON)
+  -> Kafka group.cache
+  -> group CacheProjector
+       -> 严格解码 + schema/version/action 终态语义校验
+       -> idempotent_events 检查
+       -> 版本感知 Lua 投影 Redis
+       -> idempotent_events 标记
+       -> commit offset
+```
 
-## 投影侧
+不是 `Kafka -> message-push -> group`。`group.cache` 的消费者就在 group-service 内；message-push 消费的是 `msg.push` / `realtime.push`。
 
-`apps/group/internal/consumer/cache_projector.go` 使用手动提交 Consumer：
+## 4. Redis v2 投影格式
 
-1. 解析 `group.cache` payload。
-2. 用 `idempotent_events` 检查事件是否已处理。
-3. 调用 `ApplyGroupCacheEvent` 更新 Redis。
-4. 写幂等记录。
-5. 成功后提交 Kafka offset。
-
-## Redis 投影对象
-
-| Key | 用途 | 更新策略 |
+| Key | 类型 | v2 元数据与写入策略 |
 | --- | --- | --- |
-| `group:info:{group_uuid}` | 群资料主缓存 | 建群完整创建，后续资料、禁言、解散等 patch-if-exists。 |
-| `group:members:{group_uuid}` | 群成员 Hash | 建群重建，成员增删和角色禁言 patch。 |
-| `group:user_groups:{user_uuid}` | 用户加入群反向索引 | patch-if-exists，缓存不存在时由读路径回源重建。 |
-| `group:join_requests:{group_uuid}` | 待审批入群申请缓存 | 申请创建、审批、撤销按事件增删。 |
+| `group:info:<group_uuid>` | String | 固定为 `2|<projection_version>|<json>`；负缓存唯一合法格式为 `2|0|__NOT_FOUND__`。 |
+| `group:members:<group_uuid>` | Hash | 保留 field `__SCHEMA__=2`、`__VERSION__=<version>`、`__COMPLETE__=1`；业务 field 为 `user_uuid`。 |
+| `group:join_requests:<group_uuid>` | Hash | 同样保留 schema/version/complete；业务 field 为 `apply_id`。 |
+| `group:user_groups:{<user_uuid>}` | ZSet | member 为 `group_uuid`，score 为群 `updated_at` 毫秒值；花括号是 Redis Cluster hash tag。 |
+| `group:user_group_versions:{<user_uuid>}` | Hash | 每个 `group_uuid` 保存最后成员关系版本；删除后仍保留 tombstone，并用 `__READY__=1` 表示群列表已经完整对账。 |
+| `group:user_groups_reconcile_lease:{<user_uuid>}` | String | 用户群 READY 缓存命中后的权威对账租约，固定 TTL 1 小时；仅限频，不是业务投影。 |
 
-## 失败处理
+旧 JSON String、缺少 `__SCHEMA__` / `__VERSION__` / `__COMPLETE__=1` 的 Hash、只有 ZSet 没有版本 Hash 的用户群列表都视为无效缓存：点查 Lua 会在同一原子操作中删除，完整集合读按 miss 回源并交给权威对账覆盖；任何路径都不会读取旧结构继续运行。`__COMPLETE__` 使增量 Lua 能以 O(1) 判断 Hash 是否由一次完整重建产生，禁止把仅有元数据或局部 field 的 Hash 提升为可信全集。
+
+### 4.1 Lua 原子性
+
+- 群资料：一段 Lua 完成格式校验、版本比较、`SET` 和 TTL。
+- 成员/申请 Hash：一段 Lua 完成版本比较、整表替换或批量 field patch、空集合哨兵和 TTL。
+- 同一事件影响多个成员时一次传给 Lua。例如群主转让不能循环执行两次，否则第一次推进版本后第二次会被判重。
+- 用户群索引：一段 Lua 同时更新 ZSet 和版本 Hash；两种 Key 使用同一 hash tag。
+- 成员权限点查由一段 Lua 同时读取 Hash 的 schema、version 和目标 field；用户群列表也由一段 Lua 同时读取 ZSet、`__READY__` 和各群版本，禁止用 Pipeline 观察联动状态。
+- Kafka 增量脚本只在 `incoming_version > stored_version` 时写入；相等视为重复，小于视为乱序。
+- MySQL 权威对账允许 `incoming_version == stored_version` 时重写，用于修复“版本仍正确但业务值被篡改/部分丢失”；仍严格拒绝更低版本。
+
+## 5. 读 miss 与对账
+
+读路径缓存 miss 后先返回本次 MySQL 查询结果，再异步触发修复。修复任务只携带 `group_uuid` 或 `user_uuid`，不会把请求线程刚读到的对象直接写 Redis：
+
+1. 后台重新开启 MySQL 事务；
+2. 对 `groups` 行持共享锁，一致性读取群、`cache_version`、全部历史成员和待审批申请；
+3. 用该版本执行完整 Lua 投影；
+4. 若期间已有更高版本 Kafka 事件落 Redis，Lua 拒绝旧快照。
+
+`CacheReconciler` 启动时立即执行一轮，之后按 ID keyset 分批扫描所有群并调用 `ReconcileGroupCache(group_uuid)`。它会修复群资料、有效成员、待审批申请，并根据历史成员记录为退出/被踢用户补写反向索引 tombstone。单轮仍会继续扫描失败群之后的目标，但只保留 20 条逐群错误样本和遗漏计数，避免 Redis 全局故障时错误对象按群数量无限增长。软删除群会投影为带正版本的不可用终态，不会因数据库 `status=0` 被缓存复活。
+
+按用户触发的完整对账还会读取当前版本 Hash 作为脏 UUID 提示，以 MySQL 事实删除“缓存里存在、成员历史中不存在”的多余群。它先发现候选群并按 UUID 排序锁定全部 `groups` 行，再在同一事务读取权威 `group_members`；发现锁集合外的新关系时扩充候选并重试，禁止拼接“旧成员关系 + 新 cache_version”。并发新事件拥有更高版本，不会被旧快照删除。
+
+缓存 miss 会立即触发上述用户对账；结构合法的 READY 命中也会尝试取得每用户 1 小时 Redis 租约，取得后在后台对账。因此即便缓存错误加入了一个该用户在 DB 中从未加入的群，修复路径仍然可达，又不会让每次列表请求都访问 MySQL。
+
+配置：
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `GROUP_CACHE_RECONCILE_INTERVAL` | `10m` | Go duration，只接受带单位的正值。 |
+| `GROUP_CACHE_RECONCILE_BATCH_SIZE` | `100` | 每批群数量，只接受正整数。 |
+
+显式配置非法时 group-service 启动失败，不静默采用其他格式或旧变量。
+
+## 6. 失败与死信
 
 | 失败 | 处理 |
 | --- | --- |
-| payload 无法解析 | 记录 Warn，跳过该消息。 |
-| payload 缺必要字段 | 记录 Warn，跳过该消息。 |
-| 幂等检查失败 | 返回错误，不提交 offset，等待重试。 |
-| Redis 写失败 | 返回错误，不提交 offset，等待重试。 |
-| 写幂等记录失败 | 返回错误，不提交 offset，避免重复处理不可见。 |
+| JSON、schema、版本或必填字段非法 | handler 返回 `kafka.Permanent`，第一次失败立即写 `dead_events`；死信成功后才提交 offset。 |
+| 幂等检查失败 | 普通可重试错误，不提交 offset。 |
+| Redis / MySQL 短暂失败 | 普通可重试错误，原地重试；预算耗尽后写死信。 |
+| 死信落地失败 | 不提交 offset，继续阻塞重试，保证原消息不丢。 |
+| 写幂等记录失败 | 不提交 offset；Redis Lua 和版本栅栏保证重试安全。 |
+| offset 提交失败 | 停留在当前消息，只重试提交；不重复执行 handler，也不重复插入死信。 |
 
-## 读路径要求
+## 7. 不兼容升级顺序
 
-- 缓存命中时直接返回 Redis 投影。
-- 缓存不存在时回源 MySQL 并重建缓存。
-- patch-if-exists 的设计要求读路径始终具备全量重建能力。
-- 消息发送权限不能只依赖可能缺失的 Redis 缓存，必要时应由 group 服务回源判断。
+v2 有意不兼容旧事件和旧 Redis 格式，发布时必须协调切换：
 
-## 维护注意
+1. 暂停 group 写流量和旧 projector；
+2. 执行 `scripts/migration/005_group_cache_projection_version.sql`，已有群初始化为版本 `1`；
+3. 更新 Debezium connector，使 `expand.json.payload=true`；
+   `register_outbox_connector.sh` 更新已有 connector 前先等待 `STOPPED` 且 tasks 清空，再 PUT、resume；只有新 generation 的 connector 与 task 0 都为 `RUNNING` 时才成功，任一状态为 `FAILED` 立即失败；
+4. 部署 group-service v2；
+5. 检查旧 backlog 产生的 `dead_events`，由首轮全量对账按 MySQL 当前事实重建缓存；
+6. 恢复写流量并观察 consumer lag、死信和对账日志。
 
-- 新增群写动作时，必须同时补充 `group.cache` action、payload、projector 分支和本文档。
-- 改动群缓存 Key 或 TTL 时，必须同步更新 [data/Redis-Key设计.md](../data/Redis-Key设计.md)。
-- 改动 Outbox 字段或 Debezium 路由时，必须同步更新 [事件驱动与最终一致性](事件驱动与最终一致性.md)。
+禁止在新旧 group-service 之间滚动混跑；旧生产者生成的无版本事件会被 v2 消费者明确拒绝。
+
+## 8. 维护要求
+
+- 新增群写动作时，必须同时补 action、严格 payload 校验、事务内版本领取、projector 分支、乱序测试和本文档。
+- 改动缓存格式时必须提高 schema 版本并采用协调切换，不增加旧格式 fallback。
+- 改动 Redis Key 或 TTL 时同步更新 [Redis-Key 设计](../datas/Redis-Key设计.md)。
+- 改动 Outbox 或 Debezium 路由时同步更新 [Kafka 事件](../datas/Kafka事件.md) 与 [事件驱动与最终一致性](./事件驱动与最终一致性.md)。

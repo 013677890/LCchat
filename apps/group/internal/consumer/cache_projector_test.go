@@ -9,6 +9,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,18 @@ func (f *fakeProjectorRepoForConsumer) ApplyGroupCacheEvent(ctx context.Context,
 		return nil
 	}
 	return f.applyFn(ctx, payload)
+}
+
+func (f *fakeProjectorRepoForConsumer) ReconcileGroupCache(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeProjectorRepoForConsumer) ListGroupCacheReconcileTargets(
+	context.Context,
+	int64,
+	int,
+) ([]repository.GroupCacheReconcileTarget, error) {
+	return nil, nil
 }
 
 // newConsumerTestDB 创建仅用于幂等记录测试的 SQLite 内存库。
@@ -56,15 +69,16 @@ func buildConsumerTestMessage(t *testing.T, eventID string) []byte {
 	t.Helper()
 
 	encoded, err := groupevent.Encode(groupevent.GroupCacheEventPayload{
-		EventID:   eventID,
-		Action:    groupevent.ActionGroupInfoUpdated,
-		GroupUUID: "group-1",
+		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+		ProjectionVersion: 7,
+		EventID:           eventID,
+		Action:            groupevent.ActionGroupInfoUpdated,
+		GroupUUID:         "group-1",
 		Group: &groupevent.GroupSnapshot{
 			GroupUUID:       "group-1",
 			Name:            "测试群",
 			Status:          0,
 			UpdatedAtUnixMs: 1710000000000,
-			UpdatedAtUnix:   1710000000,
 		},
 	})
 	require.NoError(t, err)
@@ -80,13 +94,14 @@ func hasConsumerIdempotentRecord(t *testing.T, db *gorm.DB, eventID string) bool
 	return processed
 }
 
-// TestHandleSkipsDecodeError 验证坏消息会被跳过且不触发投影。
-func TestHandleSkipsDecodeError(t *testing.T) {
+// TestHandleMarksDecodeErrorPermanent 验证坏消息会被首轮死信，而不是静默提交。
+func TestHandleMarksDecodeErrorPermanent(t *testing.T) {
 	repo := &fakeProjectorRepoForConsumer{}
 	projector := &CacheProjector{projectorRepo: repo, db: newConsumerTestDB(t)}
 
 	err := projector.handle(context.Background(), []byte("not-json"))
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.True(t, kafka.IsPermanent(err))
 	assert.Zero(t, repo.applyCalls)
 }
 
@@ -103,8 +118,8 @@ func TestHandleSkipsProcessedEvent(t *testing.T) {
 	assert.Zero(t, repo.applyCalls)
 }
 
-// TestHandleSkipsInvalidPayloadError 验证无效载荷按不可重试消息跳过。
-func TestHandleSkipsInvalidPayloadError(t *testing.T) {
+// TestHandleMarksInvalidPayloadPermanent 验证业务载荷错误会立即进入死信路径。
+func TestHandleMarksInvalidPayloadPermanent(t *testing.T) {
 	db := newConsumerTestDB(t)
 	repo := &fakeProjectorRepoForConsumer{
 		applyFn: func(context.Context, groupevent.GroupCacheEventPayload) error {
@@ -114,7 +129,8 @@ func TestHandleSkipsInvalidPayloadError(t *testing.T) {
 	projector := &CacheProjector{projectorRepo: repo, db: db}
 
 	err := projector.handle(context.Background(), buildConsumerTestMessage(t, "evt-invalid"))
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.True(t, kafka.IsPermanent(err))
 	assert.Equal(t, 1, repo.applyCalls)
 	assert.False(t, hasConsumerIdempotentRecord(t, db, "evt-invalid"))
 }

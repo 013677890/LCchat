@@ -1,9 +1,13 @@
 package repository
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,11 +16,31 @@ import (
 )
 
 const (
+	// groupCacheSchemaVersion 是 Redis 群缓存当前且唯一支持的结构版本。
+	//
+	// 这里故意不把缺失字段解释为旧版本：任何没有显式 schema/version 元数据的
+	// String、Hash 或 ZSet 都会被拒绝；点查 Lua 会原子删除，完整集合读则按 miss
+	// 交给版本化对账覆盖，绝不把旧字段映射成当前结构。
+	groupCacheSchemaVersion = "2"
+	// groupProjectionSchemaField / groupProjectionVersionField / groupProjectionCompleteField
+	// 是版本化 Hash 的保留字段。业务 UUID 和申请 ID 都不能使用 "__" 前缀。
+	groupProjectionSchemaField  = "__SCHEMA__"
+	groupProjectionVersionField = "__VERSION__"
+	// groupProjectionCompleteField 证明 Hash 来自一次完整 replace，而不是只写了
+	// schema/version 的中间态。增量 Lua 必须先检查它，才能以 O(1) 成本安全 patch；
+	// v2 之前或任何缺少该标记的 Hash 都直接失效，不做结构兼容。
+	groupProjectionCompleteField = "__COMPLETE__"
+	// userGroupsReadyField 只由一次完整的用户群关系对账写入。
+	//
+	// 单条 Kafka 事件可以先创建版本 tombstone，但不会把局部集合标成完整缓存；
+	// 读路径仅在 READY=1 时命中，从而避免“先到的一条 member_added”制造残缺群列表。
+	userGroupsReadyField = "__READY__"
 	// groupInfoEmptyValue 是群资料空值缓存占位。
 	//
 	// 这里显式缓存“查无此群”，可以避免恶意探测或热点 miss
-	// 在短时间内持续穿透到 MySQL。
-	groupInfoEmptyValue = "{}"
+	// 在短时间内持续穿透到 MySQL。0 是唯一允许的非正版本，且只能与该固定
+	// NOT_FOUND 载荷组合；正常群快照必须使用大于 0 的数据库投影版本。
+	groupInfoEmptyValue = groupCacheSchemaVersion + "|0|__NOT_FOUND__"
 	// groupMembersEmptyField 是群成员 Hash 的空集合占位 field。
 	//
 	// Redis Hash 为空时会被 Redis 直接删除，因此如果需要表达
@@ -50,8 +74,7 @@ type groupInfoCacheEntry struct {
 	AddMode         int8   `json:"add_mode"`
 	MuteAll         bool   `json:"mute_all"`
 	Status          int8   `json:"status"`
-	UpdatedAtUnix   int64  `json:"updated_at_unix,omitempty"`
-	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms,omitempty"`
+	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms"`
 }
 
 // groupMemberCacheEntry 是 group:members:{group_uuid} Hash 中单个 field 的值结构。
@@ -62,7 +85,7 @@ type groupMemberCacheEntry struct {
 	Role            int8   `json:"role"`
 	Remark          string `json:"remark"`
 	MuteUntilUnixMs int64  `json:"mute_until_unix_ms"`
-	JoinedAtUnix    int64  `json:"joined_at_unix"`
+	JoinedAtUnixMs  int64  `json:"joined_at_unix_ms"`
 }
 
 // groupJoinRequestCacheEntry 是 group:join_requests:{group_uuid} Hash 中单条申请的缓存值结构。
@@ -78,64 +101,100 @@ type groupJoinRequestCacheEntry struct {
 	CreatedAtUnixM int64  `json:"created_at_unix_ms"`
 }
 
-// encodeGroupInfoCacheValue 把群模型编码成 Redis String 值。
+// encodeGroupInfoCacheValue 把群模型编码成严格版本化 Redis String。
 //
-// 即便 JSON 编码异常，这里也返回一个稳定的空对象字符串，
-// 避免上层把编码失败传播成业务错误并打断主流程。
-func encodeGroupInfoCacheValue(group *model.GroupInfo) string {
-	entry := groupInfoCacheEntry{}
-	if group != nil {
-		entry.GroupID = group.Id
-		entry.GroupUUID = group.Uuid
-		entry.Name = group.Name
-		entry.Avatar = group.Avatar
-		entry.Notice = group.Notice
-		entry.OwnerUUID = group.OwnerUuid
-		entry.MemberCount = group.MemberCnt
-		entry.AddMode = group.AddMode
-		entry.MuteAll = group.MuteAll
-		entry.Status = group.Status
-		entry.UpdatedAtUnix = group.UpdatedAt.Unix()
-		entry.UpdatedAtUnixMs = group.UpdatedAt.UnixMilli()
+// 格式固定为 "<schema>|<projection_version>|<json>"。Lua 只需解析前两个十进制
+// 字段就能在单次原子操作里比较版本，不依赖 Redis 内并不存在的通用 JSON 解析能力。
+// 编码失败必须显式返回错误，禁止再用 "{}" 伪装成一条可用缓存。
+func encodeGroupInfoCacheValue(group *model.GroupInfo, projectionVersion int64) (string, error) {
+	if group == nil ||
+		group.Id <= 0 ||
+		group.Uuid == "" ||
+		group.OwnerUuid == "" ||
+		group.MemberCnt < 0 ||
+		(group.AddMode != 0 && group.AddMode != 1) ||
+		(group.Status != groupStatusNormal &&
+			group.Status != groupStatusDisabled &&
+			group.Status != groupStatusDismissed) ||
+		projectionVersion <= 0 ||
+		group.UpdatedAt.UnixMilli() <= 0 {
+		return "", fmt.Errorf("群资料缓存包含非法必填字段或 projection_version")
 	}
+	entry := groupInfoCacheEntry{}
+	entry.GroupID = group.Id
+	entry.GroupUUID = group.Uuid
+	entry.Name = group.Name
+	entry.Avatar = group.Avatar
+	entry.Notice = group.Notice
+	entry.OwnerUUID = group.OwnerUuid
+	entry.MemberCount = group.MemberCnt
+	entry.AddMode = group.AddMode
+	entry.MuteAll = group.MuteAll
+	entry.Status = group.Status
+	entry.UpdatedAtUnixMs = group.UpdatedAt.UnixMilli()
 	data, err := json.Marshal(&entry)
 	if err != nil {
-		return groupInfoEmptyValue
+		return "", fmt.Errorf("编码群资料缓存失败: %w", err)
 	}
-	return string(data)
+	return groupCacheSchemaVersion + "|" + strconv.FormatInt(projectionVersion, 10) + "|" + string(data), nil
 }
 
-// decodeGroupInfoCacheValue 解析群资料缓存 JSON。
-func decodeGroupInfoCacheValue(raw string) (*groupInfoCacheEntry, error) {
-	var entry groupInfoCacheEntry
-	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-		return nil, err
+// decodeGroupInfoCacheValue 解析严格版本化的群资料缓存。
+//
+// 返回的 empty 仅表示命中当前格式的 NOT_FOUND 占位。旧 "{}"、缺少版本前缀、
+// 未知 schema 或带未知 JSON 字段的值都会报错，调用方按 miss 回源并触发权威对账。
+func decodeGroupInfoCacheValue(raw string) (entry *groupInfoCacheEntry, projectionVersion int64, empty bool, err error) {
+	parts := strings.SplitN(raw, "|", 3)
+	if len(parts) != 3 || parts[0] != groupCacheSchemaVersion {
+		return nil, 0, false, fmt.Errorf("群资料缓存 schema/version 前缀非法")
 	}
-	return &entry, nil
+	projectionVersion, err = strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || projectionVersion < 0 {
+		return nil, 0, false, fmt.Errorf("群资料缓存 projection_version 非法")
+	}
+	if projectionVersion == 0 {
+		if parts[2] != "__NOT_FOUND__" {
+			return nil, 0, false, fmt.Errorf("群资料缓存 0 版本只能表示 NOT_FOUND")
+		}
+		return nil, 0, true, nil
+	}
+	var decoded groupInfoCacheEntry
+	if err := decodeStrictCacheJSON(parts[2], &decoded); err != nil {
+		return nil, 0, false, err
+	}
+	if decoded.GroupID <= 0 ||
+		decoded.GroupUUID == "" ||
+		decoded.OwnerUUID == "" ||
+		decoded.MemberCount < 0 ||
+		(decoded.AddMode != 0 && decoded.AddMode != 1) ||
+		(decoded.Status != groupStatusNormal &&
+			decoded.Status != groupStatusDisabled &&
+			decoded.Status != groupStatusDismissed) ||
+		decoded.UpdatedAtUnixMs <= 0 {
+		return nil, 0, false, fmt.Errorf("群资料缓存缺少必填字段")
+	}
+	return &decoded, projectionVersion, false, nil
 }
 
 // buildGroupInfoFromCache 把缓存 entry 还原为读路径使用的群模型。
-func buildGroupInfoFromCache(entry *groupInfoCacheEntry) *model.GroupInfo {
-	if entry == nil || entry.GroupUUID == "" {
+func buildGroupInfoFromCache(entry *groupInfoCacheEntry, projectionVersion int64) *model.GroupInfo {
+	if entry == nil || entry.GroupUUID == "" || projectionVersion <= 0 {
 		return nil
 	}
 	group := &model.GroupInfo{
-		Id:        entry.GroupID,
-		Uuid:      entry.GroupUUID,
-		Name:      entry.Name,
-		Avatar:    entry.Avatar,
-		Notice:    entry.Notice,
-		OwnerUuid: entry.OwnerUUID,
-		MemberCnt: entry.MemberCount,
-		AddMode:   entry.AddMode,
-		MuteAll:   entry.MuteAll,
-		Status:    entry.Status,
+		Id:           entry.GroupID,
+		Uuid:         entry.GroupUUID,
+		Name:         entry.Name,
+		Avatar:       entry.Avatar,
+		Notice:       entry.Notice,
+		OwnerUuid:    entry.OwnerUUID,
+		MemberCnt:    entry.MemberCount,
+		AddMode:      entry.AddMode,
+		MuteAll:      entry.MuteAll,
+		Status:       entry.Status,
+		CacheVersion: projectionVersion,
 	}
-	if entry.UpdatedAtUnixMs > 0 {
-		group.UpdatedAt = time.UnixMilli(entry.UpdatedAtUnixMs)
-	} else if entry.UpdatedAtUnix > 0 {
-		group.UpdatedAt = time.Unix(entry.UpdatedAtUnix, 0)
-	}
+	group.UpdatedAt = time.UnixMilli(entry.UpdatedAtUnixMs)
 	return group
 }
 
@@ -159,11 +218,7 @@ func buildGroupInfoFromSnapshot(snapshot *groupevent.GroupSnapshot) *model.Group
 		MuteAll:   snapshot.MuteAll,
 		Status:    int8(snapshot.Status),
 	}
-	if snapshot.UpdatedAtUnixMs > 0 {
-		group.UpdatedAt = time.UnixMilli(snapshot.UpdatedAtUnixMs)
-	} else if snapshot.UpdatedAtUnix > 0 {
-		group.UpdatedAt = time.Unix(snapshot.UpdatedAtUnix, 0)
-	}
+	group.UpdatedAt = time.UnixMilli(snapshot.UpdatedAtUnixMs)
 	return group
 }
 
@@ -176,7 +231,7 @@ func encodeGroupMemberCacheValue(member *model.GroupMember) string {
 		if member.MuteUntil != nil {
 			entry.MuteUntilUnixMs = member.MuteUntil.UnixMilli()
 		}
-		entry.JoinedAtUnix = member.JoinedAt.Unix()
+		entry.JoinedAtUnixMs = member.JoinedAt.UnixMilli()
 	}
 	data, err := json.Marshal(&entry)
 	if err != nil {
@@ -188,8 +243,14 @@ func encodeGroupMemberCacheValue(member *model.GroupMember) string {
 // decodeGroupMemberCacheValue 解析群成员缓存值。
 func decodeGroupMemberCacheValue(raw string) (*groupMemberCacheEntry, error) {
 	var entry groupMemberCacheEntry
-	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+	if err := decodeStrictCacheJSON(raw, &entry); err != nil {
 		return nil, err
+	}
+	if entry.Role < memberRoleMember ||
+		entry.Role > memberRoleOwner ||
+		entry.MuteUntilUnixMs < 0 ||
+		entry.JoinedAtUnixMs <= 0 {
+		return nil, fmt.Errorf("群成员缓存字段值非法")
 	}
 	return &entry, nil
 }
@@ -204,8 +265,8 @@ func buildGroupMemberFromCache(userUUID string, entry *groupMemberCacheEntry) *m
 		muteUntil := time.UnixMilli(entry.MuteUntilUnixMs)
 		member.MuteUntil = &muteUntil
 	}
-	if entry.JoinedAtUnix > 0 {
-		member.JoinedAt = time.Unix(entry.JoinedAtUnix, 0)
+	if entry.JoinedAtUnixMs > 0 {
+		member.JoinedAt = time.UnixMilli(entry.JoinedAtUnixMs)
 	}
 	return member
 }
@@ -233,8 +294,8 @@ func buildGroupMemberFromSnapshot(groupUUID string, snapshot groupevent.GroupMem
 
 // buildGroupMembersFromSnapshots 批量把事件成员快照还原成成员模型。
 //
-// 这里统一复用 member model，是为了让 projector 直接调用现有的
-// rebuild / upsert / insert 等缓存 helper，而不是重复维护第二套结构。
+// 这里统一复用 member model，是为了让 projector 和权威对账共用同一套严格缓存编码，
+// 避免事件快照与数据库快照分别维护两份容易漂移的字段映射。
 func buildGroupMembersFromSnapshots(groupUUID string, snapshots []groupevent.GroupMemberSnapshot) []*model.GroupMember {
 	if groupUUID == "" || len(snapshots) == 0 {
 		return []*model.GroupMember{}
@@ -269,8 +330,11 @@ func encodeGroupJoinRequestCacheValue(request *model.GroupJoinRequest) string {
 // decodeGroupJoinRequestCacheValue 解析入群申请缓存值。
 func decodeGroupJoinRequestCacheValue(raw string) (*groupJoinRequestCacheEntry, error) {
 	var entry groupJoinRequestCacheEntry
-	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+	if err := decodeStrictCacheJSON(raw, &entry); err != nil {
 		return nil, err
+	}
+	if entry.ApplyID <= 0 || entry.ApplicantUUID == "" || entry.CreatedAtUnixM <= 0 {
+		return nil, fmt.Errorf("入群申请缓存字段值非法")
 	}
 	return &entry, nil
 }
@@ -328,7 +392,7 @@ func sortGroupJoinRequests(items []*model.GroupJoinRequest) {
 	})
 }
 
-// cloneGroupMembers 深拷贝成员切片，防止异步任务读到后续被复用/篡改的数据。
+// cloneGroupMembers 深拷贝 singleflight 结果，避免多个请求共享可变成员指针。
 func cloneGroupMembers(members []*model.GroupMember) []*model.GroupMember {
 	if len(members) == 0 {
 		return []*model.GroupMember{}
@@ -340,22 +404,6 @@ func cloneGroupMembers(members []*model.GroupMember) []*model.GroupMember {
 		}
 		copyMember := *member
 		cloned = append(cloned, &copyMember)
-	}
-	return cloned
-}
-
-// cloneGroupInfos 深拷贝群资料切片，避免异步缓存重建和调用方共享底层对象。
-func cloneGroupInfos(groups []*model.GroupInfo) []*model.GroupInfo {
-	if len(groups) == 0 {
-		return []*model.GroupInfo{}
-	}
-	cloned := make([]*model.GroupInfo, 0, len(groups))
-	for _, group := range groups {
-		if group == nil {
-			continue
-		}
-		copyGroup := *group
-		cloned = append(cloned, &copyGroup)
 	}
 	return cloned
 }
@@ -408,13 +456,33 @@ func sortGroupMembers(members []*model.GroupMember) {
 
 // isRedisWrongType 用于识别 Redis key 类型污染。
 //
-// 一旦发现类型错误，当前项目的策略是删除脏 key，
-// 让后续读路径按正常 miss 逻辑回源并重建。
+// 一旦发现类型错误，调用方按 miss 回源；需要清理时必须放进同一段 Lua，
+// 或交给版本化对账覆盖，避免“先读到旧值、后 DEL 掉并发新值”的删除竞态。
 func isRedisWrongType(err error) bool {
 	if err == nil {
 		return false
 	}
 	return strings.Contains(err.Error(), "WRONGTYPE")
+}
+
+// decodeStrictCacheJSON 只接受当前结构声明过的字段，并拒绝尾随 JSON。
+//
+// 缓存不是跨版本兼容接口：新旧二进制混跑时，未知字段不会被静默忽略，而是让该
+// key 失效并回源。这使结构升级失败能够快速暴露，也避免“看似命中、实则只解出一半”
+// 的隐性数据错误。
+func decodeStrictCacheJSON(raw string, dst any) error {
+	decoder := json.NewDecoder(bytes.NewBufferString(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("缓存值包含多个 JSON")
+		}
+		return fmt.Errorf("缓存值包含尾随数据: %w", err)
+	}
+	return nil
 }
 
 // getRandomExpireTime 为基础 TTL 增加 10% 抖动，降低缓存雪崩概率。

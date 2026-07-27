@@ -38,6 +38,7 @@ type GroupApp struct {
 	asyncPool           *ants.Pool
 	asyncReleaseTimeout time.Duration
 	cacheProjector      *consumer.CacheProjector
+	cacheReconciler     *consumer.CacheReconciler
 	realtimeProducer    *realtimepush.Producer
 	db                  *gorm.DB
 	redisClient         *goredis.Client
@@ -58,6 +59,7 @@ func NewGroupApp(
 	asyncPool *ants.Pool,
 	asyncReleaseTimeout groupAsyncReleaseTimeout,
 	cacheProjector *consumer.CacheProjector,
+	cacheReconciler *consumer.CacheReconciler,
 	realtimeProducer *realtimepush.Producer,
 	db *gorm.DB,
 	redisClient *goredis.Client,
@@ -67,6 +69,12 @@ func NewGroupApp(
 	}
 	if grpcListener == nil {
 		return nil, errors.New("grpc listener 未初始化")
+	}
+	if cacheProjector == nil {
+		return nil, errors.New("group cache projector 未初始化")
+	}
+	if cacheReconciler == nil {
+		return nil, errors.New("group cache reconciler 未初始化")
 	}
 
 	return &GroupApp{
@@ -78,6 +86,7 @@ func NewGroupApp(
 		asyncPool:           asyncPool,
 		asyncReleaseTimeout: time.Duration(asyncReleaseTimeout),
 		cacheProjector:      cacheProjector,
+		cacheReconciler:     cacheReconciler,
 		realtimeProducer:    realtimeProducer,
 		db:                  db,
 		redisClient:         redisClient,
@@ -106,13 +115,16 @@ func (a *GroupApp) Run(ctx context.Context) error {
 		}()
 	}
 
-	if a.cacheProjector != nil {
-		go func() {
-			if err := a.cacheProjector.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "Group cache projector 运行错误", logger.ErrorField("error", err))
-			}
-		}()
-	}
+	go func() {
+		if err := a.cacheProjector.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error(ctx, "Group cache projector 运行错误", logger.ErrorField("error", err))
+		}
+	}()
+	go func() {
+		if err := a.cacheReconciler.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error(ctx, "Group cache reconciler 运行错误", logger.ErrorField("error", err))
+		}
+	}()
 
 	logger.Info(ctx, "Group 服务启动中", logger.String("grpc_address", a.grpcListener.Addr().String()))
 	if err := grpcx.Run(ctx, a.grpcServer, a.grpcListener); err != nil {

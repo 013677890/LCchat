@@ -39,6 +39,7 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | `route.topic.replacement` | `${routedByValue}` | Topic 名等于 `event_type`。 |
 | `table.field.event.key` | `entity_id` | Kafka key 使用业务实体 ID。 |
 | `table.field.event.payload` | `payload` | Kafka value 使用 payload。 |
+| `table.expand.json.payload` | `true` | 将 Outbox JSON 字符串展开为 Kafka 顶层 JSON Object，禁止消费者自行解套旧包装。 |
 | `table.field.event.id` | `id` | Outbox 事件 ID。 |
 | `additional.placement` | `event_type/entity_id/created_at` | 写入消息 header。 |
 
@@ -91,6 +92,8 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | 消费者 | group cache projector。 |
 | Key | `group_uuid`。 |
 | 语义 | 维护群资料、成员、用户群列表、入群申请等 Redis 投影。 |
+
+基础契约只接受 `schema_version=2` 且 `projection_version>0`。版本由 group 写事务递增 `groups.cache_version` 后生成；JSON 字符串包装、`payload/after/data` 包装、未知字段、缺省版本或未知 schema 均按永久错误首轮写入 `dead_events`，不做兼容解析。
 
 常见 action：
 

@@ -37,7 +37,8 @@ type ManualConsumerConfig struct {
 	// 仅在同时配置了 DeadLetterSink 时才生效；否则保持「无界原地重试」旧行为。
 	RetryBudget time.Duration
 
-	// DeadLetterSink 为死信落地实现。nil 表示不旁路（瞬时/永久失败一律无界原地重试，旧行为）。
+	// DeadLetterSink 为死信落地实现。nil 时瞬时错误保持原地重试；永久错误会让
+	// consumer 明确失败，禁止在没有可追查落点时提交并静默跳过坏消息。
 	DeadLetterSink DeadLetterSink
 }
 
@@ -73,12 +74,22 @@ func (c *ManualConsumerConfig) defaults() {
 
 // Consumer Kafka 消费者（通用）
 type Consumer struct {
-	reader         *segmentkafka.Reader
+	reader         messageReader
 	commitMode     CommitMode
 	errorBackoff   time.Duration
 	handleTimeout  time.Duration
 	retryBudget    time.Duration
 	deadLetterSink DeadLetterSink
+}
+
+// messageReader 抽出 Consumer 真正依赖的 kafka-go 最小接口。
+//
+// 生产环境仍使用 *kafka.Reader；接口的目的不是提供第二套实现，而是让“先死信、
+// 后提交、提交失败不重复执行 handler”这些可靠性语义能够用确定性单测覆盖。
+type messageReader interface {
+	FetchMessage(ctx context.Context) (segmentkafka.Message, error)
+	CommitMessages(ctx context.Context, msgs ...segmentkafka.Message) error
+	Close() error
 }
 
 // NewConsumer 创建 Kafka 消费者
@@ -154,13 +165,14 @@ func (c *Consumer) Start(ctx context.Context, handler MessageHandler) error {
 //   - handler 返回非 nil（可重试错误）：退避后就地重试**同一条**，绝不跳到下一条。
 //     原因：segmentio/kafka-go 的 FetchMessage 不会重投未提交消息，而 Kafka 的 offset 提交是累积的，
 //     若失败后直接拉下一条并在其成功时提交，会把这条失败的 offset 一并提交，造成静默丢失。
-//   - handler panic：视为永久错误，提交 offset 跳过并告警（panic 多为确定性错误，重试只会无限循环卡死分区）。
+//   - handler 返回 PermanentError 或 panic：第一次失败就写死信，落地成功后才提交；
 //
 // 队头阻塞旁路：当配置了 DeadLetterSink 且原地重试的墙钟时长超过 retryBudget 时，
 // 判定该消息为毒/持久失败消息，写入死信后提交 offset 让分区前进。死信写入失败则绝不提交、
 // 继续阻塞重试，保证「不丢消息」优先于「分区前进」。未配置死信时退化为旧的无界原地重试。
 //
-// 约定：handler 对永久错误（解码/payload 非法）返回 nil 自行跳过，仅对可重试错误（DB/Redis 抖动等）返回非 nil。
+// 约定：handler 对永久错误（解码/payload 非法）返回 Permanent(err)，
+// 对可重试错误（DB/Redis 抖动等）返回普通 error。禁止再用 nil 静默跳过坏消息。
 // ctx 取消时不提交 offset 直接返回，留待重启后从未提交位点重新消费。
 func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler, msg segmentkafka.Message) error {
 	var firstFailedAt time.Time
@@ -172,15 +184,13 @@ func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler,
 
 		handleErr, panicked := c.invokeHandler(ctx, handler, msg.Value)
 		if panicked {
-			logger.Error(ctx, "kafka 消费 handler panic，提交 offset 跳过该消息",
+			logger.Error(ctx, "kafka 消费 handler panic，按永久错误立即落死信",
 				logger.ErrorField("error", handleErr),
 			)
-			_ = c.reader.CommitMessages(ctx, msg)
-			return nil
+			handleErr = Permanent(handleErr)
 		}
 		if handleErr == nil {
-			_ = c.reader.CommitMessages(ctx, msg)
-			return nil
+			return c.commitMessage(ctx, msg)
 		}
 
 		// 记录失败次数与首次失败时间，用于墙钟重试预算判定。
@@ -190,20 +200,38 @@ func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler,
 			firstFailedAt = now
 		}
 
-		// 重试预算耗尽且配置了死信：旁路该毒消息，提交 offset 让分区前进。
-		if c.deadLetterSink != nil && c.retryBudget > 0 && now.Sub(firstFailedAt) >= c.retryBudget {
-			rec := DeadLetterRecord{
-				Topic:         msg.Topic,
-				Partition:     msg.Partition,
-				Offset:        msg.Offset,
-				Key:           msg.Key,
-				Payload:       msg.Value,
-				Err:           handleErr.Error(),
-				Attempts:      attempts,
-				FirstFailedAt: firstFailedAt,
-				LastFailedAt:  now,
+		// 解码/契约错误是确定性的，再等待重试预算只会无意义阻塞分区。
+		// 没有配置死信时直接返回错误让组件失败并报警，绝不恢复旧的“返回 nil 后提交”
+		// 行为；配置死信时只有 Park 成功才允许提交 offset。
+		if IsPermanent(handleErr) {
+			if c.deadLetterSink == nil {
+				return fmt.Errorf("kafka 永久消息错误但未配置 DeadLetterSink: %w", handleErr)
 			}
-			if parkErr := c.deadLetterSink.Park(ctx, rec); parkErr != nil {
+			if parkErr := c.parkDeadLetter(ctx, msg, handleErr, attempts, firstFailedAt, now); parkErr != nil {
+				logger.Error(ctx, "kafka 永久错误死信落地失败，继续阻塞重试（不提交 offset）",
+					logger.ErrorField("park_error", parkErr),
+					logger.ErrorField("handle_error", handleErr),
+					logger.String("topic", msg.Topic),
+					logger.Int("partition", msg.Partition),
+					logger.Int64("offset", msg.Offset),
+				)
+			} else {
+				logger.Warn(ctx, "kafka 永久消息已首轮旁路到死信并提交 offset",
+					logger.String("topic", msg.Topic),
+					logger.Int("partition", msg.Partition),
+					logger.Int64("offset", msg.Offset),
+					logger.ErrorField("error", handleErr),
+				)
+				return c.commitMessage(ctx, msg)
+			}
+		}
+
+		// 重试预算耗尽且配置了死信：旁路该毒消息，提交 offset 让分区前进。
+		if !IsPermanent(handleErr) &&
+			c.deadLetterSink != nil &&
+			c.retryBudget > 0 &&
+			now.Sub(firstFailedAt) >= c.retryBudget {
+			if parkErr := c.parkDeadLetter(ctx, msg, handleErr, attempts, firstFailedAt, now); parkErr != nil {
 				// 死信落地失败：绝不提交 offset，继续阻塞重试，保证不丢。
 				logger.Error(ctx, "kafka 死信落地失败，继续阻塞重试（不提交 offset）",
 					logger.ErrorField("park_error", parkErr),
@@ -220,8 +248,7 @@ func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler,
 					logger.Int("attempts", attempts),
 					logger.ErrorField("last_error", handleErr),
 				)
-				_ = c.reader.CommitMessages(ctx, msg)
-				return nil
+				return c.commitMessage(ctx, msg)
 			}
 		}
 
@@ -235,6 +262,59 @@ func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler,
 		case <-time.After(c.errorBackoff):
 		}
 	}
+}
+
+// commitMessage 在 handler/死信已经成功后只重试 offset 提交，不再次执行副作用。
+//
+// Kafka offset 是累积提交；如果这里忽略一次提交失败并继续 Fetch，后续 offset 的
+// 成功提交会跨过当前消息。正常消息虽然有幂等保护、永久消息也已落死信，但显式卡在
+// 当前 commit 仍能保证处理顺序和观测语义最清晰。
+func (c *Consumer) commitMessage(ctx context.Context, msg segmentkafka.Message) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := c.reader.CommitMessages(ctx, msg); err == nil {
+			return nil
+		} else {
+			logger.Error(ctx, "kafka offset 提交失败，保持当前消息并重试提交",
+				logger.ErrorField("error", err),
+				logger.String("topic", msg.Topic),
+				logger.Int("partition", msg.Partition),
+				logger.Int64("offset", msg.Offset),
+			)
+		}
+		if c.errorBackoff <= 0 {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(c.errorBackoff):
+		}
+	}
+}
+
+// parkDeadLetter 统一构造死信记录，确保“立即死信”和“预算耗尽死信”
+// 携带完全一致的 Kafka 位点、原始 payload 与失败时间信息。
+func (c *Consumer) parkDeadLetter(
+	ctx context.Context,
+	msg segmentkafka.Message,
+	handleErr error,
+	attempts int,
+	firstFailedAt, lastFailedAt time.Time,
+) error {
+	return c.deadLetterSink.Park(ctx, DeadLetterRecord{
+		Topic:         msg.Topic,
+		Partition:     msg.Partition,
+		Offset:        msg.Offset,
+		Key:           msg.Key,
+		Payload:       msg.Value,
+		Err:           handleErr.Error(),
+		Attempts:      attempts,
+		FirstFailedAt: firstFailedAt,
+		LastFailedAt:  lastFailedAt,
+	})
 }
 
 // invokeHandler 调用 handler，并在配置了 handleTimeout 时为单次处理尝试施加超时。

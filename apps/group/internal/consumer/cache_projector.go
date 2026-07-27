@@ -22,7 +22,8 @@ const groupCacheProjectorIdempotentEventType = groupevent.EventTypeGroupCache + 
 //  1. Kafka 手动提交；
 //  2. 幂等表去重；
 //  3. Redis 可重试错误返回上层，由同一消息重试；
-//  4. payload 非法时记录告警并跳过，避免坏消息永久阻塞分区。
+//  4. payload/schema 非法时返回 kafka.Permanent，首轮写入 dead_events 后再提交；
+//  5. 禁止用 nil 静默吞掉旧格式消息，否则既没有重试也没有可追查的死信记录。
 type CacheProjector struct {
 	consumer      *kafka.Consumer
 	projectorRepo repository.IGroupCacheProjectorRepository
@@ -41,9 +42,9 @@ func NewCacheProjector(
 ) *CacheProjector {
 	return &CacheProjector{
 		consumer: kafka.NewManualCommitConsumer(brokers, topic, groupID, kafka.ManualConsumerConfig{
-			MinBytes:     1,
-			MaxBytes:     10 << 20,
-			MaxWait:      500 * time.Millisecond,
+			MinBytes:       1,
+			MaxBytes:       10 << 20,
+			MaxWait:        500 * time.Millisecond,
 			ErrorBackoff:   time.Second,
 			DeadLetterSink: outbox.NewDeadLetterSink(db, "group-service:group.cache"),
 		}),
@@ -79,8 +80,7 @@ func (c *CacheProjector) Close() error {
 func (c *CacheProjector) handle(ctx context.Context, message []byte) error {
 	payload, err := groupevent.DecodeGroupCache(message)
 	if err != nil {
-		logger.Warn(ctx, "解析 group.cache 事件失败，按不可重试消息跳过", logger.ErrorField("error", err))
-		return nil
+		return kafka.Permanent(fmt.Errorf("解析 group.cache 严格事件失败: %w", err))
 	}
 
 	processed, err := outbox.CheckIdempotent(c.db, groupCacheProjectorIdempotentEventType, payload.EventID)
@@ -93,8 +93,7 @@ func (c *CacheProjector) handle(ctx context.Context, message []byte) error {
 
 	if err := c.projectorRepo.ApplyGroupCacheEvent(ctx, payload); err != nil {
 		if errors.Is(err, repository.ErrInvalidProjectorPayload) {
-			logger.Warn(ctx, "group.cache 事件内容非法，按不可重试消息跳过", logger.ErrorField("error", err))
-			return nil
+			return kafka.Permanent(fmt.Errorf("group.cache 事件内容非法: %w", err))
 		}
 		return fmt.Errorf("投影 group.cache 事件失败: %w", err)
 	}

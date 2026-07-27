@@ -2,14 +2,12 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
+
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
-	"strconv"
 )
 
 // NewGroupCacheProjectorRepository 创建 group.cache 投影仓储实例。
@@ -28,9 +26,10 @@ func NewGroupCacheProjectorRepository(db *gorm.DB, redisClient *goredis.Client) 
 //
 // 设计原则：
 //  1. projector 只处理缓存，不做任何业务权限判断；
-//  2. 主缓存 `group:info` 允许在 group_created 首次完整创建；
-//  3. 反向索引 `group:user_groups` 继续遵循 patch-if-exists；
-//  4. 任意 Redis 可重试错误直接返回，由 Kafka 手动提交模式负责重试。
+//  2. 所有 Redis 变更都必须携带 projection_version，并在 Lua 内拒绝旧版本；
+//  3. group_created 可以首次完整创建缓存，普通增量事件只 patch 已存在的群维度缓存；
+//  4. 用户群反向索引会留下逐群版本 tombstone，但只有完整对账才能写 READY；
+//  5. 任意 Redis 可重试错误直接返回，由 Kafka 手动提交模式负责重试。
 func (r *groupRepositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
 	if err := validateGroupCacheEventPayload(payload); err != nil {
 		return err
@@ -67,16 +66,39 @@ func (r *groupRepositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload 
 	}
 }
 
-// validateGroupCacheEventPayload 校验 projector 最低可执行载荷。
+// validateGroupCacheEventPayload 校验 projector 可安全执行的完整 v2 语义。
 //
-// 这里不追求把所有字段都校验到极致，而是只检查“缺了就一定无法安全投影”的部分，
-// 这样可以：
-//  1. 及时把坏消息识别出来；
-//  2. 避免 consumer 对同一条无效消息无限重试；
-//  3. 保持 projector 处理逻辑本身尽量简洁。
+// 仅检查字段存在还不够：例如 group_dismissed 携带 normal 群快照，或群主转让中
+// 旧群主没有降为 member，虽然 JSON 完整，却会把自相矛盾的最终态写进多个缓存。
+// v2 因此按 action 校验目标集合、角色和群状态；所有协议错误都作为永久坏消息处理，
+// 不从其他字段推导缺失值，也不保留旧事件的兼容解释。
 func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) error {
+	if payload.SchemaVersion != groupevent.GroupCacheSchemaVersion {
+		return fmt.Errorf("%w: unsupported schema_version %d", ErrInvalidProjectorPayload, payload.SchemaVersion)
+	}
+	if payload.ProjectionVersion <= 0 {
+		return fmt.Errorf("%w: projection_version must be positive", ErrInvalidProjectorPayload)
+	}
 	if payload.EventID == "" || payload.GroupUUID == "" || payload.Action == "" {
 		return fmt.Errorf("%w: missing base fields", ErrInvalidProjectorPayload)
+	}
+	if payload.Group != nil {
+		if payload.Group.GroupUUID != payload.GroupUUID {
+			return fmt.Errorf("%w: group snapshot uuid mismatch", ErrInvalidProjectorPayload)
+		}
+		if payload.Group.GroupID <= 0 ||
+			payload.Group.OwnerUUID == "" ||
+			payload.Group.MemberCount < 0 ||
+			(payload.Group.AddMode != 0 && payload.Group.AddMode != 1) ||
+			(payload.Group.Status != int32(groupStatusNormal) &&
+				payload.Group.Status != int32(groupStatusDisabled) &&
+				payload.Group.Status != int32(groupStatusDismissed)) ||
+			payload.Group.UpdatedAtUnixMs <= 0 {
+			return fmt.Errorf("%w: group snapshot contains invalid required fields", ErrInvalidProjectorPayload)
+		}
+	}
+	if len(payload.Members) > 0 && !validProjectedMemberSnapshots(payload.Members) {
+		return fmt.Errorf("%w: member snapshots contain invalid required fields", ErrInvalidProjectorPayload)
 	}
 	switch payload.Action {
 	case groupevent.ActionGroupCreated:
@@ -86,30 +108,86 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 		if len(payload.Members) == 0 {
 			return fmt.Errorf("%w: group_created missing member snapshots", ErrInvalidProjectorPayload)
 		}
+		if !sameProjectedMemberSet(payload.Members, payload.UserUUIDs) {
+			return fmt.Errorf("%w: group_created user_uuids must exactly match members", ErrInvalidProjectorPayload)
+		}
+		if payload.Group.Status != int32(groupStatusNormal) ||
+			payload.Group.MemberCount != int32(len(payload.Members)) ||
+			!validProjectedGroupOwnership(payload.Group, payload.Members) {
+			return fmt.Errorf("%w: group_created final state is inconsistent", ErrInvalidProjectorPayload)
+		}
 	case groupevent.ActionMemberAdded:
 		if payload.Group == nil {
 			return fmt.Errorf("%w: member_added missing group snapshot", ErrInvalidProjectorPayload)
 		}
-		if len(payload.Members) == 0 && len(payload.UserUUIDs) == 0 {
+		if len(payload.Members) == 0 || len(payload.UserUUIDs) == 0 {
 			return fmt.Errorf("%w: member_added missing target members", ErrInvalidProjectorPayload)
+		}
+		if !sameProjectedMemberSet(payload.Members, payload.UserUUIDs) {
+			return fmt.Errorf("%w: member_added user_uuids must exactly match members", ErrInvalidProjectorPayload)
+		}
+		if payload.Group.Status != int32(groupStatusNormal) ||
+			!allProjectedMembersHaveRole(payload.Members, memberRoleMember) {
+			return fmt.Errorf("%w: member_added final state is inconsistent", ErrInvalidProjectorPayload)
 		}
 	case groupevent.ActionMemberRemoved:
 		if payload.Group == nil || payload.UserUUID == "" {
 			return fmt.Errorf("%w: member_removed missing required fields", ErrInvalidProjectorPayload)
 		}
+		if payload.Group.Status != int32(groupStatusNormal) {
+			return fmt.Errorf("%w: member_removed group must be normal", ErrInvalidProjectorPayload)
+		}
 	case groupevent.ActionGroupDismissed, groupevent.ActionGroupInfoUpdated, groupevent.ActionGroupMuteSettingUpdated:
 		if payload.Group == nil {
 			return fmt.Errorf("%w: %s missing group snapshot", ErrInvalidProjectorPayload, payload.Action)
+		}
+		if payload.Action == groupevent.ActionGroupDismissed {
+			if payload.Group.Status != int32(groupStatusDismissed) {
+				return fmt.Errorf("%w: group_dismissed snapshot must be dismissed", ErrInvalidProjectorPayload)
+			}
+		} else if payload.Group.Status != int32(groupStatusNormal) {
+			return fmt.Errorf("%w: %s group must be normal", ErrInvalidProjectorPayload, payload.Action)
+		}
+		if payload.Action == groupevent.ActionGroupDismissed && len(payload.UserUUIDs) == 0 {
+			return fmt.Errorf("%w: group_dismissed missing historical member uuids", ErrInvalidProjectorPayload)
+		}
+		if payload.Action == groupevent.ActionGroupDismissed && !validUniqueUUIDs(payload.UserUUIDs) {
+			return fmt.Errorf("%w: group_dismissed contains invalid member uuids", ErrInvalidProjectorPayload)
 		}
 	case groupevent.ActionOwnerTransferred, groupevent.ActionMemberRoleUpdated, groupevent.ActionMemberProfileUpdated, groupevent.ActionMemberMuted:
 		if payload.Group == nil {
 			return fmt.Errorf("%w: %s missing group snapshot", ErrInvalidProjectorPayload, payload.Action)
 		}
+		if payload.Group.Status != int32(groupStatusNormal) {
+			return fmt.Errorf("%w: %s group must be normal", ErrInvalidProjectorPayload, payload.Action)
+		}
 		if len(payload.Members) == 0 {
 			return fmt.Errorf("%w: %s missing member snapshots", ErrInvalidProjectorPayload, payload.Action)
 		}
+		if !sameProjectedMemberSet(payload.Members, payload.UserUUIDs) {
+			return fmt.Errorf("%w: %s user_uuids must exactly match members", ErrInvalidProjectorPayload, payload.Action)
+		}
+		switch payload.Action {
+		case groupevent.ActionOwnerTransferred:
+			if !validProjectedOwnerTransfer(payload.Group, payload.Members) {
+				return fmt.Errorf("%w: owner_transferred final state is inconsistent", ErrInvalidProjectorPayload)
+			}
+		case groupevent.ActionMemberRoleUpdated:
+			if len(payload.Members) != 1 ||
+				(payload.Members[0].Role != int32(memberRoleMember) &&
+					payload.Members[0].Role != int32(memberRoleAdmin)) {
+				return fmt.Errorf("%w: member_role_updated final state is inconsistent", ErrInvalidProjectorPayload)
+			}
+		default:
+			if len(payload.Members) != 1 {
+				return fmt.Errorf("%w: %s must contain exactly one member", ErrInvalidProjectorPayload, payload.Action)
+			}
+		}
 	case groupevent.ActionJoinRequestCreated, groupevent.ActionJoinRequestReviewed, groupevent.ActionJoinRequestCanceled:
-		if payload.JoinRequest == nil {
+		if payload.JoinRequest == nil ||
+			payload.JoinRequest.ApplyID <= 0 ||
+			payload.JoinRequest.ApplicantUUID == "" ||
+			payload.JoinRequest.CreatedAtUnixMs <= 0 {
 			return fmt.Errorf("%w: %s missing join request snapshot", ErrInvalidProjectorPayload, payload.Action)
 		}
 	default:
@@ -118,25 +196,158 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 	return nil
 }
 
+func validProjectedGroupOwnership(
+	group *groupevent.GroupSnapshot,
+	members []groupevent.GroupMemberSnapshot,
+) bool {
+	if group == nil || group.OwnerUUID == "" || len(members) == 0 {
+		return false
+	}
+	ownerCount := 0
+	for _, member := range members {
+		if member.Role != int32(memberRoleOwner) {
+			continue
+		}
+		if member.UserUUID != group.OwnerUUID {
+			return false
+		}
+		ownerCount++
+	}
+	return ownerCount == 1
+}
+
+func allProjectedMembersHaveRole(members []groupevent.GroupMemberSnapshot, role int8) bool {
+	if len(members) == 0 {
+		return false
+	}
+	for _, member := range members {
+		if member.Role != int32(role) {
+			return false
+		}
+	}
+	return true
+}
+
+func validProjectedOwnerTransfer(
+	group *groupevent.GroupSnapshot,
+	members []groupevent.GroupMemberSnapshot,
+) bool {
+	if group == nil || len(members) != 2 || !validProjectedGroupOwnership(group, members) {
+		return false
+	}
+	// TransferGroupOwner 的领域规则会把旧群主直接降为普通成员，而不是管理员。
+	// 因而最终快照必须恰好包含“新群主 + 旧群主（普通成员）”两条记录。
+	memberCount := 0
+	for _, member := range members {
+		if member.Role == int32(memberRoleMember) {
+			memberCount++
+		}
+	}
+	return memberCount == 1
+}
+
+func validProjectedMemberSnapshots(members []groupevent.GroupMemberSnapshot) bool {
+	if len(members) == 0 {
+		return false
+	}
+	for _, member := range members {
+		if member.UserUUID == "" ||
+			member.Role < int32(memberRoleMember) ||
+			member.Role > int32(memberRoleOwner) ||
+			member.MuteUntilUnixMs < 0 ||
+			member.JoinedAtUnixMs <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func validUniqueUUIDs(userUUIDs []string) bool {
+	if len(userUUIDs) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(userUUIDs))
+	for _, userUUID := range userUUIDs {
+		if userUUID == "" {
+			return false
+		}
+		if _, duplicate := seen[userUUID]; duplicate {
+			return false
+		}
+		seen[userUUID] = struct{}{}
+	}
+	return true
+}
+
+// sameProjectedMemberSet 强制校验 members 与 user_uuids 表达同一集合。
+//
+// 旧实现会在 user_uuids 缺失时偷偷从 members 推导，这会掩盖生产端契约错误；
+// v2 明确拒绝这种兼容路径，保证反向索引的目标用户集合没有第二种解释。
+func sameProjectedMemberSet(members []groupevent.GroupMemberSnapshot, userUUIDs []string) bool {
+	if len(members) == 0 || len(userUUIDs) == 0 {
+		return false
+	}
+	memberSet := make(map[string]struct{}, len(members))
+	for _, member := range members {
+		if member.UserUUID == "" {
+			return false
+		}
+		if _, duplicate := memberSet[member.UserUUID]; duplicate {
+			return false
+		}
+		memberSet[member.UserUUID] = struct{}{}
+	}
+	userSet := make(map[string]struct{}, len(userUUIDs))
+	for _, userUUID := range userUUIDs {
+		if userUUID == "" {
+			return false
+		}
+		if _, duplicate := userSet[userUUID]; duplicate {
+			return false
+		}
+		userSet[userUUID] = struct{}{}
+	}
+	if len(memberSet) != len(userSet) {
+		return false
+	}
+	for userUUID := range memberSet {
+		if _, exists := userSet[userUUID]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
 // applyGroupCreatedEvent 处理建群后的首次缓存投影。
 //
 // 这里允许直接完整创建主缓存，原因是：
 //  1. group_created 自带完整群快照和首批成员快照；
 //  2. 首次建缓存比增量 patch 更稳定；
-//  3. user_groups 反向索引仍只做 patch-if-exists，保持和项目既有策略一致。
+//  3. user_groups 会创建逐群版本 tombstone，但不写 READY，避免局部事件伪装成完整列表。
 func (r *groupRepositoryImpl) applyGroupCreatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
 	group := buildGroupInfoFromSnapshot(payload.Group)
 	// projector 消费到 group_created 时 DB 事实已经存在，这里只做 Bloom 自愈补写；
 	// 失败不能阻断主缓存投影，否则会影响 group:info/group:members 的正常重建。
 	r.addGroupUUIDToBloomBestEffort(ctx, group.Uuid)
-	if err := r.setGroupInfoCache(ctx, group); err != nil {
+	if err := r.setVersionedGroupInfoProjection(
+		ctx,
+		group,
+		payload.ProjectionVersion,
+		groupInfoCreateIfMissing,
+	); err != nil {
 		return err
 	}
 	members := buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members)
-	if err := r.rebuildGroupMembersCache(ctx, payload.GroupUUID, members); err != nil {
+	if err := r.replaceGroupMembersProjection(
+		ctx,
+		payload.GroupUUID,
+		members,
+		payload.ProjectionVersion,
+		false,
+	); err != nil {
 		return err
 	}
-	return r.addGroupToUserGroupsIfExists(ctx, collectProjectedUserUUIDs(payload), group)
+	return r.patchUserGroupsProjection(ctx, payload.UserUUIDs, group, true, payload.ProjectionVersion)
 }
 
 // applyMemberAddedEvent 处理成员新增/恢复后的缓存投影。
@@ -147,15 +358,23 @@ func (r *groupRepositoryImpl) applyGroupCreatedEvent(ctx context.Context, payloa
 //  3. key 不存在时脚本会自动跳过，仍由读路径负责全量重建。
 func (r *groupRepositoryImpl) applyMemberAddedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
 	group := buildGroupInfoFromSnapshot(payload.Group)
-	if err := r.setGroupInfoCacheIfExists(ctx, group); err != nil {
+	if err := r.setVersionedGroupInfoProjection(
+		ctx,
+		group,
+		payload.ProjectionVersion,
+		groupInfoPatchExisting,
+	); err != nil {
 		return err
 	}
-	for _, member := range buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members) {
-		if err := r.upsertGroupMemberCacheIfExists(ctx, payload.GroupUUID, member); err != nil {
-			return err
-		}
+	if err := r.upsertGroupMembersProjectionIfExists(
+		ctx,
+		payload.GroupUUID,
+		buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members),
+		payload.ProjectionVersion,
+	); err != nil {
+		return err
 	}
-	return r.addGroupToUserGroupsIfExists(ctx, collectProjectedUserUUIDs(payload), group)
+	return r.patchUserGroupsProjection(ctx, payload.UserUUIDs, group, true, payload.ProjectionVersion)
 }
 
 // applyMemberRemovedEvent 处理成员退群/被踢后的缓存投影。
@@ -165,34 +384,59 @@ func (r *groupRepositoryImpl) applyMemberAddedEvent(ctx context.Context, payload
 //  2. 群成员 Hash 中的单个成员 field；
 //  3. 目标用户的 user_groups 反向索引。
 func (r *groupRepositoryImpl) applyMemberRemovedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
-	if err := r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group)); err != nil {
+	group := buildGroupInfoFromSnapshot(payload.Group)
+	if err := r.setVersionedGroupInfoProjection(
+		ctx,
+		group,
+		payload.ProjectionVersion,
+		groupInfoPatchExisting,
+	); err != nil {
 		return err
 	}
-	if err := r.removeGroupMemberCacheIfExists(ctx, payload.GroupUUID, payload.UserUUID); err != nil {
+	if err := r.removeGroupMemberProjectionIfExists(
+		ctx,
+		payload.GroupUUID,
+		payload.UserUUID,
+		payload.ProjectionVersion,
+	); err != nil {
 		return err
 	}
-	return r.removeGroupFromUserGroupsIfExists(ctx, payload.UserUUID, payload.GroupUUID)
+	return r.patchUserGroupProjection(
+		ctx,
+		payload.UserUUID,
+		group,
+		false,
+		payload.ProjectionVersion,
+		false,
+	)
 }
 
 // applyGroupDismissedEvent 处理群解散后的缓存投影。
 //
 // 群解散后：
 //  1. `group:info` 若存在则补成 status=2；
-//  2. `group:members` 直接整 key 删除，避免残留“幽灵成员”；
-//  3. 每个活跃成员的 user_groups 反向索引按 patch-if-exists 移除。
+//  2. `group:members` 原子替换为带删除版本的空 Hash，拒绝旧 member_added 复活成员；
+//  3. 每个活跃成员的 user_groups 写入逐群删除 tombstone。
 func (r *groupRepositoryImpl) applyGroupDismissedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
-	if err := r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group)); err != nil {
+	group := buildGroupInfoFromSnapshot(payload.Group)
+	if err := r.setVersionedGroupInfoProjection(
+		ctx,
+		group,
+		payload.ProjectionVersion,
+		groupInfoPatchExisting,
+	); err != nil {
 		return err
 	}
-	if err := r.deleteGroupMembersCache(ctx, payload.GroupUUID); err != nil {
+	if err := r.replaceGroupMembersProjection(
+		ctx,
+		payload.GroupUUID,
+		[]*model.GroupMember{},
+		payload.ProjectionVersion,
+		false,
+	); err != nil {
 		return err
 	}
-	for _, userUUID := range payload.UserUUIDs {
-		if err := r.removeGroupFromUserGroupsIfExists(ctx, userUUID, payload.GroupUUID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.patchUserGroupsProjection(ctx, payload.UserUUIDs, group, false, payload.ProjectionVersion)
 }
 
 // applyGroupInfoUpdatedEvent 处理群资料变更后的缓存投影。
@@ -200,7 +444,12 @@ func (r *groupRepositoryImpl) applyGroupDismissedEvent(ctx context.Context, payl
 // 第二批资料更新只改 `group:info` 主缓存，不主动触碰 members / user_groups，
 // 因为成员结构与反向索引都不依赖 notice / add_mode 这些资料字段。
 func (r *groupRepositoryImpl) applyGroupInfoUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
-	return r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group))
+	return r.setVersionedGroupInfoProjection(
+		ctx,
+		buildGroupInfoFromSnapshot(payload.Group),
+		payload.ProjectionVersion,
+		groupInfoPatchExisting,
+	)
 }
 
 // applyGroupMuteSettingUpdatedEvent 处理全员禁言开关变更后的缓存投影。
@@ -208,7 +457,12 @@ func (r *groupRepositoryImpl) applyGroupInfoUpdatedEvent(ctx context.Context, pa
 // 全员禁言只影响群级发送策略，因此这里只刷新 group:info；
 // 成员角色和单人禁言仍保留在 group:members，由发送权限检查组合判断。
 func (r *groupRepositoryImpl) applyGroupMuteSettingUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
-	return r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group))
+	return r.setVersionedGroupInfoProjection(
+		ctx,
+		buildGroupInfoFromSnapshot(payload.Group),
+		payload.ProjectionVersion,
+		groupInfoPatchExisting,
+	)
 }
 
 // applyOwnerTransferredEvent 处理群主转让后的缓存投影。
@@ -217,15 +471,20 @@ func (r *groupRepositoryImpl) applyGroupMuteSettingUpdatedEvent(ctx context.Cont
 //  1. `group:info` 里的 owner_uuid；
 //  2. `group:members` 中老群主和新群主的 role。
 func (r *groupRepositoryImpl) applyOwnerTransferredEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
-	if err := r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group)); err != nil {
+	if err := r.setVersionedGroupInfoProjection(
+		ctx,
+		buildGroupInfoFromSnapshot(payload.Group),
+		payload.ProjectionVersion,
+		groupInfoPatchExisting,
+	); err != nil {
 		return err
 	}
-	for _, member := range buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members) {
-		if err := r.upsertGroupMemberCacheIfExists(ctx, payload.GroupUUID, member); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.upsertGroupMembersProjectionIfExists(
+		ctx,
+		payload.GroupUUID,
+		buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members),
+		payload.ProjectionVersion,
+	)
 }
 
 // applyMemberRoleUpdatedEvent 处理成员角色变更后的缓存投影。
@@ -233,15 +492,20 @@ func (r *groupRepositoryImpl) applyOwnerTransferredEvent(ctx context.Context, pa
 // 角色变更不会改变成员集合和 user_groups 反向索引，
 // 因此这里只 patch 群资料主缓存与目标成员 role 字段。
 func (r *groupRepositoryImpl) applyMemberRoleUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
-	if err := r.setGroupInfoCacheIfExists(ctx, buildGroupInfoFromSnapshot(payload.Group)); err != nil {
+	if err := r.setVersionedGroupInfoProjection(
+		ctx,
+		buildGroupInfoFromSnapshot(payload.Group),
+		payload.ProjectionVersion,
+		groupInfoPatchExisting,
+	); err != nil {
 		return err
 	}
-	for _, member := range buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members) {
-		if err := r.upsertGroupMemberCacheIfExists(ctx, payload.GroupUUID, member); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.upsertGroupMembersProjectionIfExists(
+		ctx,
+		payload.GroupUUID,
+		buildGroupMembersFromSnapshots(payload.GroupUUID, payload.Members),
+		payload.ProjectionVersion,
+	)
 }
 
 // applyMemberProfileUpdatedEvent 处理成员群名片变更后的缓存投影。
@@ -265,7 +529,12 @@ func (r *groupRepositoryImpl) applyMemberMutedEvent(ctx context.Context, payload
 //  2. 缓存不存在时直接跳过，继续由读路径负责全量重建；
 //  3. 申请展示资料仍由上层聚合 user_profile，不在这里冗余缓存。
 func (r *groupRepositoryImpl) applyJoinRequestCreatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
-	return r.upsertGroupJoinRequestCacheIfExists(ctx, payload.GroupUUID, buildGroupJoinRequestFromSnapshot(payload.JoinRequest))
+	return r.upsertGroupJoinRequestProjectionIfExists(
+		ctx,
+		payload.GroupUUID,
+		buildGroupJoinRequestFromSnapshot(payload.JoinRequest),
+		payload.ProjectionVersion,
+	)
 }
 
 // applyJoinRequestReviewedEvent 处理待审批入群申请被通过或拒绝后的缓存投影。
@@ -276,123 +545,37 @@ func (r *groupRepositoryImpl) applyJoinRequestReviewedEvent(ctx context.Context,
 	if payload.JoinRequest == nil {
 		return fmt.Errorf("%w: join_request_reviewed missing join request snapshot", ErrInvalidProjectorPayload)
 	}
-	return r.removeGroupJoinRequestCacheIfExists(ctx, payload.GroupUUID, payload.JoinRequest.ApplyID)
+	return r.removeGroupJoinRequestProjectionIfExists(
+		ctx,
+		payload.GroupUUID,
+		payload.JoinRequest.ApplyID,
+		payload.ProjectionVersion,
+	)
 }
 
-// setGroupInfoCacheIfExists 仅在 `group:info` 已存在时覆盖最新群快照并刷新 TTL。
+// patchUserGroupsProjection 对同一事件的目标用户逐个写入版本化反向索引。
 //
-// 该方法供 projector 的增量事件使用，保证写事实不会反向承担“首次建缓存”职责。
-func (r *groupRepositoryImpl) setGroupInfoCacheIfExists(ctx context.Context, group *model.GroupInfo) error {
-	if r == nil || r.redisClient == nil || group == nil || group.Uuid == "" {
-		return nil
-	}
-	cacheKey := rediskey.GroupInfoKey(group.Uuid)
-	luaScript := goredis.NewScript(luaSetStringIfExists)
-	expireSeconds := int(getRandomExpireTime(rediskey.GroupInfoTTL).Seconds())
-	_, err := luaScript.Run(ctx, r.redisClient,
-		[]string{cacheKey},
-		encodeGroupInfoCacheValue(group),
-		strconv.Itoa(expireSeconds),
-	).Result()
-	if err != nil && !errors.Is(err, goredis.Nil) {
-		if isRedisWrongType(err) {
-			_ = r.redisClient.Del(ctx, cacheKey).Err()
-			return nil
-		}
-		return WrapRedisError(err)
-	}
-	return nil
-}
-
-// addGroupToUserGroupsIfExists 仅在 user_groups 已存在时把群加入对应用户的反向索引。
-//
-// 这里统一去重处理，避免同一事件里重复 user_uuid 触发多次 Lua 调用。
-func (r *groupRepositoryImpl) addGroupToUserGroupsIfExists(ctx context.Context, userUUIDs []string, group *model.GroupInfo) error {
-	if r == nil || r.redisClient == nil || group == nil || group.Uuid == "" || len(userUUIDs) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(userUUIDs))
+// 每个用户对应独立 Redis key，无法跨用户做单条 Lua；但每个用户内部的 ZSet 与
+// 版本 Hash 都由 Lua 原子更新。事件重试时，已经成功的用户会因版本相等直接跳过，
+// 尚未成功的用户继续完成，不会产生部分重试副作用。
+func (r *groupRepositoryImpl) patchUserGroupsProjection(
+	ctx context.Context,
+	userUUIDs []string,
+	group *model.GroupInfo,
+	active bool,
+	projectionVersion int64,
+) error {
 	for _, userUUID := range userUUIDs {
-		if userUUID == "" {
-			continue
-		}
-		if _, exists := seen[userUUID]; exists {
-			continue
-		}
-		seen[userUUID] = struct{}{}
-		if err := r.addGroupToUserGroupIfExists(ctx, userUUID, group); err != nil {
+		if err := r.patchUserGroupProjection(
+			ctx,
+			userUUID,
+			group,
+			active,
+			projectionVersion,
+			false,
+		); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// addGroupToUserGroupIfExists 仅在单个用户的 user_groups key 已存在时追加群 UUID。
-func (r *groupRepositoryImpl) addGroupToUserGroupIfExists(ctx context.Context, userUUID string, group *model.GroupInfo) error {
-	if r == nil || r.redisClient == nil || userUUID == "" || group == nil || group.Uuid == "" {
-		return nil
-	}
-	cacheKey := rediskey.UserGroupListKey(userUUID)
-	luaScript := goredis.NewScript(luaZAddIfExists)
-	expireSeconds := int(getRandomExpireTime(rediskey.UserGroupListTTL).Seconds())
-	_, err := luaScript.Run(ctx, r.redisClient,
-		[]string{cacheKey},
-		strconv.FormatInt(group.UpdatedAt.UnixMilli(), 10),
-		group.Uuid,
-		strconv.Itoa(expireSeconds),
-	).Result()
-	if err != nil && !errors.Is(err, goredis.Nil) {
-		if isRedisWrongType(err) {
-			_ = r.redisClient.Del(ctx, cacheKey).Err()
-			return nil
-		}
-		return WrapRedisError(err)
-	}
-	return nil
-}
-
-// removeGroupFromUserGroupsIfExists 仅在 user_groups 已存在时移除对应群 UUID。
-func (r *groupRepositoryImpl) removeGroupFromUserGroupsIfExists(ctx context.Context, userUUID, groupUUID string) error {
-	if r == nil || r.redisClient == nil || userUUID == "" || groupUUID == "" {
-		return nil
-	}
-	cacheKey := rediskey.UserGroupListKey(userUUID)
-	luaScript := goredis.NewScript(luaZRemIfExists)
-	expireSeconds := int(getRandomExpireTime(rediskey.UserGroupListTTL).Seconds())
-	_, err := luaScript.Run(ctx, r.redisClient,
-		[]string{cacheKey},
-		groupUUID,
-		strconv.Itoa(expireSeconds),
-	).Result()
-	if err != nil && !errors.Is(err, goredis.Nil) {
-		if isRedisWrongType(err) {
-			_ = r.redisClient.Del(ctx, cacheKey).Err()
-			return nil
-		}
-		return WrapRedisError(err)
-	}
-	return nil
-}
-
-// collectProjectedUserUUIDs 提取事件里需要 patch user_groups 的用户集合。
-//
-// 优先使用显式 `user_uuids`，如果调用方没带，则回退到 `members` 快照，
-// 这样可以兼容当前 mapper 和未来可能的轻微载荷调整。
-func collectProjectedUserUUIDs(payload groupevent.GroupCacheEventPayload) []string {
-	if len(payload.UserUUIDs) > 0 {
-		return payload.UserUUIDs
-	}
-	result := make([]string, 0, len(payload.Members))
-	seen := make(map[string]struct{}, len(payload.Members))
-	for _, member := range payload.Members {
-		if member.UserUUID == "" {
-			continue
-		}
-		if _, exists := seen[member.UserUUID]; exists {
-			continue
-		}
-		seen[member.UserUUID] = struct{}{}
-		result = append(result, member.UserUUID)
-	}
-	return result
 }

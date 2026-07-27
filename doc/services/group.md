@@ -16,7 +16,7 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 | `apps/group/internal/handler` | gRPC handler，负责参数转换和错误映射。 |
 | `apps/group/internal/service` | 群业务规则和权限校验。 |
 | `apps/group/internal/repository` | MySQL、Redis、Outbox 写入和缓存投影仓储。 |
-| `apps/group/internal/consumer` | `group.cache` 投影消费者。 |
+| `apps/group/internal/consumer` | `group.cache` 投影消费者与周期缓存对账任务。 |
 | `proto/group` | GroupService gRPC 契约。 |
 | `pkg/groupevent` | 群缓存事件 payload 编解码和 action 常量。 |
 ## 数据所有权
@@ -26,9 +26,9 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 | 群成员 | MySQL 群成员表 | 成员角色、群名片、禁言截止时间等。 |
 | 入群申请 | MySQL 入群申请表 | 待审批、已同意、已拒绝、已取消等状态。 |
 | 群资料缓存 | Redis `group:info:{group_uuid}` | 读侧加速，非权威事实。 |
-| 群成员缓存 | Redis `group:members:{group_uuid}` | message-push 群扩散依赖该投影。 |
-| 用户群列表缓存 | Redis `group:user_groups:{user_uuid}` | 用户群列表读侧加速。 |
-| 群待审批申请缓存 | Redis `group:join_requests:{group_uuid}` | 管理员审批列表读侧加速。 |
+| 群成员缓存 | Redis `group:members:{group_uuid}` | message-push 群扩散依赖该投影；Hash 必须有 schema/version/complete 元数据。 |
+| 用户群列表缓存 | Redis `group:user_groups:{user_uuid}` + `group:user_group_versions:{user_uuid}` | ZSet、逐群版本 tombstone 与 `__READY__` 共同组成完整投影；命中后按每用户 1 小时租约低频权威对账。 |
+| 群待审批申请缓存 | Redis `group:join_requests:{group_uuid}` | 管理员审批列表读侧加速；Hash 必须有 schema/version/complete 元数据。 |
 | Outbox 事件 | MySQL `outbox_events` | 事务内写事件，由 Debezium 路由到 `group.cache`。 |
 | 幂等消费记录 | MySQL `idempotent_events` | 缓存投影消费者防重复。 |
 ## 暴露的 gRPC 服务
@@ -71,16 +71,16 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 
 ## 缓存投影链路
 1. group 写操作在 MySQL 事务中修改业务表。
-2. 同一事务调用 `outbox.InsertEvent` 写入 `outbox_events`，`event_type=group.cache`。
-3. Debezium Outbox EventRouter 监听 `outbox_events`，按 `event_type` 路由到 Kafka `group.cache`。
-4. group 缓存投影消费者读取事件，先查 `idempotent_events` 判断是否已处理。
-5. 未处理事件调用 `ApplyGroupCacheEvent` 更新 Redis 投影。
-6. 投影成功后写 `idempotent_events`，保证重复消费不重复应用。
+2. 每条事件在同一事务递增 `groups.cache_version`，再调用 `outbox.InsertEvent` 写 `schema_version=2` 和 `projection_version`。
+3. Debezium EventRouter 以 `expand.json.payload=true` 输出顶层 JSON Object，并路由到 Kafka `group.cache`。
+4. group 缓存投影消费者严格校验 schema/version、action 必需字段及最终状态语义，再查 `idempotent_events`。
+5. 未处理事件调用 `ApplyGroupCacheEvent`，由 Lua 比较版本并原子更新 Redis。
+6. 投影成功后写 `idempotent_events` 并提交 offset；周期对账按群从 MySQL 完整快照修复漂移。
 
 ## 降级策略
 - 群写操作以 MySQL 事务为准；缓存投影失败不会回滚已提交业务数据。
-- Redis 可重试错误应返回消费者重试，非法 payload 应记录后跳过，避免毒消息阻塞队列。
-- 读路径如果缓存未命中或缓存短暂不一致，应回源 MySQL 或等待投影自愈。
+- Redis 可重试错误返回消费者重试；非法 payload 首轮写 `dead_events`，死信成功后才提交。
+- 读路径如果缓存未命中会回源 MySQL，并以重新读取的 `cache_version` 快照异步修复；不把请求线程的旧对象直接晚写缓存。
 
 ## 不变量
 - 群事实以 MySQL 为准，Redis 只是投影缓存。

@@ -8,6 +8,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -151,7 +152,6 @@ func TestBuildGroupSnapshotRoundTrip(t *testing.T) {
 		assert.Equal(t, group.Id, snapshot.GroupID)
 		assert.Equal(t, group.MemberCnt, int(snapshot.MemberCount))
 		assert.Equal(t, group.UpdatedAt.UnixMilli(), snapshot.UpdatedAtUnixMs)
-		assert.Equal(t, group.UpdatedAt.Unix(), snapshot.UpdatedAtUnix)
 		assert.Equal(t, group.Id, restored.Id)
 		assert.Equal(t, group.Uuid, restored.Uuid)
 		assert.Equal(t, group.Name, restored.Name)
@@ -281,22 +281,29 @@ func TestValidateGroupCacheEventPayload(t *testing.T) {
 		{
 			name: "建群事件缺少群快照",
 			payload: groupevent.GroupCacheEventPayload{
-				EventID:   "evt-1",
-				Action:    groupevent.ActionGroupCreated,
-				GroupUUID: "group-1",
+				SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+				ProjectionVersion: 1,
+				EventID:           "evt-1",
+				Action:            groupevent.ActionGroupCreated,
+				GroupUUID:         "group-1",
 			},
 			wantErr: true,
 		},
 		{
 			name: "移除成员事件最小载荷合法",
 			payload: groupevent.GroupCacheEventPayload{
-				EventID:   "evt-2",
-				Action:    groupevent.ActionMemberRemoved,
-				GroupUUID: "group-1",
-				UserUUID:  "user-1",
+				SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+				ProjectionVersion: 2,
+				EventID:           "evt-2",
+				Action:            groupevent.ActionMemberRemoved,
+				GroupUUID:         "group-1",
+				UserUUID:          "user-1",
 				Group: &groupevent.GroupSnapshot{
-					GroupUUID:   "group-1",
-					MemberCount: 2,
+					GroupID:         1,
+					GroupUUID:       "group-1",
+					OwnerUUID:       "owner-1",
+					MemberCount:     2,
+					UpdatedAtUnixMs: time.Unix(1710000000, 0).UnixMilli(),
 				},
 			},
 			wantErr: false,
@@ -304,18 +311,22 @@ func TestValidateGroupCacheEventPayload(t *testing.T) {
 		{
 			name: "申请创建事件缺少申请快照",
 			payload: groupevent.GroupCacheEventPayload{
-				EventID:   "evt-3",
-				Action:    groupevent.ActionJoinRequestCreated,
-				GroupUUID: "group-1",
+				SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+				ProjectionVersion: 3,
+				EventID:           "evt-3",
+				Action:            groupevent.ActionJoinRequestCreated,
+				GroupUUID:         "group-1",
 			},
 			wantErr: true,
 		},
 		{
 			name: "申请处理事件最小载荷合法",
 			payload: groupevent.GroupCacheEventPayload{
-				EventID:   "evt-4",
-				Action:    groupevent.ActionJoinRequestReviewed,
-				GroupUUID: "group-1",
+				SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+				ProjectionVersion: 4,
+				EventID:           "evt-4",
+				Action:            groupevent.ActionJoinRequestReviewed,
+				GroupUUID:         "group-1",
 				JoinRequest: &groupevent.GroupJoinRequestSnapshot{
 					ApplyID:         11,
 					ApplicantUUID:   "user-1",
@@ -338,19 +349,83 @@ func TestValidateGroupCacheEventPayload(t *testing.T) {
 	}
 }
 
-func TestCollectProjectedUserUUIDs(t *testing.T) {
-	payloadWithExplicitUsers := groupevent.GroupCacheEventPayload{
-		UserUUIDs: []string{"user-1", "user-2"},
-		Members:   []groupevent.GroupMemberSnapshot{{UserUUID: "ignored-user"}},
+func TestInsertGroupCacheEventAllocatesVersionPerEventInTransaction(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.GroupInfo{}, &outbox.Event{}))
+	now := time.UnixMilli(1710009000123)
+	group := &model.GroupInfo{
+		Uuid:      "group-1",
+		Name:      "group",
+		OwnerUuid: "owner-1",
+		MemberCnt: 1,
+		UpdatedAt: now,
 	}
-	assert.Equal(t, []string{"user-1", "user-2"}, collectProjectedUserUUIDs(payloadWithExplicitUsers))
+	require.NoError(t, db.Create(group).Error)
+	repo := &groupRepositoryImpl{db: db}
 
-	payloadWithMembers := groupevent.GroupCacheEventPayload{
-		Members: []groupevent.GroupMemberSnapshot{{UserUUID: "user-1"}, {UserUUID: "user-1"}, {UserUUID: "user-2"}},
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		for index := int64(1); index <= 2; index++ {
+			payload := groupevent.GroupCacheEventPayload{
+				EventID:   "event-" + time.Unix(index, 0).Format("150405"),
+				Action:    groupevent.ActionGroupInfoUpdated,
+				GroupUUID: group.Uuid,
+				Group:     buildGroupSnapshot(group),
+			}
+			if err := repo.insertGroupCacheEvent(tx, payload); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	var persisted model.GroupInfo
+	require.NoError(t, db.Where("uuid = ?", group.Uuid).Take(&persisted).Error)
+	assert.Equal(t, int64(2), persisted.CacheVersion)
+
+	var events []outbox.Event
+	require.NoError(t, db.Order("id ASC").Find(&events).Error)
+	require.Len(t, events, 2)
+	for index, event := range events {
+		payload, decodeErr := groupevent.DecodeGroupCache([]byte(event.Payload))
+		require.NoError(t, decodeErr)
+		assert.Equal(t, int64(index+1), payload.ProjectionVersion)
+		assert.Equal(t, groupevent.GroupCacheSchemaVersion, payload.SchemaVersion)
 	}
-	// 当事件没有显式 user_uuids 时，projector 需要从成员快照中回退提取并去重，
-	// 这样新增成员和恢复成员都能稳定更新 user_groups 反向索引。
-	assert.Equal(t, []string{"user-1", "user-2"}, collectProjectedUserUUIDs(payloadWithMembers))
+}
+
+func TestInsertGroupCacheEventRollsBackVersionWithOutbox(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.GroupInfo{}, &outbox.Event{}))
+	group := &model.GroupInfo{
+		Uuid:      "group-rollback",
+		Name:      "group",
+		OwnerUuid: "owner-1",
+		MemberCnt: 1,
+		UpdatedAt: time.UnixMilli(1710010000123),
+	}
+	require.NoError(t, db.Create(group).Error)
+	repo := &groupRepositoryImpl{db: db}
+	rollbackErr := errors.New("force rollback")
+
+	err = db.Transaction(func(tx *gorm.DB) error {
+		require.NoError(t, repo.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+			EventID:   "event-rollback",
+			Action:    groupevent.ActionGroupInfoUpdated,
+			GroupUUID: group.Uuid,
+			Group:     buildGroupSnapshot(group),
+		}))
+		return rollbackErr
+	})
+	require.ErrorIs(t, err, rollbackErr)
+
+	var persisted model.GroupInfo
+	require.NoError(t, db.Where("uuid = ?", group.Uuid).Take(&persisted).Error)
+	assert.Zero(t, persisted.CacheVersion)
+	var eventCount int64
+	require.NoError(t, db.Model(&outbox.Event{}).Count(&eventCount).Error)
+	assert.Zero(t, eventCount)
 }
 
 func deletedAt(t time.Time) gorm.DeletedAt {

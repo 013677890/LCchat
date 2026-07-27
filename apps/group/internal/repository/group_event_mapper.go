@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
@@ -60,8 +61,8 @@ func (r *groupRepositoryImpl) insertMemberRemovedEvent(tx *gorm.DB, group *model
 
 // insertGroupDismissedEvent 把“群解散”事实写入 group.cache outbox。
 //
-// 这里额外带上活跃成员 UUID 列表，是为了让 projector 能按 patch-if-exists
-// 规则把每个用户的 user_groups 反向索引删掉，而不需要再查库。
+// 这里额外带上活跃成员 UUID 列表，是为了让 projector 给每个用户的
+// user_groups 反向索引写入删除版本 tombstone，而不需要再查库。
 func (r *groupRepositoryImpl) insertGroupDismissedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, userUUIDs []string) error {
 	return r.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
 		Action:       groupevent.ActionGroupDismissed,
@@ -204,13 +205,26 @@ func (r *groupRepositoryImpl) insertJoinRequestCanceledEvent(tx *gorm.DB, groupU
 // 关键约束：
 //  1. event_type 固定为 group.cache，保证同群事件落到同一 Kafka topic；
 //  2. entity_id 固定为 group_uuid，保证同群事件按 key 有序；
-//  3. event_id 在这里兜底生成，避免调用方漏填导致幂等链路失效。
+//  3. schema_version 固定写当前版本，不允许调用方选择旧契约；
+//  4. projection_version 在同一事务内递增后写入事件，事务回滚时版本与 outbox 一起回滚；
+//  5. event_id 在这里统一生成，避免调用方漏填导致幂等链路失效。
 func (r *groupRepositoryImpl) insertGroupCacheEvent(tx *gorm.DB, payload groupevent.GroupCacheEventPayload) error {
 	if tx == nil || payload.GroupUUID == "" || payload.Action == "" {
 		return fmt.Errorf("%w: invalid group cache event payload", ErrDatabase)
 	}
+	projectionVersion, err := r.nextGroupCacheProjectionVersion(tx, payload.GroupUUID)
+	if err != nil {
+		return err
+	}
+	// 事件版本完全由服务端事务生成。即使内部调用方误填，也会被覆盖，不能借此
+	// 伪造旧版本或跳号；消费端也只接受当前 schema_version。
+	payload.SchemaVersion = groupevent.GroupCacheSchemaVersion
+	payload.ProjectionVersion = projectionVersion
 	if payload.EventID == "" {
 		payload.EventID = idutil.GenIDString()
+	}
+	if err := validateGroupCacheEventPayload(payload); err != nil {
+		return err
 	}
 	encoded, err := groupevent.Encode(payload)
 	if err != nil {
@@ -220,6 +234,39 @@ func (r *groupRepositoryImpl) insertGroupCacheEvent(tx *gorm.DB, payload groupev
 		return WrapDBError(err)
 	}
 	return nil
+}
+
+// nextGroupCacheProjectionVersion 在业务事务中为单条 group.cache 事件领取下一版本。
+//
+// UPDATE 本身会持有 groups 行锁，因此即使某条新增写路径忘了预先调用
+// loadGroupForUpdate，同一 group_uuid 的版本领取仍会串行化。紧随其后的 SELECT
+// 与 UPDATE 位于同一事务和连接上，拿到的就是本次递增结果。审批通过可能在一个
+// 事务内写两条事件，这个方法会分别返回 N+1、N+2，避免两条事件共用版本后第二条
+// 被 Redis 的“<= 已投影版本”规则误判成重复。
+func (r *groupRepositoryImpl) nextGroupCacheProjectionVersion(tx *gorm.DB, groupUUID string) (int64, error) {
+	if tx == nil || groupUUID == "" {
+		return 0, fmt.Errorf("%w: invalid group cache projection version request", ErrDatabase)
+	}
+	result := tx.Model(&model.GroupInfo{}).
+		Where("uuid = ?", groupUUID).
+		UpdateColumn("cache_version", gorm.Expr("cache_version + 1"))
+	if result.Error != nil {
+		return 0, WrapDBError(result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return 0, fmt.Errorf("%w: group %s not found while allocating cache version", ErrDatabase, groupUUID)
+	}
+	var projectionVersion int64
+	if err := tx.Model(&model.GroupInfo{}).
+		Select("cache_version").
+		Where("uuid = ?", groupUUID).
+		Scan(&projectionVersion).Error; err != nil {
+		return 0, WrapDBError(err)
+	}
+	if projectionVersion <= 0 {
+		return 0, fmt.Errorf("%w: allocated invalid cache version %d", ErrDatabase, projectionVersion)
+	}
+	return projectionVersion, nil
 }
 
 // buildGroupSnapshot 把领域模型转换为事件快照。
@@ -242,7 +289,6 @@ func buildGroupSnapshot(group *model.GroupInfo) *groupevent.GroupSnapshot {
 		MuteAll:         group.MuteAll,
 		Status:          int32(group.Status),
 		UpdatedAtUnixMs: group.UpdatedAt.UnixMilli(),
-		UpdatedAtUnix:   group.UpdatedAt.Unix(),
 	}
 }
 

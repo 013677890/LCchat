@@ -72,12 +72,14 @@
 
 | Key | 数据类型 | TTL | 使用方 | 说明 |
 | --- | --- | --- | --- | --- |
-| `group:members:{group_uuid}` | Set/Hash | 24 小时 | group/message-push/msg | 群成员缓存，群消息扩散依赖。 |
-| `group:join_requests:{group_uuid}` | List/Hash/String | 24 小时 | group | 群待审批申请缓存。 |
-| `group:info:{group_uuid}` | String(JSON) | 1 小时/空值 5 分钟 | group/gateway/msg | 群资料缓存。 |
-| `group:user_groups:{user_uuid}` | Set/List | 24 小时/空值 5 分钟 | group/gateway | 用户加入的群列表缓存。 |
+| `group:members:<group_uuid>` | Hash | 24 小时 | group/message-push/msg | `__SCHEMA__=2`、`__VERSION__`、`__COMPLETE__=1` 加成员 field；版本 Lua 原子更新。 |
+| `group:join_requests:<group_uuid>` | Hash | 24 小时 | group | `__SCHEMA__=2`、`__VERSION__`、`__COMPLETE__=1` 加待审批 `apply_id` field。 |
+| `group:info:<group_uuid>` | String | 1 小时/负缓存 5 分钟 | group/gateway/msg | 固定格式 `2\|<projection_version>\|<json>`；负缓存为 `2\|0\|__NOT_FOUND__`。 |
+| `group:user_groups:{<user_uuid>}` | ZSet | 24 小时 | group/gateway | member 为群 UUID、score 为群更新时间；花括号是 Redis Cluster hash tag。 |
+| `group:user_group_versions:{<user_uuid>}` | Hash | 24 小时 | group | 逐群版本 tombstone；`__READY__=1` 才表示用户群列表完整。 |
+| `group:user_groups_reconcile_lease:{<user_uuid>}` | String | 1 小时 | group | READY 命中后的用户级权威对账限频租约；不承载业务事实。 |
 
-group Key 由 `group.cache` Outbox 投影更新，写入成功和缓存可见之间存在短暂最终一致延迟。
+group Key 由 `group.cache` Outbox projector 或带 `groups.cache_version` 的 DB 全量对账写入。所有状态写都通过 Lua 比较版本并原子修改；Kafka 增量只接受更高版本，权威对账可用相同版本修复损坏值但仍拒绝更低版本。成员点查与用户群 ZSet/版本 Hash 联读也使用 Lua 获取原子快照。Hash 的 `__COMPLETE__=1` 是完整重建凭证，增量 patch 只在 schema、version、complete 都合法时执行。旧格式或缺少任一必需元数据的缓存直接失效，不做兼容读取。
 
 ## 7. gateway 限流 Key
 
@@ -126,5 +128,5 @@ ACK 使用 Lua 脚本单调合并，只允许位点前进，不允许旧 ACK 覆
 
 1. 新增 Redis Key 必须在 `consts/redisKey` 中封装构造函数，禁止散落字符串拼接。
 2. 修改 TTL 必须同步评估业务语义、缓存穿透风险和前端体验。
-3. Key value 格式变更必须同步更新消费方文档和兼容策略；当前项目倾向不向后兼容，通过同步重构收敛复杂度。
+3. Key value 格式变更必须同步提高 schema 并协调切换；当前 group v2 明确禁止兼容读取旧格式，也禁止新旧服务混跑。
 4. 所有 Token、验证码、ACK 等敏感或状态类 Key 禁止在日志中输出完整值。

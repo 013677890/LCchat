@@ -3,11 +3,19 @@ package groupevent
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
+	"io"
 )
 
 // EventTypeGroupCache 是群缓存投影统一使用的 outbox 事件类型。
-const EventTypeGroupCache = "group.cache"
+const (
+	EventTypeGroupCache = "group.cache"
+	// GroupCacheSchemaVersion 是当前且唯一可接受的 group.cache 事件结构版本。
+	//
+	// 消费端不会把缺失版本当作 v0，也不会递归拆 Debezium/字符串包装来兼容旧消息；
+	// CDC 必须按当前 connector 契约直接输出 payload JSON，否则消息会立即进入死信。
+	GroupCacheSchemaVersion int32 = 2
+)
 
 const (
 	// ActionGroupCreated 表示群聚合首次创建后的全量初始化事件。
@@ -40,7 +48,7 @@ const (
 
 // GroupSnapshot 描述单条群聚合快照。
 type GroupSnapshot struct {
-	GroupID         int64  `json:"group_id,omitempty"`
+	GroupID         int64  `json:"group_id"`
 	GroupUUID       string `json:"group_uuid"`
 	Name            string `json:"name"`
 	Avatar          string `json:"avatar"`
@@ -50,8 +58,7 @@ type GroupSnapshot struct {
 	AddMode         int32  `json:"add_mode"`
 	MuteAll         bool   `json:"mute_all"`
 	Status          int32  `json:"status"`
-	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms,omitempty"`
-	UpdatedAtUnix   int64  `json:"updated_at_unix"`
+	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms"`
 }
 
 // GroupMemberSnapshot 描述单条群成员快照。
@@ -76,16 +83,17 @@ type GroupJoinRequestSnapshot struct {
 // 所有群写事实都收敛到同一 topic，再由 action 决定投影器如何 patch Redis，
 // 这样可以复用 Kafka 同 key 有序语义，避免同一群事件散落到多个 topic 后失序。
 type GroupCacheEventPayload struct {
-	EventID        string                    `json:"event_id"`
-	Action         string                    `json:"action"`
-	GroupUUID      string                    `json:"group_uuid"`
-	OperatorUUID   string                    `json:"operator_uuid,omitempty"`
-	Group          *GroupSnapshot            `json:"group,omitempty"`
-	Members        []GroupMemberSnapshot     `json:"members,omitempty"`
-	JoinRequest    *GroupJoinRequestSnapshot `json:"join_request,omitempty"`
-	UserUUID       string                    `json:"user_uuid,omitempty"`
-	UserUUIDs      []string                  `json:"user_uuids,omitempty"`
-	JoinedAtUnixMs int64                     `json:"joined_at_unix_ms,omitempty"`
+	SchemaVersion     int32                     `json:"schema_version"`
+	ProjectionVersion int64                     `json:"projection_version"`
+	EventID           string                    `json:"event_id"`
+	Action            string                    `json:"action"`
+	GroupUUID         string                    `json:"group_uuid"`
+	OperatorUUID      string                    `json:"operator_uuid,omitempty"`
+	Group             *GroupSnapshot            `json:"group,omitempty"`
+	Members           []GroupMemberSnapshot     `json:"members,omitempty"`
+	JoinRequest       *GroupJoinRequestSnapshot `json:"join_request,omitempty"`
+	UserUUID          string                    `json:"user_uuid,omitempty"`
+	UserUUIDs         []string                  `json:"user_uuids,omitempty"`
 }
 
 // Encode 把群缓存事件编码成 JSON 字符串。
@@ -99,57 +107,35 @@ func Encode(payload any) (string, error) {
 
 // DecodeGroupCache 解析 group.cache 事件消息。
 func DecodeGroupCache(message []byte) (GroupCacheEventPayload, error) {
-	return decodeEventPayload(message, func(payload *GroupCacheEventPayload) bool {
-		return payload.EventID != "" && payload.GroupUUID != "" && payload.Action != ""
-	})
-}
-
-// decodeEventPayload 在多种嵌套形态里提取事件 payload。
-func decodeEventPayload[T any](message []byte, isValid func(*T) bool) (T, error) {
-	var zero T
-	var lastErr error
-	for _, candidate := range collectPayloadCandidates(message, 0, map[string]struct{}{}) {
-		var payload T
-		if err := json.Unmarshal(candidate, &payload); err != nil {
-			lastErr = err
-			continue
+	var payload GroupCacheEventPayload
+	trimmed := bytes.TrimSpace(message)
+	if len(trimmed) == 0 {
+		return payload, fmt.Errorf("group.cache payload 为空")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		return GroupCacheEventPayload{}, fmt.Errorf("group.cache payload 不是当前严格 JSON 结构: %w", err)
+	}
+	// 第二次 Decode 必须直接到 EOF，明确拒绝尾随第二个 JSON 值或其他脏数据。
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return GroupCacheEventPayload{}, fmt.Errorf("group.cache payload 含多个 JSON 值")
 		}
-		if isValid(&payload) {
-			return payload, nil
-		}
+		return GroupCacheEventPayload{}, fmt.Errorf("group.cache payload 含尾随数据: %w", err)
 	}
-	if lastErr != nil {
-		return zero, lastErr
+	if payload.SchemaVersion != GroupCacheSchemaVersion {
+		return GroupCacheEventPayload{}, fmt.Errorf(
+			"group.cache schema_version=%d，当前只接受 %d",
+			payload.SchemaVersion,
+			GroupCacheSchemaVersion,
+		)
 	}
-	return zero, errors.New("event payload missing required fields")
-}
-
-// collectPayloadCandidates 递归展开 Debezium/字符串包裹后的候选消息体。
-func collectPayloadCandidates(raw []byte, depth int, visited map[string]struct{}) [][]byte {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || depth > 4 {
-		return nil
+	if payload.ProjectionVersion <= 0 {
+		return GroupCacheEventPayload{}, fmt.Errorf("group.cache projection_version 必须大于 0")
 	}
-	key := string(trimmed)
-	if _, exists := visited[key]; exists {
-		return nil
+	if payload.EventID == "" || payload.GroupUUID == "" || payload.Action == "" {
+		return GroupCacheEventPayload{}, fmt.Errorf("group.cache payload 缺少 event_id/action/group_uuid")
 	}
-	visited[key] = struct{}{}
-	results := [][]byte{trimmed}
-	var text string
-	if err := json.Unmarshal(trimmed, &text); err == nil {
-		results = append(results, collectPayloadCandidates([]byte(text), depth+1, visited)...)
-	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(trimmed, &object); err != nil {
-		return results
-	}
-	for _, field := range []string{"payload", "after", "data"} {
-		candidate, ok := object[field]
-		if !ok {
-			continue
-		}
-		results = append(results, collectPayloadCandidates(candidate, depth+1, visited)...)
-	}
-	return results
+	return payload, nil
 }
