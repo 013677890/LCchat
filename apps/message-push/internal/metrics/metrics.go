@@ -76,6 +76,25 @@ var (
 		Help:      "connect PushToDevice 调用总数",
 	}, []string{"event_type", "result"}) // event_type: MSG_PUSH / MSG_RECALL / MSG_MARK_READ, result: success / error
 
+	// PushToUserDuration connect PushToUser RPC 耗时（秒）。
+	// result=partial 表示 RPC 成功但投递数小于路由快照中的预期设备数。
+	PushToUserDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "message_push",
+		Subsystem: "connect",
+		Name:      "push_to_user_duration_seconds",
+		Help:      "connect PushToUser RPC 耗时分布",
+		Buckets:   []float64{.001, .005, .01, .025, .05, .1, .15, .2, .3, .5},
+	}, []string{"result"}) // result: success / partial / error
+
+	// PushToUserTotal connect PushToUser RPC 调用计数。
+	// 该指标统计调用而不是设备；实际成功设备数继续统一进入 DeliveredDevices。
+	PushToUserTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "message_push",
+		Subsystem: "connect",
+		Name:      "push_to_user_total",
+		Help:      "connect PushToUser 调用总数",
+	}, []string{"event_type", "result"}) // result: success / partial / error
+
 	// DeliveredDevices 成功投递的设备数
 	DeliveredDevices = promauto.NewHistogram(prometheus.HistogramOpts{
 		Namespace: "message_push",
@@ -105,4 +124,9 @@ func ObserveHandleDuration(start time.Time, result string) {
 // ObservePushToDeviceDuration 记录 PushToDevice 耗时
 func ObservePushToDeviceDuration(start time.Time, result string) {
 	PushToDeviceDuration.WithLabelValues(result).Observe(time.Since(start).Seconds())
+}
+
+// ObservePushToUserDuration 记录 PushToUser 耗时，并与调用计数复用同一结果分类。
+func ObservePushToUserDuration(start time.Time, result string) {
+	PushToUserDuration.WithLabelValues(result).Observe(time.Since(start).Seconds())
 }

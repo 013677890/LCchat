@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/connectcli"
@@ -25,9 +26,13 @@ import (
 // 超过该窗口未活跃的设备路由会在读取时被视为过期，不再参与推送。
 type messagePushRouteTTL time.Duration
 
-// messagePushConnectUserTimeout = 单次 PushToUser RPC 超时时间。
+// messagePushConnectUserTimeout = 单次 connect 推送 RPC 超时时间。
 // 用于限制 message-push 调用 connect 节点时的最长等待时间。
 type messagePushConnectUserTimeout time.Duration
+
+// messagePushMaxFanoutConcurrency = 单条 msg.push 事件同时执行的 connect 节点扇出上限。
+// 它不控制 Kafka consumer 数量，也不允许同一节点内对设备做无界并发。
+type messagePushMaxFanoutConcurrency int
 
 type messagePushGroupGRPCAddress string
 
@@ -121,6 +126,34 @@ func provideMessagePushConnectUserTimeout() messagePushConnectUserTimeout {
 	return messagePushConnectUserTimeout(d)
 }
 
+// provideMessagePushMaxFanoutConcurrency 提供 connect 节点扇出并发上限。
+// 未配置时使用明确的产品默认值 32；一旦显式配置，就必须是正整数。
+// 非法值直接使依赖初始化失败，禁止回退到默认值后带着错误配置继续运行。
+// 运行时还会与实际节点数取最小值，所以偏大的合法配置不会分配无用 worker。
+func provideMessagePushMaxFanoutConcurrency() (messagePushMaxFanoutConcurrency, error) {
+	const defaultConcurrency = 32
+
+	raw := os.Getenv("MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY")
+	if raw == "" {
+		return messagePushMaxFanoutConcurrency(defaultConcurrency), nil
+	}
+	concurrency, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY 必须是正整数（当前值=%q）: %w",
+			raw,
+			err,
+		)
+	}
+	if concurrency <= 0 {
+		return 0, fmt.Errorf(
+			"MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY 必须大于零（当前值=%q）",
+			raw,
+		)
+	}
+	return messagePushMaxFanoutConcurrency(concurrency), nil
+}
+
 func provideMessagePushGroupGRPCAddress() messagePushGroupGRPCAddress {
 	addr := os.Getenv("GROUP_GRPC_ADDR")
 	if addr == "" {
@@ -167,8 +200,19 @@ func provideConnectSender(manager *connectcli.ClientManager, timeout messagePush
 
 // provideEventHandler 创建 Kafka 事件处理器。
 // 它负责把 MsgPushEvent 解释为“查路由 / 查群成员 -> 调 connect 推送”的执行流程。
-func provideEventHandler(routes *route.RedisRepository, sender *connectcli.Sender, groups *groupcli.Client) *consumer.EventHandler {
-	return consumer.NewEventHandler(routes, sender, groups)
+// 并发上限是强制构造参数；EventHandler 会再次校验依赖与配置，不提供旧签名或默认回退。
+func provideEventHandler(
+	routes *route.RedisRepository,
+	sender *connectcli.Sender,
+	groups *groupcli.Client,
+	concurrency messagePushMaxFanoutConcurrency,
+) (*consumer.EventHandler, error) {
+	return consumer.NewEventHandler(
+		routes,
+		sender,
+		groups,
+		int(concurrency),
+	)
 }
 
 // provideRealtimeHandler 创建 realtime.push 事件处理器。
@@ -212,6 +256,7 @@ var messagePushProviderSet = wire.NewSet(
 	provideMessagePushGroupID,
 	provideMessagePushRouteTTL,
 	provideMessagePushConnectUserTimeout,
+	provideMessagePushMaxFanoutConcurrency,
 	provideMessagePushGroupGRPCAddress,
 	provideMessagePushGroupGRPCConn,
 	provideGroupClient,

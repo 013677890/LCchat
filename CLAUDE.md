@@ -63,7 +63,7 @@ python scripts/gateway_blackbox_test.py   # 黑盒接口测试（需服务已启
 
 发送：gateway → msg `SendMessage` → usecase 调 relation/group 校验权限 → message domain 幂等检查（三元组 `from_uuid+device_id+client_msg_id`，Redis TTL 10 分钟 + DB 唯一约束）→ Redis `INCR msg:seq:{conv_id}` 分配 seq → 同事务写 `message` + outbox(`msg.push`) → conversation domain 更新会话（单聊写扩散、群聊更新 `group_conversation` 热数据）。
 
-下行：Debezium → Kafka `msg.push` → message-push 消费（P2P 查接收方路由；群聊调 group 拿成员再扩散；多端同步查发送方其他设备）→ 按 Redis 路由 `user:routing:{user_uuid}`（Hash, field=device_id, value=`connectAddr|lastActiveMs`, TTL 180s）逐设备调对应 connect 节点 `PushToDevice` → connect 写 WebSocket。
+下行：Debezium → Kafka `msg.push` → message-push 消费（P2P 查接收方路由；群聊调 group 拿成员再扩散；多端同步查发送方其他设备）→ 读取 Redis 路由 `user:routing:{user_uuid}`（Hash, field=device_id, value=`connectAddr|lastActiveMs`, TTL 180s）并按 connect 节点分组 → 节点间有界并发（`MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY`，未配置时默认 32，显式配置非法则启动失败），节点内按用户串行处理：完整用户目标必须调用一次 `PushToUser`，需要排除当前设备的目标逐设备调用 `PushToDevice`；两种 RPC 都是 `EventHandler` 的强制发送契约，不提供旧单设备 sender 的降级路径 → connect 写 WebSocket。
 
 非阻断原则：**消息落库成功即发送成功**，后续会话更新/Kafka 投递/推送失败只 `logger.Warn` 不回滚，客户端靠 PullMessages 自愈。connect 是纯管道：不消费 Kafka、不做业务判断。
 

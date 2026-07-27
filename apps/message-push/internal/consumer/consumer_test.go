@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,9 @@ import (
 )
 
 func init() { logger.ReplaceGlobal(gozap.NewNop()) }
+
+// testMaxFanoutConcurrency 让直接构造的测试处理器满足生产代码的必填并发契约。
+const testMaxFanoutConcurrency = 32
 
 func marshalEvent(t *testing.T, e *msgpb.MsgPushEvent) []byte {
 	t.Helper()
@@ -68,20 +72,54 @@ type pushCall struct {
 	envelope    *connectpb.MessageEnvelope
 }
 
+type userPushCall struct {
+	connectAddr string
+	userUUID    string
+	envelope    *connectpb.MessageEnvelope
+}
+
 type mockSender struct {
+	mu               sync.Mutex
 	calls            []pushCall
+	userCalls        []userPushCall
 	err              error
 	failDeviceErrors map[string]error
 }
 
 func (m *mockSender) PushToDevice(ctx context.Context, connectAddr, userUUID, deviceID string, envelope *connectpb.MessageEnvelope) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, pushCall{
 		connectAddr: connectAddr,
 		userUUID:    userUUID,
 		deviceID:    deviceID,
 		envelope:    envelope,
 	})
+	if err := m.failDeviceErrors[deviceID]; err != nil {
+		return err
+	}
 	return m.err
+}
+
+// PushToUser 让通用 mock 实现 EventHandler 的完整发送契约。
+// 基础行为测试的完整用户目标都只有一台设备，因此成功时返回一次投递。
+func (m *mockSender) PushToUser(
+	ctx context.Context,
+	connectAddr string,
+	userUUID string,
+	envelope *connectpb.MessageEnvelope,
+) (int32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.userCalls = append(m.userCalls, userPushCall{
+		connectAddr: connectAddr,
+		userUUID:    userUUID,
+		envelope:    envelope,
+	})
+	if m.err != nil {
+		return 0, m.err
+	}
+	return 1, nil
 }
 
 type mockGroupFetcher struct {
@@ -203,7 +241,11 @@ func TestHandle_P2PPush_SendsReceiverAndSenderOtherDevices(t *testing.T) {
 	itemData, err := proto.Marshal(&msgpb.MsgItem{ConvId: "conv-1", Seq: 9})
 	require.NoError(t, err)
 
-	h := &EventHandler{routes: routes, sender: sender}
+	h := &EventHandler{
+		routes:               routes,
+		sender:               sender,
+		maxFanoutConcurrency: testMaxFanoutConcurrency,
+	}
 	err = h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		DeviceId:     "current-dev",
@@ -213,12 +255,18 @@ func TestHandle_P2PPush_SendsReceiverAndSenderOtherDevices(t *testing.T) {
 		FromUuid:     "sender",
 	}))
 	require.NoError(t, err)
-	require.Len(t, sender.calls, 2)
-	assert.ElementsMatch(t, []string{"receiver-dev", "other-dev"}, []string{sender.calls[0].deviceID, sender.calls[1].deviceID})
-	for _, call := range sender.calls {
-		require.NotNil(t, call.envelope)
-		assert.True(t, call.envelope.GetAckRequired())
-		assert.Equal(t, int64(9), call.envelope.GetSeq())
+	require.Len(t, sender.userCalls, 1)
+	assert.Equal(t, "connect-a", sender.userCalls[0].connectAddr)
+	assert.Equal(t, "receiver", sender.userCalls[0].userUUID)
+	require.Len(t, sender.calls, 1)
+	assert.Equal(t, "other-dev", sender.calls[0].deviceID)
+	for _, envelope := range []*connectpb.MessageEnvelope{
+		sender.userCalls[0].envelope,
+		sender.calls[0].envelope,
+	} {
+		require.NotNil(t, envelope)
+		assert.True(t, envelope.GetAckRequired())
+		assert.Equal(t, int64(9), envelope.GetSeq())
 	}
 }
 
@@ -232,7 +280,11 @@ func TestHandle_MsgPush_FillsSeqFromData(t *testing.T) {
 	itemData, err := proto.Marshal(&msgpb.MsgItem{ConvId: "conv-1", Seq: 42})
 	require.NoError(t, err)
 
-	h := &EventHandler{routes: routes, sender: sender}
+	h := &EventHandler{
+		routes:               routes,
+		sender:               sender,
+		maxFanoutConcurrency: testMaxFanoutConcurrency,
+	}
 	err = h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		Type:         "MSG_PUSH",
@@ -240,10 +292,11 @@ func TestHandle_MsgPush_FillsSeqFromData(t *testing.T) {
 		Data:         itemData,
 	}))
 	require.NoError(t, err)
-	require.Len(t, sender.calls, 1)
-	require.NotNil(t, sender.calls[0].envelope)
-	assert.Equal(t, int64(42), sender.calls[0].envelope.GetSeq())
-	assert.True(t, sender.calls[0].envelope.GetAckRequired())
+	assert.Empty(t, sender.calls)
+	require.Len(t, sender.userCalls, 1)
+	require.NotNil(t, sender.userCalls[0].envelope)
+	assert.Equal(t, int64(42), sender.userCalls[0].envelope.GetSeq())
+	assert.True(t, sender.userCalls[0].envelope.GetAckRequired())
 }
 
 func TestHandle_MarkRead_OnlySyncsOtherDevices(t *testing.T) {
@@ -256,7 +309,11 @@ func TestHandle_MarkRead_OnlySyncsOtherDevices(t *testing.T) {
 			},
 		},
 	}
-	h := &EventHandler{routes: routes, sender: sender}
+	h := &EventHandler{
+		routes:               routes,
+		sender:               sender,
+		maxFanoutConcurrency: testMaxFanoutConcurrency,
+	}
 	err := h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "reader",
 		DeviceId:     "current-dev",
@@ -265,6 +322,7 @@ func TestHandle_MarkRead_OnlySyncsOtherDevices(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	require.Len(t, sender.calls, 1)
+	assert.Empty(t, sender.userCalls)
 	assert.Equal(t, "other-dev", sender.calls[0].deviceID)
 	assert.False(t, sender.calls[0].envelope.GetAckRequired())
 }
@@ -277,7 +335,11 @@ func TestHandle_ReadReceipt_SendsReceiver(t *testing.T) {
 			"reader": {{UserUUID: "reader", DeviceID: "reader-other", ConnectGRPCAddr: "connect-b"}},
 		},
 	}
-	h := &EventHandler{routes: routes, sender: sender}
+	h := &EventHandler{
+		routes:               routes,
+		sender:               sender,
+		maxFanoutConcurrency: testMaxFanoutConcurrency,
+	}
 	err := h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "sender",
 		FromUuid:     "reader",
@@ -287,11 +349,11 @@ func TestHandle_ReadReceipt_SendsReceiver(t *testing.T) {
 		Seq:          12,
 	}))
 	require.NoError(t, err)
-	require.Len(t, sender.calls, 1)
-	call := sender.calls[0]
+	assert.Empty(t, sender.calls)
+	require.Len(t, sender.userCalls, 1)
+	call := sender.userCalls[0]
 	assert.Equal(t, "connect-a", call.connectAddr)
 	assert.Equal(t, "sender", call.userUUID)
-	assert.Equal(t, "sender-dev", call.deviceID)
 	require.NotNil(t, call.envelope)
 	assert.Equal(t, "MSG_READ_RECEIPT", call.envelope.GetType())
 	assert.False(t, call.envelope.GetAckRequired())
@@ -312,18 +374,30 @@ func TestHandle_GroupPush_ExpandsMembersAndDeduplicates(t *testing.T) {
 	itemData, err := proto.Marshal(&msgpb.MsgItem{ConvId: "group-1", Seq: 5})
 	require.NoError(t, err)
 
-	h := &EventHandler{routes: routes, sender: sender, groups: groups}
+	h := &EventHandler{
+		routes:               routes,
+		sender:               sender,
+		groups:               groups,
+		maxFanoutConcurrency: testMaxFanoutConcurrency,
+	}
 	err = h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "group-1",
 		Type:         "MSG_PUSH",
 		ConvType:     msgpb.ConvType_CONV_TYPE_GROUP,
 		Data:         itemData,
 		FromUuid:     "sender",
+		DeviceId:     "sender-current",
 		Seq:          5,
 	}))
 	require.NoError(t, err)
-	require.Len(t, sender.calls, 3)
-	assert.ElementsMatch(t, []string{"a-1", "b-1", "sender-other"}, []string{sender.calls[0].deviceID, sender.calls[1].deviceID, sender.calls[2].deviceID})
+	require.Len(t, sender.userCalls, 2)
+	assert.ElementsMatch(
+		t,
+		[]string{"member-a", "member-b"},
+		[]string{sender.userCalls[0].userUUID, sender.userCalls[1].userUUID},
+	)
+	require.Len(t, sender.calls, 1)
+	assert.Equal(t, "sender-other", sender.calls[0].deviceID)
 }
 
 func TestHandle_ReturnsRetriableWhenAllPushesFail(t *testing.T) {
@@ -333,7 +407,11 @@ func TestHandle_ReturnsRetriableWhenAllPushesFail(t *testing.T) {
 			"receiver": {{UserUUID: "receiver", DeviceID: "receiver-dev", ConnectGRPCAddr: "connect-a"}},
 		},
 	}
-	h := &EventHandler{routes: routes, sender: sender}
+	h := &EventHandler{
+		routes:               routes,
+		sender:               sender,
+		maxFanoutConcurrency: testMaxFanoutConcurrency,
+	}
 	err := h.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "receiver",
 		Type:         "MSG_READ_RECEIPT",

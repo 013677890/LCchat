@@ -34,14 +34,21 @@ func initializeMessagePushApp() (*MessagePushApp, error) {
 		return nil, err
 	}
 	groupcliClient := provideGroupClient(clientConn)
-	eventHandler := provideEventHandler(redisRepository, sender, groupcliClient)
-	msgPushConsumer := providePushConsumer(kafkaConfig, string2, eventHandler)
+	mainMessagePushMaxFanoutConcurrency, err := provideMessagePushMaxFanoutConcurrency()
+	if err != nil {
+		return nil, err
+	}
+	eventHandler, err := provideEventHandler(redisRepository, sender, groupcliClient, mainMessagePushMaxFanoutConcurrency)
+	if err != nil {
+		return nil, err
+	}
+	mainMsgPushConsumer := providePushConsumer(kafkaConfig, string2, eventHandler)
 	realtimeHandler := provideRealtimeHandler(redisRepository, sender, groupcliClient)
-	realtimePushConsumer := provideRealtimePushConsumer(kafkaConfig, realtimeHandler)
-	pushConsumers := providePushConsumers(msgPushConsumer, realtimePushConsumer)
+	mainRealtimePushConsumer := provideRealtimePushConsumer(kafkaConfig, realtimeHandler)
+	mainPushConsumers := providePushConsumers(mainMsgPushConsumer, mainRealtimePushConsumer)
 	config := provideMessagePushHTTPConfig()
 	server := provideMessagePushHTTPServer(config)
-	messagePushApp, err := NewMessagePushApp(logger, pushConsumers, client, clientManager, clientConn, server)
+	messagePushApp, err := NewMessagePushApp(logger, mainPushConsumers, client, clientManager, clientConn, server)
 	if err != nil {
 		return nil, err
 	}

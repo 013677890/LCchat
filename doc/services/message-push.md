@@ -8,7 +8,8 @@ message-push 是消息下行桥接服务，负责消费 Kafka `msg.push` 事件�
 - 解析 `MsgPushEvent`，支持新消息、撤回、已读同步、已读回执等下行类型。
 - 根据会话类型选择扩散策略：单聊直接找接收者，群聊拆分群成员。
 - 查询 Redis 在线路由 `user:routing:{user_uuid}`，定位用户在线设备所在 Connect 节点。
-- 通过 Connect gRPC `PushToDevice` / `PushToUser` 投递 WebSocket 下行帧。
+- 对 `msg.push` 按 Connect 节点有界并发扇出，同一节点内按用户串行处理。
+- `msg.push` 的完整用户目标通过 `PushToUser` 批量投递；需要排除当前设备时通过 `PushToDevice` 精确投递。
 - 处理发送方多端同步：向发送者除当前设备外的其他在线设备投递一份。
 
 ## 启动与核心目录
@@ -27,8 +28,8 @@ message-push 是消息下行桥接服务，负责消费 Kafka `msg.push` 事件�
 | --- | --- | --- |
 | 输入 Topic | Kafka `msg.push` | msg-service 写入的下行事件。 |
 | 路由数据 | Redis `user:routing:{user_uuid}` | Connect 写入的在线设备路由。 |
-| 群成员 | group 服务或群成员缓存 | 群聊扩散需要拆分成员。 |
-| 输出 gRPC | connect `PushToDevice` / `PushToUser` | 精确投递到在线设备。 |
+| 群成员 | group 服务 gRPC | 群聊扩散需要拆分成员。 |
+| 输出 gRPC | connect `PushToDevice` / `PushToUser` | 按设备精确投递或按节点内用户批量投递。 |
 | 输出 WebSocket | connect 转发给客户端 | 客户端收到 `MSG_PUSH`、`MSG_RECALL` 等帧。 |
 
 ## 路由格式
@@ -63,8 +64,8 @@ web-chrome-001 => connect:9091|1710000000123
 
 1. `receiver_uuid` 表示对端用户 UUID。
 2. message-push 查询对端在线路由。
-3. 对每个在线设备调用对应 connect 节点投递。
-4. `MSG_PUSH` / `MSG_RECALL` 对发送者执行多端同步，排除当前发送设备。
+3. 对端属于完整用户目标，按 `connectGrpcAddr` 分组后在各节点调用一次 `PushToUser`。
+4. `MSG_PUSH` / `MSG_RECALL` 对发送者执行多端同步，排除当前发送设备并逐设备调用 `PushToDevice`。
 
 ### 群聊
 
@@ -72,7 +73,16 @@ web-chrome-001 => connect:9091|1710000000123
 2. message-push 查询群成员列表。
 3. 根据事件类型决定是否排除发送者，以及是否投递给发送者其他设备。
 4. 对每个成员查询在线路由并去重 `(user_uuid, device_id)`。
-5. 按 Connect 节点发起 gRPC 投递。
+5. 按 Connect 节点有界并发；同节点同成员通过 `PushToUser` 批量投递。
+6. 发送者其他设备存在排除条件，继续通过 `PushToDevice` 精确投递。
+
+## 扇出并发与结果判定
+
+- 节点并发上限由 `MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY` 配置；未配置时默认 32，显式配置必须是正整数，否则服务初始化失败。节点少于上限时按实际节点数并发。
+- 同一节点内不对每台设备各开 goroutine，而是按用户串行调用，避免打满复用的 gRPC 连接。
+- `EventHandler` 强制要求 sender 同时实现 `PushToUser` 和 `PushToDevice`；完整用户目标固定使用前者，不支持回退到旧的逐设备发送路径。
+- `PushToUser` 返回成功入队的设备数：零投递计为失败，小于路由快照设备数计为部分成功。
+- 所有已尝试设备都失败时返回可重试错误；部分成功时整体返回成功，避免重推已经成功的设备。
 
 ## 错误处理
 
@@ -83,7 +93,8 @@ web-chrome-001 => connect:9091|1710000000123
 | 不支持的事件类型 | 永久错误，跳过 | 保持兼容，等待代码支持后再投递。 |
 | Redis 路由临时失败 | 可重试 | 避免短暂基础设施异常导致消息丢失。 |
 | Connect gRPC 临时失败 | 本地有限重试 | 当前实现本地最多重试 3 次。 |
-| 用户不在线 | 正常跳过 | 离线用户通过 HTTP 拉取自愈。 |
+| 用户无有效在线路由 | 正常跳过 | 离线用户通过 HTTP 拉取自愈。 |
+| 路由存在但 connect 无对应连接 | 按投递失败统计 | 全部已尝试设备失败时进入本地有限重试。 |
 
 ## 可用性边界
 
