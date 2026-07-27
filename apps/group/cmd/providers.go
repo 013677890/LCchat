@@ -106,11 +106,12 @@ func provideGroupGRPCShutdownTimeout() groupGRPCShutdownTimeout {
 
 // provideGroupCacheReconcilerConfig 解析唯一受支持的对账配置契约。
 //
-// interval 直接使用 Go duration（例如 10m、30s），不再同时接受旧式“裸秒数”；
+// interval 直接使用 Go duration（例如 6h、30m），表示相邻两轮之间的基准等待时间；
+// reconciler 会在该基准上增加 ±20% 抖动，不再同时接受旧式“裸秒数”；
 // 非法显式配置会让服务启动失败，避免运维以为对账已启用、实际却悄悄回落默认值。
 func provideGroupCacheReconcilerConfig() (consumer.CacheReconcilerConfig, error) {
 	cfg := consumer.CacheReconcilerConfig{
-		Interval:  10 * time.Minute,
+		Interval:  6 * time.Hour,
 		BatchSize: 100,
 	}
 	if raw := os.Getenv("GROUP_CACHE_RECONCILE_INTERVAL"); raw != "" {

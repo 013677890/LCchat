@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
@@ -15,7 +16,17 @@ import (
 // Redis 全局故障时可能每个群都失败；若把全表规模的 error 链全部驻留到扫描结束，
 // 大群量环境会产生没有上限的内存占用。继续扫描能避免坏群阻塞游标，但诊断只需要
 // 有界样本和遗漏计数。
-const maxCacheReconcileErrorSamples = 20
+const (
+	maxCacheReconcileErrorSamples = 20
+
+	// cacheReconcileJitterDivisor 把基准周期的五分之一作为双向抖动窗口，即 ±20%。
+	//
+	// 对账会扫描全部群并读取 MySQL、重建 Redis。如果所有 group-service 实例都按
+	// 完全相同的固定周期启动，重启或发布后很容易长期同频，周期性放大数据库与缓存
+	// 压力。20% 在 6 小时默认基准下会把下一轮均匀分散到 4 小时 48 分至
+	// 7 小时 12 分之间，同时仍能把漂移修复时延稳定约束在小时级。
+	cacheReconcileJitterDivisor = 5
+)
 
 // CacheReconcilerConfig 控制 group 缓存周期对账的扫描节奏。
 type CacheReconcilerConfig struct {
@@ -54,25 +65,60 @@ func NewCacheReconciler(
 	return &CacheReconciler{repo: repo, interval: cfg.Interval, batchSize: cfg.BatchSize}, nil
 }
 
-// Start 立即执行首轮对账，随后按固定间隔运行，直到进程 context 取消。
+// Start 立即执行首轮对账，随后按“基准间隔 ±20% 抖动”运行，直到进程 context 取消。
 //
 // 单轮失败只记录并等待下一轮，不终止 group-service；缓存修复是后台增强能力，
 // 业务读路径仍可回源 MySQL。context 取消则立即结束，不启动新批次。
+//
+// 下一次 timer 在本轮完成后才创建，而不是使用固定 ticker。这样即使一次全表扫描
+// 超过配置周期，也不会积压 tick 或让多个对账轮次重叠；配置的 Interval 表示两轮
+// 对账之间的基准等待时间，而不是墙上时钟的固定触发频率。
 func (r *CacheReconciler) Start(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
 	r.runAndReport(ctx)
-	ticker := time.NewTicker(r.interval)
-	defer ticker.Stop()
 	for {
+		timer := time.NewTimer(nextCacheReconcileDelay(r.interval))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 			r.runAndReport(ctx)
 		}
 	}
+}
+
+// nextCacheReconcileDelay 生成下一轮对账等待时间。
+//
+// rand/v2 的包级生成器可安全并发使用；每轮重新取样，避免进程启动后形成固定相位。
+// 随机偏移包含上下界，并委托给 cacheReconcileDelay 完成夹紧和映射，便于用确定输入
+// 精确测试下界、基准值与上界。
+func nextCacheReconcileDelay(base time.Duration) time.Duration {
+	if base <= 0 {
+		return base
+	}
+	jitterWindow := base / cacheReconcileJitterDivisor
+	randomOffset := time.Duration(rand.Int64N(int64(2*jitterWindow) + 1))
+	return cacheReconcileDelay(base, randomOffset)
+}
+
+// cacheReconcileDelay 把随机偏移映射到 [base*80%, base*120%]。
+//
+// 构造器已禁止非正 base；这里仍对非正值原样返回，使该纯函数在独立测试或未来复用
+// 时不会制造负抖动窗口。offset 被夹紧到合法范围，防止未来替换随机源时越界。
+func cacheReconcileDelay(base, offset time.Duration) time.Duration {
+	if base <= 0 {
+		return base
+	}
+	jitterWindow := base / cacheReconcileJitterDivisor
+	if offset < 0 {
+		offset = 0
+	} else if offset > 2*jitterWindow {
+		offset = 2 * jitterWindow
+	}
+	return base - jitterWindow + offset
 }
 
 func (r *CacheReconciler) runAndReport(ctx context.Context) {

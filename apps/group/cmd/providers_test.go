@@ -14,7 +14,7 @@ func TestProvideGroupCacheReconcilerConfigStrictParsing(t *testing.T) {
 		t.Setenv("GROUP_CACHE_RECONCILE_BATCH_SIZE", "")
 		cfg, err := provideGroupCacheReconcilerConfig()
 		require.NoError(t, err)
-		assert.Equal(t, 10*time.Minute, cfg.Interval)
+		assert.Equal(t, 6*time.Hour, cfg.Interval)
 		assert.Equal(t, 100, cfg.BatchSize)
 	})
 

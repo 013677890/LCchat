@@ -80,6 +80,27 @@ func TestNewCacheReconcilerRejectsInvalidExplicitConfig(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestCacheReconcileDelayAppliesTwentyPercentJitter(t *testing.T) {
+	const base = 6 * time.Hour
+
+	tests := []struct {
+		name   string
+		offset time.Duration
+		want   time.Duration
+	}{
+		{name: "负偏移夹紧到下界", offset: -time.Hour, want: 4*time.Hour + 48*time.Minute},
+		{name: "零偏移是下界", offset: 0, want: 4*time.Hour + 48*time.Minute},
+		{name: "单窗口偏移保持基准周期", offset: 72 * time.Minute, want: 6 * time.Hour},
+		{name: "双窗口偏移是上界", offset: 144 * time.Minute, want: 7*time.Hour + 12*time.Minute},
+		{name: "过大偏移夹紧到上界", offset: 3 * time.Hour, want: 7*time.Hour + 12*time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, cacheReconcileDelay(base, tt.offset))
+		})
+	}
+}
+
 func TestCacheReconcilerRunOnceBoundsErrorsDuringGlobalFailure(t *testing.T) {
 	expectedErr := errors.New("redis unavailable")
 	repo := &fakeCacheReconcileRepository{

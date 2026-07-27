@@ -94,7 +94,7 @@ group gRPC 写请求
 3. 用该版本执行完整 Lua 投影；
 4. 若期间已有更高版本 Kafka 事件落 Redis，Lua 拒绝旧快照。
 
-`CacheReconciler` 启动时立即执行一轮，之后按 ID keyset 分批扫描所有群并调用 `ReconcileGroupCache(group_uuid)`。它会修复群资料、有效成员、待审批申请，并根据历史成员记录为退出/被踢用户补写反向索引 tombstone。单轮仍会继续扫描失败群之后的目标，但只保留 20 条逐群错误样本和遗漏计数，避免 Redis 全局故障时错误对象按群数量无限增长。软删除群会投影为带正版本的不可用终态，不会因数据库 `status=0` 被缓存复活。
+`CacheReconciler` 启动时立即执行一轮，之后按 ID keyset 分批扫描所有群并调用 `ReconcileGroupCache(group_uuid)`。后续轮次在上一轮完成后，以配置周期为基准重新生成 ±20% 抖动的等待时间；默认 `6h` 基准对应 `4h48m`～`7h12m`，既打散多实例同频扫描，也避免单轮耗时超过周期时积压或重叠。它会修复群资料、有效成员、待审批申请，并根据历史成员记录为退出/被踢用户补写反向索引 tombstone。单轮仍会继续扫描失败群之后的目标，但只保留 20 条逐群错误样本和遗漏计数，避免 Redis 全局故障时错误对象按群数量无限增长。软删除群会投影为带正版本的不可用终态，不会因数据库 `status=0` 被缓存复活。
 
 按用户触发的完整对账还会读取当前版本 Hash 作为脏 UUID 提示，以 MySQL 事实删除“缓存里存在、成员历史中不存在”的多余群。它先发现候选群并按 UUID 排序锁定全部 `groups` 行，再在同一事务读取权威 `group_members`；发现锁集合外的新关系时扩充候选并重试，禁止拼接“旧成员关系 + 新 cache_version”。并发新事件拥有更高版本，不会被旧快照删除。
 
@@ -104,7 +104,7 @@ group gRPC 写请求
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `GROUP_CACHE_RECONCILE_INTERVAL` | `10m` | Go duration，只接受带单位的正值。 |
+| `GROUP_CACHE_RECONCILE_INTERVAL` | `6h` | 相邻轮次之间的基准等待时间；每轮加入 ±20% 抖动。Go duration，只接受带单位的正值。 |
 | `GROUP_CACHE_RECONCILE_BATCH_SIZE` | `100` | 每批群数量，只接受正整数。 |
 
 显式配置非法时 group-service 启动失败，不静默采用其他格式或旧变量。
