@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,6 +23,7 @@ import (
 type fakeMsgHTTPService struct {
 	sendMessageFn                func(context.Context, *dto.SendMessageRequest) (*dto.SendMessageResponse, error)
 	pullMessagesFn               func(context.Context, *dto.PullMessagesRequest) (*dto.PullMessagesResponse, error)
+	batchSyncMessagesFn          func(context.Context, *dto.BatchSyncMessagesRequest) (*dto.BatchSyncMessagesResponse, error)
 	getMessagesByIdsFn           func(context.Context, *dto.GetMessagesByIdsRequest) (*dto.GetMessagesByIdsResponse, error)
 	updateConversationSettingsFn func(context.Context, *dto.UpdateConvSettingsRequest) error
 }
@@ -40,6 +42,13 @@ func (f *fakeMsgHTTPService) PullMessages(ctx context.Context, req *dto.PullMess
 		return &dto.PullMessagesResponse{}, nil
 	}
 	return f.pullMessagesFn(ctx, req)
+}
+
+func (f *fakeMsgHTTPService) BatchSyncMessages(ctx context.Context, req *dto.BatchSyncMessagesRequest) (*dto.BatchSyncMessagesResponse, error) {
+	if f.batchSyncMessagesFn == nil {
+		return &dto.BatchSyncMessagesResponse{}, nil
+	}
+	return f.batchSyncMessagesFn(ctx, req)
 }
 
 func (f *fakeMsgHTTPService) GetMessagesByIds(ctx context.Context, req *dto.GetMessagesByIdsRequest) (*dto.GetMessagesByIdsResponse, error) {
@@ -164,6 +173,96 @@ func TestMsgHandlerPullMessagesValidatesLimit(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, consts.CodeParamError, decodeMsgHandlerCode(t, w))
 	assert.False(t, called)
+}
+
+func TestMsgHandlerBatchSyncMessagesValidatesBatchContract(t *testing.T) {
+	initGatewayMsgHandlerLogger()
+
+	overBudgetItems := make([]map[string]any, 0, 11)
+	for index := 0; index < 11; index++ {
+		overBudgetItems = append(overBudgetItems, map[string]any{
+			"convId": fmt.Sprintf("conv-%d", index),
+			"limit":  50,
+		})
+	}
+	overBudgetBody, err := json.Marshal(map[string]any{"conversations": overBudgetItems})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty_conversations", body: `{"conversations":[]}`},
+		{name: "null_conversation", body: `{"conversations":[null]}`},
+		{name: "blank_conversation_id", body: `{"conversations":[{"convId":"  ","afterSeq":0}]}`},
+		{name: "negative_after_seq", body: `{"conversations":[{"convId":"conv-1","afterSeq":-1}]}`},
+		{name: "limit_above_cap", body: `{"conversations":[{"convId":"conv-1","limit":51}]}`},
+		{
+			name: "duplicate_conversation_id",
+			body: `{"conversations":[{"convId":"conv-1"},{"convId":"conv-1"}]}`,
+		},
+		{name: "total_limit_above_cap", body: string(overBudgetBody)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			h := NewMsgHandler(&fakeMsgHTTPService{
+				batchSyncMessagesFn: func(context.Context, *dto.BatchSyncMessagesRequest) (*dto.BatchSyncMessagesResponse, error) {
+					called = true
+					return &dto.BatchSyncMessagesResponse{}, nil
+				},
+			})
+			w := httptest.NewRecorder()
+			req := newMsgJSONRequest(t, http.MethodPost, "/api/v1/auth/messages/sync-batch", tt.body)
+			c, _ := gin.CreateTestContext(w)
+			c.Request = req
+
+			h.BatchSyncMessages(c)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, consts.CodeParamError, decodeMsgHandlerCode(t, w))
+			assert.False(t, called)
+		})
+	}
+}
+
+func TestMsgHandlerBatchSyncMessagesForwardsIndependentCursors(t *testing.T) {
+	initGatewayMsgHandlerLogger()
+
+	called := false
+	h := NewMsgHandler(&fakeMsgHTTPService{
+		batchSyncMessagesFn: func(_ context.Context, req *dto.BatchSyncMessagesRequest) (*dto.BatchSyncMessagesResponse, error) {
+			called = true
+			require.Len(t, req.Conversations, 2)
+			assert.Equal(t, "conv-1", req.Conversations[0].ConvID)
+			assert.Equal(t, int64(7), req.Conversations[0].AfterSeq)
+			assert.Equal(t, "conv-2", req.Conversations[1].ConvID)
+			assert.Equal(t, int64(20), req.Conversations[1].AfterSeq)
+			assert.Equal(t, int32(3), req.Conversations[1].Limit)
+			return &dto.BatchSyncMessagesResponse{
+				Results: []*dto.ConversationSyncResultDTO{
+					{ConvID: "conv-1", NextSeq: 8},
+					{ConvID: "conv-2", NextSeq: 20, ErrorCode: int32(consts.CodeConversationNotFound)},
+				},
+			}, nil
+		},
+	})
+	w := httptest.NewRecorder()
+	req := newMsgJSONRequest(
+		t,
+		http.MethodPost,
+		"/api/v1/auth/messages/sync-batch",
+		`{"conversations":[{"convId":"conv-1","afterSeq":7},{"convId":"conv-2","afterSeq":20,"limit":3}]}`,
+	)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	h.BatchSyncMessages(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, consts.CodeSuccess, decodeMsgHandlerCode(t, w))
+	assert.True(t, called)
 }
 
 func TestMsgHandlerGetMessagesByIdsValidatesIDs(t *testing.T) {

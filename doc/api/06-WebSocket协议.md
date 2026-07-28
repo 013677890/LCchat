@@ -379,9 +379,11 @@ WebSocket 只保证在线实时投递，不替代历史拉取。前端应在以�
 | 场景 | 动作 |
 | --- | --- |
 | 登录后首次打开会话页 | 调用 `/api/v1/auth/messages/pull` 拉最近消息。 |
-| WebSocket 重连成功 | 按本地最后 seq 对活跃会话补拉。 |
+| 登录恢复或 WebSocket 重连成功 | 调用 `/api/v1/auth/messages/sync-batch`，提交多个已有本地缓存会话各自的 `afterSeq`。 |
 | 收到 `MSG_PUSH` 发现 seq gap | 按缺口范围补拉。 |
 | ACK 写入失败或服务端返回 `30002` | 保留本地 ACK 队列，稍后重试或等待下次连接后重新上报。 |
+
+批量同步只用于按已有位点向后追新。没有本地位点的新会话仍应在首次打开时调用单会话 `/messages/pull` 并使用 `direction=2` 拉最近一页。批量结果中单个会话失败不会导致整批失败，客户端必须检查每个 `results[].errorCode`，并且只在消息成功持久化后推进该会话的 `nextSeq`。
 
 ### 7.4 ACK 策略
 
@@ -407,6 +409,7 @@ WebSocket 只保证在线实时投递，不替代历史拉取。前端应在以�
 | --- | --- | --- |
 | 发送消息 | HTTP `POST /api/v1/auth/messages/send` | 当前 WebSocket `message` 只返回占位 ACK，不做持久化。 |
 | 拉历史消息 | HTTP `GET /api/v1/auth/messages/pull` | WebSocket 不负责历史补齐。 |
+| 多会话重连追新 | HTTP `POST /api/v1/auth/messages/sync-batch` | 各会话提交独立 `afterSeq`，用于登录恢复和重连批量追平。 |
 | 新消息实时到达 | WebSocket `MSG_PUSH` | 由 Kafka `msg.push` 经 message-push 转发到 Connect。 |
 | 撤回通知 | WebSocket `MSG_RECALL` | HTTP 撤回成功后异步下发。 |
 | 已读同步 | WebSocket `MSG_MARK_READ` | HTTP 标记已读成功后异步下发。 |

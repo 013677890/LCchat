@@ -1,6 +1,9 @@
 package dto
 
 import (
+	"strings"
+	"unicode/utf8"
+
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 )
 
@@ -95,6 +98,132 @@ func ConvertPullMessagesResponseFromProto(pb *msgpb.PullMessagesResponse) *PullM
 		HasMore:  pb.HasMore,
 		MaxSeq:   pb.MaxSeq,
 	}
+}
+
+// ==================== 多会话消息同步 DTO ====================
+
+const (
+	batchSyncDefaultLimit     = 10
+	batchSyncMaxLimit         = 50
+	batchSyncMaxConversations = 50
+	batchSyncMaxTotalLimit    = 500
+)
+
+// ConversationSyncCursorDTO 是一个会话独立的增量同步位点。
+// AfterSeq 必须来自客户端对该会话已经持久化的位点，不能用其他会话的 seq 替代。
+type ConversationSyncCursorDTO struct {
+	ConvID   string `json:"convId" binding:"required,min=1,max=128"`
+	AfterSeq int64  `json:"afterSeq" binding:"min=0"`
+	Limit    int32  `json:"limit" binding:"omitempty,min=0,max=50"`
+}
+
+// BatchSyncMessagesRequest 按会话提交独立位点。Gateway binding 负责字段级约束，
+// ValidateBatchSyncMessagesRequest 再补充重复 convId、空白字符和总预算等跨字段约束。
+type BatchSyncMessagesRequest struct {
+	Conversations []*ConversationSyncCursorDTO `json:"conversations" binding:"required,min=1,max=50,dive,required"`
+}
+
+// ConversationSyncResultDTO 是一个会话的独立同步结果。
+// ErrorCode=0 时其余字段有效；非 0 时 Messages 为空且 NextSeq 保持原请求位点。
+type ConversationSyncResultDTO struct {
+	ConvID    string        `json:"convId"`
+	Messages  []*MsgItemDTO `json:"messages"`
+	HasMore   bool          `json:"hasMore"`
+	MaxSeq    int64         `json:"maxSeq"`
+	NextSeq   int64         `json:"nextSeq"`
+	ErrorCode int32         `json:"errorCode"`
+}
+
+// BatchSyncMessagesResponse 中 Results 与请求 Conversations 一一对应且顺序相同。
+type BatchSyncMessagesResponse struct {
+	Results []*ConversationSyncResultDTO `json:"results"`
+}
+
+// ValidateBatchSyncMessagesRequest 校验需要观察整个批次才能确定的约束。
+// 这些规则在 msg-service 还会再次校验；Gateway 提前拒绝是为了不让确定非法的请求
+// 占用一次 gRPC 往返，更不能依赖它代替服务端领域边界校验。
+func ValidateBatchSyncMessagesRequest(req *BatchSyncMessagesRequest) bool {
+	if req == nil ||
+		len(req.Conversations) == 0 ||
+		len(req.Conversations) > batchSyncMaxConversations {
+		return false
+	}
+
+	seenConversationIDs := make(map[string]struct{}, len(req.Conversations))
+	totalLimit := 0
+	for _, item := range req.Conversations {
+		if item == nil ||
+			item.ConvID == "" ||
+			strings.TrimSpace(item.ConvID) != item.ConvID ||
+			utf8.RuneCountInString(item.ConvID) > 128 ||
+			item.AfterSeq < 0 ||
+			item.Limit < 0 ||
+			item.Limit > batchSyncMaxLimit {
+			return false
+		}
+		if _, duplicated := seenConversationIDs[item.ConvID]; duplicated {
+			return false
+		}
+		seenConversationIDs[item.ConvID] = struct{}{}
+
+		effectiveLimit := int(item.Limit)
+		if effectiveLimit == 0 {
+			effectiveLimit = batchSyncDefaultLimit
+		}
+		totalLimit += effectiveLimit
+		if totalLimit > batchSyncMaxTotalLimit {
+			return false
+		}
+	}
+	return true
+}
+
+// ConvertToProtoBatchSyncMessagesRequest 将 HTTP DTO 转换为 msg-service 请求，并保持输入顺序。
+func ConvertToProtoBatchSyncMessagesRequest(dto *BatchSyncMessagesRequest) *msgpb.BatchSyncMessagesRequest {
+	if dto == nil {
+		return nil
+	}
+
+	conversations := make([]*msgpb.ConversationSyncCursor, 0, len(dto.Conversations))
+	for _, item := range dto.Conversations {
+		if item == nil {
+			// 正常 HTTP 入口会在转换前拒绝 nil；保留 nil 可使绕过 Handler 的内部调用
+			// 仍由 msg-service 严格拒绝，而不是在 Gateway 转换时 panic。
+			conversations = append(conversations, nil)
+			continue
+		}
+		conversations = append(conversations, &msgpb.ConversationSyncCursor{
+			ConvId:   item.ConvID,
+			AfterSeq: item.AfterSeq,
+			Limit:    item.Limit,
+		})
+	}
+	return &msgpb.BatchSyncMessagesRequest{Conversations: conversations}
+}
+
+// ConvertBatchSyncMessagesResponseFromProto 将逐会话结果转换为 HTTP JSON DTO。
+func ConvertBatchSyncMessagesResponseFromProto(pb *msgpb.BatchSyncMessagesResponse) *BatchSyncMessagesResponse {
+	if pb == nil {
+		return nil
+	}
+
+	results := make([]*ConversationSyncResultDTO, 0, len(pb.Results))
+	for _, item := range pb.Results {
+		if item == nil {
+			// 正常调用会由 Gateway service 在转换前严格拒绝 nil。直接使用转换函数时
+			// 也选择失败关闭，不能静默跳项破坏 results 与请求的一一对应关系。
+			return nil
+		}
+		results = append(results, &ConversationSyncResultDTO{
+			ConvID:    item.ConvId,
+			Messages:  ConvertMsgItemsFromProto(item.Messages),
+			HasMore:   item.HasMore,
+			MaxSeq:    item.MaxSeq,
+			NextSeq:   item.NextSeq,
+			ErrorCode: item.ErrorCode,
+		})
+	}
+	return &BatchSyncMessagesResponse{Results: results}
 }
 
 // ==================== 消息反查 DTO ====================

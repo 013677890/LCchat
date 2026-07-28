@@ -6,7 +6,7 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 
 - 单聊和群聊统一发送入口，分配消息 ID 和会话内递增 `seq`。
 - 基于 `(from_uuid, device_id, client_msg_id)` 做发送幂等，避免弱网重试重复落库。
-- 拉取历史消息、按消息 ID 批量反查、撤回消息。
+- 拉取单会话历史消息、按多个会话各自的 seq 位点批量追新、按消息 ID 批量反查、撤回消息。
 - 维护会话列表、最后消息预览、未读数、免打扰、置顶和逻辑删除位点。
 - 标记会话已读，并与多端同步、P2P 已读回执 outbox 事件同事务提交。
 - 将新消息、撤回、已读事件写入 MySQL `outbox_events`，由 Debezium CDC 路由到 Kafka `msg.push`，再由 message-push 做下行投递。
@@ -19,7 +19,7 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 | `apps/msg/internal/handler` | gRPC handler，薄适配层。 |
 | `apps/msg/internal/domain/message` | 消息领域：消息落库、seq 分配、撤回、拉取。 |
 | `apps/msg/internal/domain/conversation` | 会话领域：会话列表、已读、删除、设置。 |
-| `apps/msg/internal/usecase` | 跨领域工作流：发送、撤回、已读。 |
+| `apps/msg/internal/usecase` | 跨领域工作流：发送、消息读取/批量同步、撤回、已读。 |
 | `apps/msg/internal/groupcli` | 群权限校验客户端。 |
 | `proto/msg` | MsgService、MsgItem、MsgPushEvent 契约。 |
 
@@ -27,7 +27,7 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 
 | 层 | 规则 |
 | --- | --- |
-| handler | 只做参数转换和错误映射，不写业务规则。 |
+| handler | 只做参数转换、鉴权主体解析和错误映射，不写业务规则。 |
 | message domain | 只处理消息事实，不依赖 conversation domain。 |
 | conversation domain | 只处理会话事实，不依赖 message domain。 |
 | usecase | 唯一允许协调多个 domain；不直接投递 `msg.push` Kafka。 |
@@ -54,12 +54,13 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 
 | 服务 | 能力 |
 | --- | --- |
-| `MsgService` | 发送消息、拉取消息、消息反查、撤回、会话列表、已读、删除会话、更新设置。 |
+| `MsgService` | 发送消息、单会话拉取、多会话位点同步、消息反查、撤回、会话列表、已读、删除会话、更新设置。 |
 
 关键 RPC：
 
 - `SendMessage`：单聊/群聊统一发送入口。
 - `PullMessages`：按 `conv_id + anchor_seq + direction` 拉取历史。
+- `BatchSyncMessages`：按最多 50 个会话各自的 `after_seq` 有界并发追新；结果保持请求顺序，并用逐项 `error_code` 表达部分失败。
 - `GetMessagesByIds`：按消息 ID 批量反查。
 - `RecallMessage`：撤回消息。
 - `GetConversations`：全量或增量获取会话列表。
@@ -95,6 +96,20 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 - P2P `MarkRead` 会额外写入 `MSG_READ_RECEIPT` outbox；群聊只写当前用户 self-sync 的 `MSG_MARK_READ`。
 - 上述 outbox 的 `entity_id` 均为 `conv_id`，保持同会话分区有序。
 
+## 多会话批量同步链路
+
+1. Gateway 严格校验会话数、逐项位点、重复 `conv_id` 和有效 limit 总和，再调用 `BatchSyncMessages`。
+2. msg handler 只解析一次登录用户身份，`MessageReadWorkflow` 为每个会话复用单会话读取逻辑：
+   - `ResolveReadAccess` 裁决当前用户读取资格并取得 `clear_seq`；
+   - `GetMaxSeq` 读取当前最大 seq；
+   - `PullMessages` 固定使用 FORWARD 方向查询 `seq > after_seq AND seq > clear_seq`。
+3. 单批最多 50 个会话，内部查询并发上限为 8，所有有效 limit 之和最多 500。
+4. 每个 goroutine 只写预分配结果切片的固定下标，所以查询可并发完成、响应仍严格保持请求顺序。
+5. 所有查询收敛后按请求顺序执行约 3 MiB 的消息本体预算裁剪；被裁剪项只推进到实际返回的最后 seq，并强制 `has_more=true`，确保 Gateway 4 MiB gRPC 接收上限不会把整批结果变成传输失败。
+6. 单会话无权读取或查询失败只写入该项 `error_code`；请求参数非法、父 deadline 到期或调用取消才整体失败。
+
+该接口消除的是客户端对 Gateway/msg-service 的 N 次网络往返，不会把消息表改成跨会话扫描。底层仍按每个 `conv_id + seq` 索引独立读取，因此查询并发必须有界。
+
 ## 非阻断策略
 
 | 步骤 | 失败处理 | 原因 |
@@ -102,13 +117,13 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 | 消息落库 | 阻断返回错误 | 消息事实未成立。 |
 | 撤回 / 已读 outbox 落库 | 阻断并回滚业务变更 | 业务事实与下行通知必须原子提交。 |
 | 会话 Upsert | Warn，不阻断 | 后续消息或拉取可自愈。 |
-| CDC/Kafka 投递 | 不在请求内等待 | 客户端可通过 PullMessages 自愈。 |
+| CDC/Kafka 投递 | 不在请求内等待 | 客户端可通过单会话 `PullMessages` 或多会话 `BatchSyncMessages` 自愈。 |
 | 群成员会话初始化 | Warn，不阻断 | 下次会话更新可补偿。 |
 
 ## 不变量
 
 - 消息事实以 MySQL 为准，Redis 只用于 seq 和幂等缓存。
 - 发送成功的判定点是“消息落库成功”，不是“下行推送成功”。
-- `seq` 只在单个会话内有序，不能跨会话比较。
+- `seq` 只在单个会话内有序，不能跨会话比较；批量同步必须为每个会话携带独立位点。
 - `client_msg_id` 必须由客户端在重试时复用。
 - 撤回后客户端渲染应优先看 `status`，不要继续展示原 `content`。

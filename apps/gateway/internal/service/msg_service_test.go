@@ -8,6 +8,8 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	gatewaypb "github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 
 	"github.com/stretchr/testify/assert"
@@ -19,6 +21,7 @@ type fakeGatewayMsgClient struct {
 
 	sendMessageFn                func(context.Context, *msgpb.SendMessageRequest) (*msgpb.SendMessageResponse, error)
 	pullMessagesFn               func(context.Context, *msgpb.PullMessagesRequest) (*msgpb.PullMessagesResponse, error)
+	batchSyncMessagesFn          func(context.Context, *msgpb.BatchSyncMessagesRequest) (*msgpb.BatchSyncMessagesResponse, error)
 	getMessagesByIdsFn           func(context.Context, *msgpb.GetMessagesByIdsRequest) (*msgpb.GetMessagesByIdsResponse, error)
 	recallMessageFn              func(context.Context, *msgpb.RecallMessageRequest) (*msgpb.RecallMessageResponse, error)
 	getConversationsFn           func(context.Context, *msgpb.GetConversationsRequest) (*msgpb.GetConversationsResponse, error)
@@ -39,6 +42,13 @@ func (f *fakeGatewayMsgClient) PullMessages(ctx context.Context, req *msgpb.Pull
 		return nil, errors.New("unexpected PullMessages call")
 	}
 	return f.pullMessagesFn(ctx, req)
+}
+
+func (f *fakeGatewayMsgClient) BatchSyncMessages(ctx context.Context, req *msgpb.BatchSyncMessagesRequest) (*msgpb.BatchSyncMessagesResponse, error) {
+	if f.batchSyncMessagesFn == nil {
+		return nil, errors.New("unexpected BatchSyncMessages call")
+	}
+	return f.batchSyncMessagesFn(ctx, req)
 }
 
 func (f *fakeGatewayMsgClient) GetMessagesByIds(ctx context.Context, req *msgpb.GetMessagesByIdsRequest) (*msgpb.GetMessagesByIdsResponse, error) {
@@ -136,6 +146,25 @@ func TestGatewayMsgServiceSendMessage(t *testing.T) {
 		require.Nil(t, resp)
 		require.ErrorIs(t, err, wantErr)
 	})
+
+	t.Run("rejects_out_of_contract_result_order", func(t *testing.T) {
+		client := &fakeGatewayMsgClient{
+			batchSyncMessagesFn: func(context.Context, *msgpb.BatchSyncMessagesRequest) (*msgpb.BatchSyncMessagesResponse, error) {
+				return &msgpb.BatchSyncMessagesResponse{
+					Results: []*msgpb.ConversationSyncResult{{ConvId: "another-conversation"}},
+				}, nil
+			},
+		}
+		svc := NewMsgService(client)
+
+		resp, err := svc.BatchSyncMessages(context.Background(), &dto.BatchSyncMessagesRequest{
+			Conversations: []*dto.ConversationSyncCursorDTO{{ConvID: "conv-1"}},
+		})
+
+		require.Nil(t, resp)
+		require.Error(t, err)
+		assert.Equal(t, consts.CodeInternalError, apperr.Code(err))
+	})
 }
 
 func TestGatewayMsgServicePullMessages(t *testing.T) {
@@ -148,6 +177,73 @@ func TestGatewayMsgServicePullMessages(t *testing.T) {
 		}
 		svc := NewMsgService(client)
 		resp, err := svc.PullMessages(context.Background(), &dto.PullMessagesRequest{ConvID: "conv-x"})
+		require.Nil(t, resp)
+		require.ErrorIs(t, err, wantErr)
+	})
+}
+
+func TestGatewayMsgServiceBatchSyncMessages(t *testing.T) {
+	t.Run("maps_independent_cursors_and_results", func(t *testing.T) {
+		client := &fakeGatewayMsgClient{
+			batchSyncMessagesFn: func(_ context.Context, req *msgpb.BatchSyncMessagesRequest) (*msgpb.BatchSyncMessagesResponse, error) {
+				require.Len(t, req.Conversations, 2)
+				assert.Equal(t, "conv-1", req.Conversations[0].ConvId)
+				assert.Equal(t, int64(7), req.Conversations[0].AfterSeq)
+				assert.Zero(t, req.Conversations[0].Limit)
+				assert.Equal(t, "conv-2", req.Conversations[1].ConvId)
+				assert.Equal(t, int64(20), req.Conversations[1].AfterSeq)
+				assert.Equal(t, int32(5), req.Conversations[1].Limit)
+
+				return &msgpb.BatchSyncMessagesResponse{
+					Results: []*msgpb.ConversationSyncResult{
+						{
+							ConvId:   "conv-1",
+							Messages: []*msgpb.MsgItem{{MsgId: "msg-8", Seq: 8}},
+							HasMore:  true,
+							MaxSeq:   10,
+							NextSeq:  8,
+						},
+						{
+							ConvId:    "conv-2",
+							NextSeq:   20,
+							ErrorCode: int32(consts.CodeConversationNotFound),
+						},
+					},
+				}, nil
+			},
+		}
+		svc := NewMsgService(client)
+
+		resp, err := svc.BatchSyncMessages(context.Background(), &dto.BatchSyncMessagesRequest{
+			Conversations: []*dto.ConversationSyncCursorDTO{
+				{ConvID: "conv-1", AfterSeq: 7},
+				{ConvID: "conv-2", AfterSeq: 20, Limit: 5},
+			},
+		})
+
+		require.NoError(t, err)
+		require.Len(t, resp.Results, 2)
+		require.Len(t, resp.Results[0].Messages, 1)
+		assert.Equal(t, "msg-8", resp.Results[0].Messages[0].MsgID)
+		assert.Equal(t, int64(8), resp.Results[0].NextSeq)
+		assert.True(t, resp.Results[0].HasMore)
+		assert.Equal(t, int32(consts.CodeConversationNotFound), resp.Results[1].ErrorCode)
+		assert.Equal(t, int64(20), resp.Results[1].NextSeq)
+	})
+
+	t.Run("downstream_error_passthrough", func(t *testing.T) {
+		wantErr := errors.New("batch sync failed")
+		client := &fakeGatewayMsgClient{
+			batchSyncMessagesFn: func(context.Context, *msgpb.BatchSyncMessagesRequest) (*msgpb.BatchSyncMessagesResponse, error) {
+				return nil, wantErr
+			},
+		}
+		svc := NewMsgService(client)
+
+		resp, err := svc.BatchSyncMessages(context.Background(), &dto.BatchSyncMessagesRequest{
+			Conversations: []*dto.ConversationSyncCursorDTO{{ConvID: "conv-1"}},
+		})
+
 		require.Nil(t, resp)
 		require.ErrorIs(t, err, wantErr)
 	})

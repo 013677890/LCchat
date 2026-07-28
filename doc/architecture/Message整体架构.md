@@ -59,7 +59,7 @@ domain 不直接依赖其他 domain；msg-service 不直接写 `msg.push` Kafka�
 - 初始化群成员会话行失败。
 - CDC / Kafka 投递延迟或短暂失败。
 
-自愈方式：客户端后续通过 PullMessages 和会话同步拿到权威状态。
+自愈方式：客户端后续通过单会话 PullMessages、多会话 BatchSyncMessages 和会话同步拿到权威状态。
 
 ## 撤回和已读
 

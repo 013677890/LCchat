@@ -36,6 +36,11 @@ func (c *msgServiceClientImpl) PullMessages(ctx context.Context, req *msgpb.Pull
 	return c.msgClient.PullMessages(ctx, req)
 }
 
+// BatchSyncMessages 按多个会话各自的 seq 位点批量补拉新消息
+func (c *msgServiceClientImpl) BatchSyncMessages(ctx context.Context, req *msgpb.BatchSyncMessagesRequest) (*msgpb.BatchSyncMessagesResponse, error) {
+	return c.msgClient.BatchSyncMessages(ctx, req)
+}
+
 // GetMessagesByIds 批量获取指定消息
 func (c *msgServiceClientImpl) GetMessagesByIds(ctx context.Context, req *msgpb.GetMessagesByIdsRequest) (*msgpb.GetMessagesByIdsResponse, error) {
 	return c.msgClient.GetMessagesByIds(ctx, req)

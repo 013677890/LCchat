@@ -18,6 +18,8 @@ type MsgServiceClient interface {
 	// ==================== 消息拉取 ====================
 	// PullMessages 按会话增量拉取历史消息
 	PullMessages(ctx context.Context, req *msgpb.PullMessagesRequest) (*msgpb.PullMessagesResponse, error)
+	// BatchSyncMessages 按多个会话各自的 seq 位点批量补拉新消息
+	BatchSyncMessages(ctx context.Context, req *msgpb.BatchSyncMessagesRequest) (*msgpb.BatchSyncMessagesResponse, error)
 	// GetMessagesByIds 批量获取指定消息
 	GetMessagesByIds(ctx context.Context, req *msgpb.GetMessagesByIdsRequest) (*msgpb.GetMessagesByIdsResponse, error)
 	// ==================== 消息操作 ====================

@@ -148,6 +148,8 @@ type MsgService interface {
 	SendMessage(ctx context.Context, req *dto.SendMessageRequest) (*dto.SendMessageResponse, error)
 	// PullMessages 拉取历史消息
 	PullMessages(ctx context.Context, req *dto.PullMessagesRequest) (*dto.PullMessagesResponse, error)
+	// BatchSyncMessages 按多个会话各自的 seq 位点批量同步新消息
+	BatchSyncMessages(ctx context.Context, req *dto.BatchSyncMessagesRequest) (*dto.BatchSyncMessagesResponse, error)
 	// GetMessagesByIds 批量获取指定消息
 	GetMessagesByIds(ctx context.Context, req *dto.GetMessagesByIdsRequest) (*dto.GetMessagesByIdsResponse, error)
 	// RecallMessage 撤回消息

@@ -236,6 +236,11 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 			{
 				messages.POST("/send", msgHandler.SendMessage)
 				messages.GET("/pull", msgHandler.PullMessages)
+				// 多会话同步会产生有界读扩散，使用独立限流防止高频重连或恶意请求
+				// 绕过普通用户级令牌桶持续占用 msg-service 的查询并发。
+				messages.POST("/sync-batch",
+					middleware.UserRateLimitMiddlewareWithConfig(5.0, 10),
+					msgHandler.BatchSyncMessages)
 				messages.POST("/get-by-ids", msgHandler.GetMessagesByIds)
 				messages.POST("/recall", msgHandler.RecallMessage)
 			}

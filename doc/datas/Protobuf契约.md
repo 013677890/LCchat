@@ -124,6 +124,7 @@ HTTP 返回的 `GroupInfoDTO` 与 proto 群资料响应字段对应：`group_uui
 | --- | --- |
 | `SendMessage` | 发送单聊/群聊消息，幂等落库并触发下行事件。 |
 | `PullMessages` | 基于 `conv_id + anchor_seq + direction` 拉取历史。 |
+| `BatchSyncMessages` | 按多个会话各自的 `after_seq` 前向补拉；结果与请求顺序一致，单会话错误通过 `error_code` 返回。 |
 | `GetMessagesByIds` | 批量反查消息。 |
 | `RecallMessage` | 撤回消息。 |
 | `GetConversations` | 获取会话列表，支持全量和增量。 |
@@ -138,8 +139,12 @@ HTTP 返回的 `GroupInfoDTO` 与 proto 群资料响应字段对应：`group_uui
 | `MsgItem` | 消息完整结构，用于拉取和 WebSocket 下行。 |
 | `LastMsgPreview` | 会话列表最后消息预览。 |
 | `ConversationItem` | 会话列表项。 |
+| `ConversationSyncCursor` | 一个会话的 `conv_id + after_seq + limit` 独立同步位点。 |
+| `ConversationSyncResult` | 一个会话的消息、`has_more/max_seq/next_seq` 和独立 `error_code`。 |
 
 枚举：`ConvType` 中 `1=P2P`，`2=GROUP`；`PullDirection` 中 `1=FORWARD`，`2=BACKWARD`。
+
+`BatchSyncMessages` 固定使用 FORWARD 语义，不复用 `PullDirection`。请求最多 50 个不同会话，单会话 limit 上限 50（0 按默认 10），有效 limit 总和不超过 500；这些跨字段约束除 Proto 字段校验外，还由 Gateway 和 msg-service 业务入口严格校验。响应还受约 3 MiB 消息本体预算约束，因此实际消息数可能小于 limit，此时 `has_more=true` 且 `next_seq` 只推进到实际返回的最后一条消息。
 
 ## 8. connect 契约
 

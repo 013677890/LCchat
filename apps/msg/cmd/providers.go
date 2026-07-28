@@ -228,6 +228,7 @@ var msgDomainProviderSet = wire.NewSet(
 	message.NewRepository,
 	conversation.NewRepository,
 	provideConvService,
+	usecase.NewMessageReadWorkflow,
 	usecase.NewSendMessageWorkflow,
 	usecase.NewRecallMessageWorkflow,
 	usecase.NewMarkReadWorkflow,

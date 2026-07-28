@@ -83,6 +83,33 @@ func (h *MsgHandler) PullMessages(c *gin.Context) {
 	result.Success(c, resp)
 }
 
+// BatchSyncMessages 批量同步多个会话的新消息
+// @Summary 按多个会话各自的 seq 位点批量同步消息
+// @Description 登录恢复或 WebSocket 重连后，按每个会话独立的 afterSeq 前向补拉；单会话失败通过 result.errorCode 返回
+// @Tags 消息接口
+// @Accept json
+// @Produce json
+// @Param request body dto.BatchSyncMessagesRequest true "批量同步消息请求"
+// @Success 200 {object} dto.BatchSyncMessagesResponse
+// @Router /api/v1/auth/messages/sync-batch [post]
+func (h *MsgHandler) BatchSyncMessages(c *gin.Context) {
+	ctx := middleware.NewContextWithGin(c)
+
+	var req dto.BatchSyncMessagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil || !dto.ValidateBatchSyncMessagesRequest(&req) {
+		result.Fail(c, nil, consts.CodeParamError)
+		return
+	}
+
+	resp, err := h.msgService.BatchSyncMessages(ctx, &req)
+	if err != nil {
+		handleServiceError(c, err)
+		return
+	}
+
+	result.Success(c, resp)
+}
+
 // GetMessagesByIds 批量获取消息接口
 // @Summary 批量获取消息
 // @Description 根据消息ID列表批量获取消息

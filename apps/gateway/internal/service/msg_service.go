@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/dto"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/pb"
+	"github.com/013677890/LCchat-Backend/consts"
+	"github.com/013677890/LCchat-Backend/pkg/apperr"
 )
 
 // MsgServiceImpl 消息服务实现
@@ -40,6 +43,28 @@ func (s *MsgServiceImpl) PullMessages(ctx context.Context, req *dto.PullMessages
 		return nil, err
 	}
 	return dto.ConvertPullMessagesResponseFromProto(resp), nil
+}
+
+// BatchSyncMessages 将 HTTP 层的逐会话位点一次性转发给 msg-service。
+// 部分失败仍是一个成功的 RPC 响应，具体失败码保留在每个 result.errorCode 中。
+func (s *MsgServiceImpl) BatchSyncMessages(ctx context.Context, req *dto.BatchSyncMessagesRequest) (*dto.BatchSyncMessagesResponse, error) {
+	protoReq := dto.ConvertToProtoBatchSyncMessagesRequest(req)
+	resp, err := s.msgClient.BatchSyncMessages(ctx, protoReq)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || len(resp.Results) != len(protoReq.Conversations) {
+		return nil, apperr.New(consts.CodeInternalError)
+	}
+	for index, result := range resp.Results {
+		requestItem := protoReq.Conversations[index]
+		if result == nil || requestItem == nil || result.ConvId != requestItem.ConvId {
+			// 严格执行“一项请求对应同下标的一项结果”契约，不猜测、不重排，也不静默
+			// 跳过异常项；下游违反契约时整次 Gateway 调用按内部错误失败。
+			return nil, apperr.New(consts.CodeInternalError)
+		}
+	}
+	return dto.ConvertBatchSyncMessagesResponseFromProto(resp), nil
 }
 
 // GetMessagesByIds 批量获取指定消息

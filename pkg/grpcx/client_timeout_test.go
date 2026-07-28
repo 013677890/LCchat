@@ -73,6 +73,7 @@ func TestClientTimeoutUnaryInterceptorKeepsShorterParentDeadline(t *testing.T) {
 func TestDefaultClientMethodTimeoutsReturnsClone(t *testing.T) {
 	timeouts := DefaultClientMethodTimeouts()
 	require.NotNil(t, timeouts)
+	assert.Equal(t, 1500*time.Millisecond, timeouts["/msg.MsgService/BatchSyncMessages"])
 
 	timeouts["/auth.AuthService/Login"] = 42 * time.Second
 

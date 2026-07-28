@@ -31,6 +31,15 @@ service MsgService {
   // 若调用方已有更短父 deadline，应优先服从父预算。
   rpc PullMessages(PullMessagesRequest) returns (PullMessagesResponse);
 
+  // BatchSyncMessages 按多个会话各自的 seq 位点批量补拉新消息。
+  // 与 PullMessages 不同，本接口只提供 FORWARD 语义：每个会话返回 seq > after_seq 的消息。
+  // 单个会话无权限、已不存在或读取失败时，只在对应 result.error_code 中返回错误，
+  // 不影响同一批次中其他会话同步；请求级参数错误和调用取消仍会整体失败。
+  // 典型场景：登录恢复、WebSocket 重连后，客户端用本地持久化的逐会话位点做批量追平。
+  // 建议调用超时：1500ms。
+  // 若调用方已有更短父 deadline，应优先服从父预算。
+  rpc BatchSyncMessages(BatchSyncMessagesRequest) returns (BatchSyncMessagesResponse);
+
   // GetMessagesByIds 批量获取指定消息。
   // 典型场景：
   // - 用户点击引用/回复区域，需要跳转到原始消息；
@@ -68,7 +77,7 @@ service MsgService {
 
   // DeleteConversation 删除（关闭）会话。
   // 逻辑删除：status 置为 1，同时记录 clear_seq = 当前 max_seq。
-  // 后续 PullMessages 时增加 seq > clear_seq 过滤，防止被删除的消息"幽灵复活"。
+  // 后续 PullMessages / BatchSyncMessages 时增加 seq > clear_seq 过滤，防止被删除的消息"幽灵复活"。
   // read_seq 同步设为 max_seq（未读数归零）。
   // 建议调用超时：500ms。
   // 若调用方已有更短父 deadline，应优先服从父预算。
@@ -145,6 +154,47 @@ message PullMessagesResponse {
   bool has_more = 2;
   // max_seq: 该会话当前最大 seq（客户端可用于判断是否有 gap）。
   int64 max_seq = 3;
+}
+
+// ConversationSyncCursor 描述一个会话独立的增量同步起点。
+// seq 只在会话内有序，因此不能用一个全局 seq 代替本结构中的逐会话 after_seq。
+message ConversationSyncCursor {
+  // conv_id: 目标会话 ID。
+  string conv_id = 1 [(validate.rules).string = {min_len: 1, max_len: 128}];
+  // after_seq: 客户端已经持久化的最后同步位点；服务端只返回 seq > after_seq 的消息。
+  int64 after_seq = 2 [(validate.rules).int64.gte = 0];
+  // limit: 当前会话本轮最多返回多少条；0 使用服务端默认值 10，上限 50。
+  int32 limit = 3 [(validate.rules).int32 = {gte: 0, lte: 50}];
+}
+
+message BatchSyncMessagesRequest {
+  // conversations: 待同步会话及各自位点，单批 1~50 个。
+  // 同一请求禁止重复 conv_id；所有会话的有效 limit 之和不得超过 500。
+  repeated ConversationSyncCursor conversations = 1
+      [(validate.rules).repeated = {min_items: 1, max_items: 50}];
+}
+
+message ConversationSyncResult {
+  // conv_id: 与请求项对应的会话 ID；results 顺序与请求 conversations 顺序一致。
+  string conv_id = 1;
+  // messages: 本轮返回的消息，按 seq 升序；失败时为空。
+  repeated MsgItem messages = 2;
+  // has_more: 当前 next_seq 之后是否仍有可继续补拉的消息。
+  // 除单会话 limit 外，服务端还可能因整批响应字节预算而提前截断并返回 true。
+  bool has_more = 3;
+  // max_seq: 服务端当前观察到的会话最大 seq；失败时为 0。
+  int64 max_seq = 4;
+  // next_seq: 客户端下一轮应作为 after_seq 回传的位点。
+  // 有消息时取本轮最后一条消息的 seq；无消息或失败时保持请求的 after_seq。
+  int64 next_seq = 5;
+  // error_code: 0 表示当前会话同步成功；非 0 为该会话独立的业务错误码。
+  // 当前主要返回 13004（会话不存在或无读取权限）和 30001（内部读取失败）。
+  int32 error_code = 6;
+}
+
+message BatchSyncMessagesResponse {
+  // results: 与请求项一一对应并保持相同顺序，便于客户端按下标或 conv_id 合并结果。
+  repeated ConversationSyncResult results = 1;
 }
 
 // ==================== 消息反查 ====================

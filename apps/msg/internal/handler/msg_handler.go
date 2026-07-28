@@ -19,23 +19,23 @@ import (
 // 日志策略：入口/出口/耗时由拦截器统一记录，handler 仅记录真正的业务处理点错误。
 type MsgHandler struct {
 	pb.UnimplementedMsgServiceServer
-	msgService            *msgsvc.Service
 	convService           *convsvc.Service
+	messageReadWorkflow   *usecase.MessageReadWorkflow
 	sendMessageWorkflow   *usecase.SendMessageWorkflow
 	recallMessageWorkflow *usecase.RecallMessageWorkflow
 	markReadWorkflow      *usecase.MarkReadWorkflow
 }
 
 func NewMsgHandler(
-	msgService *msgsvc.Service,
 	convService *convsvc.Service,
+	messageReadWf *usecase.MessageReadWorkflow,
 	sendWf *usecase.SendMessageWorkflow,
 	recallWf *usecase.RecallMessageWorkflow,
 	markReadWf *usecase.MarkReadWorkflow,
 ) *MsgHandler {
 	return &MsgHandler{
-		msgService:            msgService,
 		convService:           convService,
+		messageReadWorkflow:   messageReadWf,
 		sendMessageWorkflow:   sendWf,
 		recallMessageWorkflow: recallWf,
 		markReadWorkflow:      markReadWf,
@@ -96,32 +96,30 @@ func (h *MsgHandler) PullMessages(ctx context.Context, req *pb.PullMessagesReque
 		return nil, err
 	}
 
-	clearSeq, err := h.requireConversationAccess(ctx, ownerUUID, req.ConvId)
+	resp, err := h.messageReadWorkflow.PullMessages(ctx, ownerUUID, req)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// BatchSyncMessages 按多个会话各自的 seq 位点批量补拉新消息。
+// Handler 只解析一次鉴权主体；跨 conversation/message 领域的权限裁决、读取和
+// 有界并发编排统一交给 MessageReadWorkflow。
+func (h *MsgHandler) BatchSyncMessages(
+	ctx context.Context,
+	req *pb.BatchSyncMessagesRequest,
+) (*pb.BatchSyncMessagesResponse, error) {
+	ownerUUID, err := authenticatedUserUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	direction := msgsvc.DirectionForward
-	if req.Direction == pb.PullDirection_PULL_DIRECTION_BACKWARD {
-		direction = msgsvc.DirectionBackward
-	}
-
-	limit := int(req.Limit)
-	if limit <= 0 {
-		limit = 50
-	}
-
-	maxSeq, err := h.msgService.GetMaxSeq(ctx, req.ConvId)
+	resp, err := h.messageReadWorkflow.BatchSyncMessages(ctx, ownerUUID, req)
 	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
+		return nil, err
 	}
-
-	msgs, hasMore, err := h.msgService.PullMessages(ctx, req.ConvId, req.AnchorSeq, direction, limit, clearSeq)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
-	}
-
-	return &pb.PullMessagesResponse{Messages: msgs, HasMore: hasMore, MaxSeq: maxSeq}, nil
+	return resp, nil
 }
 
 // GetMessagesByIds 批量按 ID 查询消息。
@@ -130,15 +128,12 @@ func (h *MsgHandler) GetMessagesByIds(ctx context.Context, req *pb.GetMessagesBy
 	if err != nil {
 		return nil, err
 	}
-	if _, err := h.requireConversationAccess(ctx, ownerUUID, req.ConvId); err != nil {
+
+	resp, err := h.messageReadWorkflow.GetMessagesByIDs(ctx, ownerUUID, req)
+	if err != nil {
 		return nil, err
 	}
-
-	msgs, err := h.msgService.GetMessagesByIds(ctx, req.ConvId, req.MsgIds)
-	if err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
-	}
-	return &pb.GetMessagesByIdsResponse{Messages: msgs}, nil
+	return resp, nil
 }
 
 // GetConversations 获取用户会话列表。
@@ -198,17 +193,6 @@ func authenticatedUserUUID(ctx context.Context) (string, error) {
 		return "", apperr.New(consts.CodeUnauthorized)
 	}
 	return userUUID, nil
-}
-
-func (h *MsgHandler) requireConversationAccess(ctx context.Context, ownerUUID, convID string) (int64, error) {
-	clearSeq, err := h.convService.ResolveReadAccess(ctx, ownerUUID, convID)
-	if err != nil {
-		if errors.Is(err, convsvc.ErrConversationNotFound) {
-			return 0, apperr.New(consts.CodeConversationNotFound)
-		}
-		return 0, apperr.Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
-	}
-	return clearSeq, nil
 }
 
 func mapMsgDomainError(_ context.Context, err error) error {

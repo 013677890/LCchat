@@ -27,32 +27,33 @@ func initializeMsgApp() (*MsgApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	redisConfig := provideRedisConfig()
-	client, err := provideRedisClient(logger, redisConfig)
-	if err != nil {
-		return nil, err
-	}
-	repository := message.NewRepository(db, client)
-	config := provideMsgConfig()
+	repository := conversation.NewRepository(db)
 	mainMsgGroupGRPCAddress := provideMsgGroupGRPCAddress()
 	mainMsgGroupGRPCConn, err := provideMsgGroupGRPCConn(logger, mainMsgGroupGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
-	groupcliClient := provideMsgGroupClient(mainMsgGroupGRPCConn)
-	service := provideMsgService(repository, config, groupcliClient)
-	conversationRepository := conversation.NewRepository(db)
-	conversationService := provideConvService(conversationRepository, groupcliClient)
+	client := provideMsgGroupClient(mainMsgGroupGRPCConn)
+	service := provideConvService(repository, client)
+	redisConfig := provideRedisConfig()
+	redisClient, err := provideRedisClient(logger, redisConfig)
+	if err != nil {
+		return nil, err
+	}
+	messageRepository := message.NewRepository(db, redisClient)
+	config := provideMsgConfig()
+	messageService := provideMsgService(messageRepository, config, client)
+	messageReadWorkflow := usecase.NewMessageReadWorkflow(messageService, service)
 	mainMsgRelationGRPCAddress := provideMsgRelationGRPCAddress()
 	mainMsgRelationGRPCConn, err := provideMsgRelationGRPCConn(logger, mainMsgRelationGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
 	permissionChecker := provideMsgPermissionChecker(mainMsgRelationGRPCConn, mainMsgGroupGRPCConn)
-	sendMessageWorkflow := usecase.NewSendMessageWorkflow(service, conversationService, groupcliClient, permissionChecker)
-	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(service)
-	markReadWorkflow := usecase.NewMarkReadWorkflow(conversationService)
-	msgHandler := handler.NewMsgHandler(service, conversationService, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)
+	sendMessageWorkflow := usecase.NewSendMessageWorkflow(messageService, service, client, permissionChecker)
+	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(messageService)
+	markReadWorkflow := usecase.NewMarkReadWorkflow(service)
+	msgHandler := handler.NewMsgHandler(service, messageReadWorkflow, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)
 	registrationFunc := provideMsgRegistration(msgHandler)
 	mainMsgGRPCAddress := provideMsgGRPCAddress()
 	builtServer, err := provideMsgGRPCServer(registrationFunc, mainMsgGRPCAddress)
@@ -71,7 +72,7 @@ func initializeMsgApp() (*MsgApp, error) {
 		return nil, err
 	}
 	mainMsgAsyncReleaseTimeout := provideAsyncReleaseTimeout(asyncConfig)
-	msgApp, err := NewMsgApp(logger, server, builtServer, listener, mainMsgGRPCShutdownTimeout, pool, mainMsgAsyncReleaseTimeout, db, client)
+	msgApp, err := NewMsgApp(logger, server, builtServer, listener, mainMsgGRPCShutdownTimeout, pool, mainMsgAsyncReleaseTimeout, db, redisClient)
 	if err != nil {
 		return nil, err
 	}
