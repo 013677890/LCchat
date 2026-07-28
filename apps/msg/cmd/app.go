@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/msg/internal/consumer"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
@@ -31,6 +32,7 @@ type MsgApp struct {
 	grpcShutdownTimeout time.Duration
 	asyncPool           *ants.Pool
 	asyncReleaseTimeout time.Duration
+	groupProjector      *consumer.GroupMembershipProjector
 	db                  *gorm.DB
 	redisClient         *goredis.Client
 }
@@ -44,6 +46,7 @@ func NewMsgApp(
 	grpcShutdownTimeout msgGRPCShutdownTimeout,
 	asyncPool *ants.Pool,
 	asyncReleaseTimeout msgAsyncReleaseTimeout,
+	groupProjector *consumer.GroupMembershipProjector,
 	db *gorm.DB,
 	redisClient *goredis.Client,
 ) (*MsgApp, error) {
@@ -53,6 +56,9 @@ func NewMsgApp(
 	if grpcListener == nil {
 		return nil, errors.New("grpc listener 未初始化")
 	}
+	if groupProjector == nil {
+		return nil, errors.New("msg group membership projector 未初始化")
+	}
 	return &MsgApp{
 		logger:              log,
 		metricsServer:       metricsServer,
@@ -61,6 +67,7 @@ func NewMsgApp(
 		grpcShutdownTimeout: time.Duration(grpcShutdownTimeout),
 		asyncPool:           asyncPool,
 		asyncReleaseTimeout: time.Duration(asyncReleaseTimeout),
+		groupProjector:      groupProjector,
 		db:                  db,
 		redisClient:         redisClient,
 	}, nil
@@ -80,6 +87,12 @@ func (a *MsgApp) Run(ctx context.Context) error {
 			}
 		}()
 	}
+
+	go func() {
+		if err := a.groupProjector.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error(ctx, "Msg group membership projector 运行错误", logger.ErrorField("error", err))
+		}
+	}()
 
 	logger.Info(ctx, "Msg 服务启动中",
 		logger.String("grpc_address", a.grpcListener.Addr().String()),
@@ -118,6 +131,11 @@ func (a *MsgApp) Shutdown(ctx context.Context) error {
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("释放 Async 协程池失败: %w", err))
+		}
+	}
+	if a.groupProjector != nil {
+		if err := a.groupProjector.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Msg group membership projector 失败: %w", err))
 		}
 	}
 	if a.redisClient != nil {

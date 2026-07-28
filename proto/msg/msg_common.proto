@@ -75,4 +75,7 @@ message ConversationItem {
   bool pin = 7;
   // updated_at: 会话最后更新时间（unix 毫秒），用于增量同步排序。
   int64 updated_at = 8;
+  // status: 当前用户视角的有效状态，0=可见，1=删除/不可见。
+  // 增量同步会用 1 表示用户主动删除、退群或群已解散；全量同步只返回 0。
+  int32 status = 9;
 }

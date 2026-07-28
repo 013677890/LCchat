@@ -3,14 +3,11 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"time"
 
 	convsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	msgsvc "github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
-	"github.com/013677890/LCchat-Backend/apps/msg/internal/groupcli"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 
@@ -18,14 +15,16 @@ import (
 //
 // 编排步骤：
 //  1. message.Service.CreateMessage → 幂等检查 + ULID + conv_id + seq + message/outbox 同事务落库
-//  2. 幂等命中 → 直接返回首次结果
+//  2. 幂等命中 → 幂等修复固定数量的会话投影后返回首次结果
 //  3. conversation.Service.UpsertForMessage → 更新发送方会话 (isSender=true)
 //  4. P2P → Upsert 接收方会话 (isSender=false) / GROUP → UpsertGroupConv
 //  5. 返回 {msg_id, seq, conv_id, send_time}；CDC 后续把 outbox 投递到 Kafka msg.push
+//
+// 群成员 conversation 行不属于发送编排：group.cache 独立消费组会在建群/加人/退群时
+// 增量投影成员状态。禁止在每条群消息上重新拉取全体成员并做 INSERT IGNORE。
 type SendMessageWorkflow struct {
 	msgService        *msgsvc.Service
 	convService       *convsvc.Service
-	groupCli          *groupcli.Client
 	permissionChecker PermissionChecker
 }
 
@@ -39,13 +38,11 @@ type PermissionChecker interface {
 func NewSendMessageWorkflow(
 	msgService *msgsvc.Service,
 	convService *convsvc.Service,
-	groupCli *groupcli.Client,
 	permissionChecker PermissionChecker,
 ) *SendMessageWorkflow {
 	return &SendMessageWorkflow{
 		msgService:        msgService,
 		convService:       convService,
-		groupCli:          groupCli,
 		permissionChecker: permissionChecker,
 	}
 }
@@ -72,7 +69,8 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, fromUuid, deviceId st
 
 	msg := result.Msg
 
-	// Step 2: 幂等命中 → 直接返回首次创建的结果
+	// Step 2: 幂等命中 → 修复首次请求可能漏写的固定数量会话投影，再返回原结果。
+	// GROUP 只修复发送者个人行与一条共享群行，不恢复逐成员写扩散。
 	if result.IsIdempotent {
 		if err := w.repairIdempotentConversationProjection(ctx, fromUuid, req, msg); err != nil {
 			return nil, fmt.Errorf("SendMessageWorkflow: 修复幂等消息会话投影失败: %w", err)
@@ -108,24 +106,13 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, fromUuid, deviceId st
 			)
 		}
 	} else if req.ConvType == pb.ConvType_CONV_TYPE_GROUP {
-		// 群聊读扩散：只更新群热数据表
+		// 群聊读扩散：每条消息只更新一行共享热数据。
+		// 成员增减由 group.cache projector 按成员事件处理，发送耗时不再随群人数增长。
 		if err := w.convService.UpsertGroupConv(ctx, msg); err != nil {
 			logger.Warn(ctx, "发送消息：更新群会话热数据失败（不阻断）",
 				logger.String("conv_id", msg.ConvId),
 				logger.ErrorField("error", err),
 			)
-		}
-
-		// 同步兜底确保群成员在 conversation 表有行。失败不阻断发送，但会再交给异步补偿重试。
-		if w.groupCli != nil {
-			groupUUID := msg.ConvId
-			if err := w.ensureGroupMembersConv(ctx, groupUUID); err != nil {
-				logger.Warn(ctx, "发送消息：初始化群成员会话行失败，将异步补偿",
-					logger.String("group_uuid", groupUUID),
-					logger.ErrorField("error", err),
-				)
-				w.retryEnsureGroupMembersConv(ctx, groupUUID)
-			}
 		}
 	}
 
@@ -141,54 +128,24 @@ func (w *SendMessageWorkflow) Execute(ctx context.Context, fromUuid, deviceId st
 }
 
 func (w *SendMessageWorkflow) repairIdempotentConversationProjection(ctx context.Context, fromUuid string, req *pb.SendMessageRequest, msg *model.Message) error {
-	if req.ConvType != pb.ConvType_CONV_TYPE_P2P {
-		return nil
-	}
-	if err := w.convService.RepairForMessage(ctx, fromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
-		return fmt.Errorf("修复发送方会话失败: %w", err)
-	}
-	if err := w.convService.RepairForMessage(ctx, req.TargetUuid, msg, req.ConvType, fromUuid, false); err != nil {
-		return fmt.Errorf("修复接收方会话失败: %w", err)
-	}
-	return nil
-}
-
-func (w *SendMessageWorkflow) ensureGroupMembersConv(ctx context.Context, groupUUID string) error {
-	members, err := w.groupCli.GetGroupMemberUUIDs(ctx, groupUUID)
-	if err != nil {
-		return fmt.Errorf("获取群成员失败: %w", err)
-	}
-	if err := w.convService.EnsureGroupMembersConv(ctx, members, groupUUID); err != nil {
-		return fmt.Errorf("批量初始化群成员会话行失败: %w", err)
-	}
-	return nil
-}
-
-func (w *SendMessageWorkflow) retryEnsureGroupMembersConv(ctx context.Context, groupUUID string) {
-	async.RunSafe(ctx, func(taskCtx context.Context) {
-		backoffs := []time.Duration{200 * time.Millisecond, time.Second, 3 * time.Second}
-		var lastErr error
-		for attempt, backoff := range backoffs {
-			select {
-			case <-taskCtx.Done():
-				return
-			case <-time.After(backoff):
-			}
-
-			if err := w.ensureGroupMembersConv(taskCtx, groupUUID); err != nil {
-				lastErr = err
-				logger.Warn(taskCtx, "发送消息：群成员会话行补偿失败，将继续重试",
-					logger.String("group_uuid", groupUUID),
-					logger.Int("attempt", attempt+1),
-					logger.ErrorField("error", err),
-				)
-				continue
-			}
-			return
+	switch req.ConvType {
+	case pb.ConvType_CONV_TYPE_P2P:
+		if err := w.convService.RepairForMessage(ctx, fromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
+			return fmt.Errorf("修复发送方会话失败: %w", err)
 		}
-		logger.Warn(taskCtx, "发送消息：群成员会话行补偿重试耗尽",
-			logger.String("group_uuid", groupUUID),
-			logger.ErrorField("error", lastErr),
-		)
-	}, 10*time.Second)
+		if err := w.convService.RepairForMessage(ctx, req.TargetUuid, msg, req.ConvType, fromUuid, false); err != nil {
+			return fmt.Errorf("修复接收方会话失败: %w", err)
+		}
+		return nil
+	case pb.ConvType_CONV_TYPE_GROUP:
+		if err := w.convService.RepairForMessage(ctx, fromUuid, msg, req.ConvType, req.TargetUuid, true); err != nil {
+			return fmt.Errorf("修复群发送方个人会话失败: %w", err)
+		}
+		if err := w.convService.UpsertGroupConv(ctx, msg); err != nil {
+			return fmt.Errorf("修复群共享会话失败: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("不支持的会话类型: %s", req.ConvType.String())
+	}
 }

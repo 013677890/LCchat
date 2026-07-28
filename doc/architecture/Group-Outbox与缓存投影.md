@@ -1,6 +1,6 @@
 # Group-Outbox 与缓存投影
 
-group 服务使用 MySQL Outbox、Debezium、Kafka 和 Redis projector 维护群缓存。MySQL 是唯一权威事实；Kafka projector 是正常写链路中唯一的 Redis 投影者，读 miss 与周期对账只允许用带数据库版本的完整快照修复缓存。
+group 服务使用 MySQL Outbox、Debezium、Kafka 和 Redis projector 维护群缓存。MySQL 是唯一权威事实；group Kafka projector 是正常写链路中唯一的 Redis 投影者，读 miss 与周期对账只允许用带数据库版本的完整快照修复缓存。同一 `group.cache` 还由 msg 的独立消费组维护成员会话投影，但它只写 msg 自己拥有的表，不参与 Redis 写入。
 
 ## 1. 一致性边界
 
@@ -28,6 +28,10 @@ group 服务使用 MySQL Outbox、Debezium、Kafka 和 Redis projector 维护群
 transforms.outbox.table.expand.json.payload=true
 ```
 
+action 的终态语义由 `pkg/groupevent.ValidateGroupCachePayload` 唯一定义，group Redis
+projector 与 msg membership projector 共用该校验器；禁止消费者各自放宽字段、推导目标
+集合或保留第二套契约。
+
 常见 action：
 
 | 动作 | Action | 主要 payload |
@@ -52,15 +56,35 @@ group gRPC 写请求
        -> outbox_events(event_type=group.cache, entity_id=group_uuid)
   -> Debezium EventRouter(expand JSON)
   -> Kafka group.cache
-  -> group CacheProjector
-       -> 严格解码 + schema/version/action 终态语义校验
-       -> idempotent_events 检查
-       -> 版本感知 Lua 投影 Redis
-       -> idempotent_events 标记
-       -> commit offset
+       ├─ consumer group: group-cache-projector-group
+       │    -> group CacheProjector
+       │    -> 严格校验 + idempotent_events
+       │    -> 版本感知 Lua 投影 Redis
+       │    -> commit offset
+       └─ consumer group: msg-group-membership-projector-group
+            -> msg GroupMembershipProjector
+            -> 严格校验 + 单群连续版本检查
+            -> 事务内增量更新 conversation / group_conversation
+            -> 事务内标记 idempotent_events
+            -> commit offset
 ```
 
-不是 `Kafka -> message-push -> group`。`group.cache` 的消费者就在 group-service 内；message-push 消费的是 `msg.push` / `realtime.push`。
+不是 `Kafka -> message-push -> group`。`group.cache` 由 group-service 和 msg-service 使用不同 consumer group 各自完整消费；message-push 只消费 `msg.push` / `realtime.push`。
+
+### 3.1 msg 成员会话投影
+
+msg 不复制 `group_members` 全表，只保存会话读模型所需字段：
+
+| 事件 | msg 写入 |
+| --- | --- |
+| `group_created` / `member_added` | 激活事件携带的成员 `conversation` 行，记录成员版本和入群时间。 |
+| `member_removed` | 将目标成员写为 Left tombstone，保留个人 read/mute/pin/status。 |
+| `group_dismissed` | 将一条 `group_conversation.group_status` 写为 Dismissed。 |
+| 其他 action | 不改成员集合，只推进单群 `projection_version`。 |
+
+成员变更、版本推进和幂等标记在同一 MySQL 事务内完成。`projection_version <= current`
+视为重复/旧事件；`projection_version != current+1` 视为链路缺口并进入 msg 死信，
+禁止跳过缺口。群消息发送只更新发送方个人行和一条共享群热数据，不再查询全群成员。
 
 ## 4. Redis v2 投影格式
 
@@ -120,6 +144,10 @@ group gRPC 写请求
 | 写幂等记录失败 | 不提交 offset；Redis Lua 和版本栅栏保证重试安全。 |
 | offset 提交失败 | 停留在当前消息，只重试提交；不重复执行 handler，也不重复插入死信。 |
 
+msg projector 使用自己的 `dead_events(source=msg-service:group-membership)` 和
+`idempotent_events(event_type=group.cache:msg-membership-projector)`；它与 group Redis
+projector 的消费进度、死信和幂等命名空间完全独立。
+
 ## 7. 不兼容升级顺序
 
 v2 有意不兼容旧事件和旧 Redis 格式，发布时必须协调切换：
@@ -137,6 +165,7 @@ v2 有意不兼容旧事件和旧 Redis 格式，发布时必须协调切换：
 ## 8. 维护要求
 
 - 新增群写动作时，必须同时补 action、严格 payload 校验、事务内版本领取、projector 分支、乱序测试和本文档。
+- 新 action 若改变成员集合或群可见状态，还必须同步更新 msg membership projector 分支与测试；不改变集合的 action 也必须推进 msg 单群版本。
 - 改动缓存格式时必须提高 schema 版本并采用协调切换，不增加旧格式 fallback。
 - 改动 Redis Key 或 TTL 时同步更新 [Redis-Key 设计](../datas/Redis-Key设计.md)。
 - 改动 Outbox 或 Debezium 路由时同步更新 [Kafka 事件](../datas/Kafka事件.md) 与 [事件驱动与最终一致性](./事件驱动与最终一致性.md)。

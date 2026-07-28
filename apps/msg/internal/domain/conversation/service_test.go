@@ -24,7 +24,6 @@ type mockRepo struct {
 	upsertFn            func(ctx context.Context, conv *model.Conversation, isSender bool) error
 	repairFn            func(ctx context.Context, conv *model.Conversation, isSender bool) error
 	upsertGroupConvFn   func(ctx context.Context, gc *model.GroupConversation) error
-	batchInitFn         func(ctx context.Context, members []string, groupUUID string) error
 	getByOwnerAndConvFn func(ctx context.Context, owner, convId string) (*model.Conversation, error)
 	updateReadSeqFn     func(ctx context.Context, owner, convId string, readSeq int64) error
 	updateReadOutboxFn  func(ctx context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error)
@@ -55,12 +54,6 @@ func (m *mockRepo) RepairForMessage(ctx context.Context, conv *model.Conversatio
 func (m *mockRepo) UpsertGroupConv(ctx context.Context, gc *model.GroupConversation) error {
 	if m.upsertGroupConvFn != nil {
 		return m.upsertGroupConvFn(ctx, gc)
-	}
-	return nil
-}
-func (m *mockRepo) BatchInitGroupMemberConv(ctx context.Context, members []string, groupUUID string) error {
-	if m.batchInitFn != nil {
-		return m.batchInitFn(ctx, members, groupUUID)
 	}
 	return nil
 }
@@ -180,6 +173,35 @@ func TestUpsertForMessage_Receiver(t *testing.T) {
 	assert.Equal(t, int64(0), captured.ReadSeq)
 }
 
+func TestUpsertForMessage_GroupSenderCreatesExplicitActiveMembership(t *testing.T) {
+	var captured *model.Conversation
+	repo := &mockRepo{
+		upsertFn: func(_ context.Context, conv *model.Conversation, isSender bool) error {
+			assert.True(t, isSender)
+			captured = conv
+			return nil
+		},
+	}
+	svc := NewService(repo)
+	now := time.Now()
+	msg := &model.Message{
+		ConvId: "group-1", MsgId: "m1", Seq: 1, FromUuid: "user-1",
+		Content: `{"text":"hello"}`, MsgType: 1, SendTime: now,
+	}
+
+	require.NoError(t, svc.UpsertForMessage(
+		context.Background(),
+		"user-1",
+		msg,
+		pb.ConvType_CONV_TYPE_GROUP,
+		"group-1",
+		true,
+	))
+	require.NotNil(t, captured)
+	assert.Equal(t, model.ConversationMembershipActive, captured.MembershipStatus)
+	assert.Equal(t, int64(0), captured.MembershipVersion)
+}
+
 func TestRepairForMessage_ReceiverUsesDerivedUnreadOnInsert(t *testing.T) {
 	var captured *model.Conversation
 	var capturedIsSender bool
@@ -232,27 +254,6 @@ func TestUpsertGroupConv(t *testing.T) {
 	assert.Equal(t, "m2", captured.LastMsgId)
 }
 
-// ==================== EnsureGroupMembersConv ====================
-
-func TestEnsureGroupMembersConv(t *testing.T) {
-	var capturedMembers []string
-	var capturedGroup string
-
-	repo := &mockRepo{
-		batchInitFn: func(_ context.Context, members []string, groupUUID string) error {
-			capturedMembers = members
-			capturedGroup = groupUUID
-			return nil
-		},
-	}
-	svc := NewService(repo)
-
-	err := svc.EnsureGroupMembersConv(context.Background(), []string{"u1", "u2", "u3"}, "g-100")
-	require.NoError(t, err)
-	assert.Equal(t, []string{"u1", "u2", "u3"}, capturedMembers)
-	assert.Equal(t, "g-100", capturedGroup)
-}
-
 // ==================== ResolveReadAccess ====================
 
 func TestResolveReadAccess_ExistingConversationReturnsClearSeq(t *testing.T) {
@@ -260,7 +261,18 @@ func TestResolveReadAccess_ExistingConversationReturnsClearSeq(t *testing.T) {
 		getByOwnerAndConvFn: func(_ context.Context, owner, convId string) (*model.Conversation, error) {
 			assert.Equal(t, "user1", owner)
 			assert.Equal(t, "group-1", convId)
-			return &model.Conversation{ClearSeq: 12}, nil
+			return &model.Conversation{
+				Type:             int8(pb.ConvType_CONV_TYPE_GROUP),
+				ClearSeq:         12,
+				MembershipStatus: model.ConversationMembershipActive,
+			}, nil
+		},
+		getGroupConvFn: func(_ context.Context, groupUuid string) (*model.GroupConversation, error) {
+			assert.Equal(t, "group-1", groupUuid)
+			return &model.GroupConversation{
+				GroupUuid:   groupUuid,
+				GroupStatus: model.GroupConversationStatusNormal,
+			}, nil
 		},
 	}
 	svc := NewService(repo)
@@ -268,6 +280,37 @@ func TestResolveReadAccess_ExistingConversationReturnsClearSeq(t *testing.T) {
 	clearSeq, err := svc.ResolveReadAccess(context.Background(), "user1", "group-1")
 	require.NoError(t, err)
 	assert.Equal(t, int64(12), clearSeq)
+}
+
+func TestResolveReadAccess_LeftMemberDeniedEvenWhenConversationExists(t *testing.T) {
+	repo := &mockRepo{
+		getByOwnerAndConvFn: func(context.Context, string, string) (*model.Conversation, error) {
+			return &model.Conversation{
+				Type:             int8(pb.ConvType_CONV_TYPE_GROUP),
+				ClearSeq:         12,
+				MembershipStatus: model.ConversationMembershipLeft,
+			}, nil
+		},
+	}
+	svc := NewService(repo)
+
+	_, err := svc.ResolveReadAccess(context.Background(), "user1", "group-1")
+	require.ErrorIs(t, err, ErrConversationNotFound)
+}
+
+func TestResolveReadAccess_GroupWithoutExplicitMembershipStateRejected(t *testing.T) {
+	repo := &mockRepo{
+		getByOwnerAndConvFn: func(context.Context, string, string) (*model.Conversation, error) {
+			return &model.Conversation{
+				Type:             int8(pb.ConvType_CONV_TYPE_GROUP),
+				MembershipStatus: model.ConversationMembershipNotApplicable,
+			}, nil
+		},
+	}
+	svc := NewService(repo)
+
+	_, err := svc.ResolveReadAccess(context.Background(), "user1", "group-1")
+	require.ErrorIs(t, err, ErrInvalidGroupMembershipState)
 }
 
 func TestResolveReadAccess_GroupMemberWithoutConversationAllowed(t *testing.T) {
@@ -318,7 +361,16 @@ func TestResolveReadAccess_GroupNonMemberWithoutConversationDenied(t *testing.T)
 func TestMarkRead_ReturnsUnread(t *testing.T) {
 	var gotEvents []OutboxEvent
 	repo := &mockRepo{
-		updateReadOutboxFn: func(_ context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
+		getByOwnerAndConvFn: func(context.Context, string, string) (*model.Conversation, error) {
+			return &model.Conversation{
+				Type:             int8(pb.ConvType_CONV_TYPE_GROUP),
+				MembershipStatus: model.ConversationMembershipActive,
+			}, nil
+		},
+		getGroupConvFn: func(context.Context, string) (*model.GroupConversation, error) {
+			return &model.GroupConversation{GroupStatus: model.GroupConversationStatusNormal}, nil
+		},
+		upsertGroupReadFn: func(_ context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
 			assert.Equal(t, "user1", owner)
 			assert.Equal(t, "group-1", convId)
 			assert.Equal(t, int64(50), readSeq)
@@ -361,19 +413,12 @@ func TestMarkRead_GroupMemberWithoutConversationUpsertsReadSeq(t *testing.T) {
 	var gotEvents []OutboxEvent
 	var upsertCalled bool
 	repo := &mockRepo{
-		updateReadOutboxFn: func(_ context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
-			assert.Equal(t, "user1", owner)
-			assert.Equal(t, "group-1", convId)
-			assert.Equal(t, int64(50), readSeq)
-			gotEvents = events
-			return nil, ErrConversationNotFound
-		},
 		upsertGroupReadFn: func(_ context.Context, owner, groupUuid string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
 			upsertCalled = true
 			assert.Equal(t, "user1", owner)
 			assert.Equal(t, "group-1", groupUuid)
 			assert.Equal(t, int64(50), readSeq)
-			assert.Equal(t, gotEvents, events)
+			gotEvents = events
 			return &model.Conversation{UnreadCount: 0}, nil
 		},
 	}
@@ -398,13 +443,6 @@ func TestMarkRead_GroupMemberWithoutConversationUpsertsReadSeq(t *testing.T) {
 func TestMarkRead_GroupNonMemberWithoutConversationDenied(t *testing.T) {
 	upsertCalled := false
 	repo := &mockRepo{
-		updateReadOutboxFn: func(_ context.Context, owner, convId string, readSeq int64, events []OutboxEvent) (*model.Conversation, error) {
-			assert.Equal(t, "user1", owner)
-			assert.Equal(t, "group-1", convId)
-			assert.Equal(t, int64(50), readSeq)
-			require.Len(t, events, 1)
-			return nil, ErrConversationNotFound
-		},
 		upsertGroupReadFn: func(context.Context, string, string, int64, []OutboxEvent) (*model.Conversation, error) {
 			upsertCalled = true
 			return &model.Conversation{}, nil
@@ -441,6 +479,21 @@ func assertMarkReadEvent(t *testing.T, event OutboxEvent, convId, pushType, rece
 	require.NoError(t, proto.Unmarshal(pushEvent.GetData(), &notice))
 	assert.Equal(t, convId, notice.GetConvId())
 	assert.Equal(t, readSeq, notice.GetReadSeq())
+}
+
+func TestModelToConvItemCarriesIncrementalDeletionStatus(t *testing.T) {
+	now := time.Now().Truncate(time.Millisecond)
+	item := modelToConvItem(&model.Conversation{
+		ConvId:     "group-1",
+		Type:       int8(pb.ConvType_CONV_TYPE_GROUP),
+		TargetUuid: "group-1",
+		Status:     1,
+		UpdatedAt:  now,
+	})
+
+	require.NotNil(t, item)
+	assert.Equal(t, int32(1), item.Status)
+	assert.Equal(t, now.UnixMilli(), item.UpdatedAt)
 }
 
 // ==================== buildPreviewText ====================

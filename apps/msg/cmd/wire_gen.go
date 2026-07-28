@@ -50,7 +50,7 @@ func initializeMsgApp() (*MsgApp, error) {
 		return nil, err
 	}
 	permissionChecker := provideMsgPermissionChecker(mainMsgRelationGRPCConn, mainMsgGroupGRPCConn)
-	sendMessageWorkflow := usecase.NewSendMessageWorkflow(messageService, service, client, permissionChecker)
+	sendMessageWorkflow := usecase.NewSendMessageWorkflow(messageService, service, permissionChecker)
 	recallMessageWorkflow := usecase.NewRecallMessageWorkflow(messageService)
 	markReadWorkflow := usecase.NewMarkReadWorkflow(service)
 	msgHandler := handler.NewMsgHandler(service, messageReadWorkflow, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)
@@ -72,7 +72,13 @@ func initializeMsgApp() (*MsgApp, error) {
 		return nil, err
 	}
 	mainMsgAsyncReleaseTimeout := provideAsyncReleaseTimeout(asyncConfig)
-	msgApp, err := NewMsgApp(logger, server, builtServer, listener, mainMsgGRPCShutdownTimeout, pool, mainMsgAsyncReleaseTimeout, db, redisClient)
+	kafkaConfig := provideKafkaConfig()
+	groupMembershipProjectorRepository := conversation.NewGroupMembershipProjectorRepository(db)
+	groupMembershipProjector, err := provideMsgGroupMembershipProjector(kafkaConfig, groupMembershipProjectorRepository, db)
+	if err != nil {
+		return nil, err
+	}
+	msgApp, err := NewMsgApp(logger, server, builtServer, listener, mainMsgGRPCShutdownTimeout, pool, mainMsgAsyncReleaseTimeout, groupMembershipProjector, db, redisClient)
 	if err != nil {
 		return nil, err
 	}

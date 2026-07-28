@@ -87,3 +87,47 @@ func TestDecodeGroupCacheRejectsUnknownLegacyFieldsAndTrailingJSON(t *testing.T)
 	_, err := DecodeGroupCache(append(direct, []byte(` {}`)...))
 	assert.Error(t, err)
 }
+
+func TestValidateGroupCachePayloadUsesOneStrictActionContract(t *testing.T) {
+	created := GroupCacheEventPayload{
+		SchemaVersion:     GroupCacheSchemaVersion,
+		ProjectionVersion: 1,
+		EventID:           "event-created",
+		Action:            ActionGroupCreated,
+		GroupUUID:         "group-1",
+		Group: &GroupSnapshot{
+			GroupID:         1,
+			GroupUUID:       "group-1",
+			OwnerUUID:       "owner-1",
+			MemberCount:     2,
+			AddMode:         0,
+			Status:          projectedGroupStatusNormal,
+			UpdatedAtUnixMs: 1710000000123,
+		},
+		Members: []GroupMemberSnapshot{
+			{UserUUID: "owner-1", Role: projectedMemberRoleOwner, JoinedAtUnixMs: 1710000000123},
+			{UserUUID: "member-1", Role: projectedMemberRoleMember, JoinedAtUnixMs: 1710000000123},
+		},
+		UserUUIDs: []string{"owner-1", "member-1"},
+	}
+	require.NoError(t, ValidateGroupCachePayload(created))
+
+	invalidOwner := created
+	invalidOwner.Members = append([]GroupMemberSnapshot(nil), created.Members...)
+	invalidOwner.Members[0].Role = projectedMemberRoleMember
+	require.ErrorIs(t, ValidateGroupCachePayload(invalidOwner), ErrInvalidGroupCachePayload)
+
+	missingExplicitTargets := created
+	missingExplicitTargets.UserUUIDs = nil
+	require.ErrorIs(t, ValidateGroupCachePayload(missingExplicitTargets), ErrInvalidGroupCachePayload)
+
+	addedAsAdmin := created
+	addedAsAdmin.EventID = "event-added"
+	addedAsAdmin.ProjectionVersion = 2
+	addedAsAdmin.Action = ActionMemberAdded
+	addedAsAdmin.Members = []GroupMemberSnapshot{
+		{UserUUID: "member-2", Role: projectedMemberRoleAdmin, JoinedAtUnixMs: 1710000000123},
+	}
+	addedAsAdmin.UserUUIDs = []string{"member-2"}
+	require.ErrorIs(t, ValidateGroupCachePayload(addedAsAdmin), ErrInvalidGroupCachePayload)
+}

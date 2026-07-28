@@ -42,27 +42,3 @@ func (c *Client) QueryMemberRole(ctx context.Context, groupUUID, userUUID string
 	}
 	return int8(resp.GetRole()), nil
 }
-
-// GetGroupMemberUUIDs 获取群组所有有效成员 UUID 列表。
-func (c *Client) GetGroupMemberUUIDs(ctx context.Context, groupUUID string) ([]string, error) {
-	if c == nil || c.groupClient == nil {
-		return nil, fmt.Errorf("group service client 未初始化")
-	}
-	resp, err := c.groupClient.GetGroupMemberIds(ctx, &grouppb.GetGroupMemberIdsRequest{GroupUuid: groupUUID})
-	if err != nil {
-		return nil, fmt.Errorf("调用 GroupService.GetGroupMemberIds 失败: %w", err)
-	}
-	uuids := make([]string, 0, len(resp.GetUserUuids()))
-	seen := make(map[string]struct{}, len(resp.GetUserUuids()))
-	for _, userUUID := range resp.GetUserUuids() {
-		if userUUID == "" {
-			continue
-		}
-		if _, exists := seen[userUUID]; exists {
-			continue
-		}
-		seen[userUUID] = struct{}{}
-		uuids = append(uuids, userUUID)
-	}
-	return uuids, nil
-}

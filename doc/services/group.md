@@ -47,6 +47,9 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 | --- | --- | --- | --- |
 | `group.cache` | 生产 | `group.cache` | 群资料、成员、申请等写操作产生缓存投影事件。 |
 | `group.cache` | 消费 | `group.cache` | 本服务内投影消费者应用 Redis 缓存更新。 |
+
+msg-service 还会用另一个 consumer group 完整消费同一 topic，维护它自己拥有的
+`conversation` 群成员会话投影。group 仍是成员权威源；message-push 不中转该事件。
 常见 `group.cache` action：
 | action | 触发场景 | 影响缓存 |
 | --- | --- | --- |

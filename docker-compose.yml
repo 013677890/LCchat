@@ -330,6 +330,9 @@ services:
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_MSG_PUSH_TOPIC: msg.push
+      KAFKA_GROUP_CACHE_TOPIC: group.cache
+      KAFKA_GROUP_CACHE_GROUP_ID: group-cache-projector-group
+      KAFKA_MSG_GROUP_MEMBERSHIP_GROUP_ID: msg-group-membership-projector-group
       GROUP_GRPC_ADDR: "group:9095"
       RELATION_GRPC_ADDR: "relation:9093"
       MSG_GRPC_ADDR: ":9092"

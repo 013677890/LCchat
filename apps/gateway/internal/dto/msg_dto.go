@@ -435,6 +435,7 @@ type ConversationItemDTO struct {
 	Mute        bool               `json:"mute"`
 	Pin         bool               `json:"pin"`
 	UpdatedAt   int64              `json:"updatedAt"`
+	Status      int32              `json:"status"`
 }
 
 // ==================== 嵌套 DTO 转换函数 ====================
@@ -501,6 +502,7 @@ func ConvertConversationItemFromProto(pb *msgpb.ConversationItem) *ConversationI
 		Mute:        pb.Mute,
 		Pin:         pb.Pin,
 		UpdatedAt:   pb.UpdatedAt,
+		Status:      pb.Status,
 	}
 }
 

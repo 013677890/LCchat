@@ -12,7 +12,7 @@
 | `account.deleted` | `KAFKA_ACCOUNT_DELETED_TOPIC` | auth Outbox | user/relation/group 等 | 账号注销后的下游清理。 |
 | `msg.push` | `KAFKA_MSG_PUSH_TOPIC` | msg Outbox | message-push | 消息下行、撤回、已读同步。 |
 | `realtime.push` | `KAFKA_REALTIME_PUSH_TOPIC` | relation、group | message-push | 好友、关系、群申请和群状态等非消息类实时提醒。 |
-| `group.cache` | `KAFKA_GROUP_CACHE_TOPIC` | group Outbox | group cache projector | 群缓存投影事件。 |
+| `group.cache` | `KAFKA_GROUP_CACHE_TOPIC` | group Outbox | group Redis projector、msg membership projector | 群事实的 Redis 缓存投影与 msg 成员会话投影。 |
 
 ## 2. Kafka 默认配置
 
@@ -28,6 +28,16 @@
 | Consumer `MaxWait` | 500ms | 最大等待。 |
 | Consumer `CommitInterval` | 1s | Offset 提交间隔。 |
 | Consumer `StartOffset` | -1 | 从最新开始消费。 |
+
+`group.cache` 的两个 projector 必须使用不同 consumer group：
+
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `KAFKA_GROUP_CACHE_GROUP_ID` | `group-cache-projector-group` | group-service Redis 投影。 |
+| `KAFKA_MSG_GROUP_MEMBERSHIP_GROUP_ID` | `msg-group-membership-projector-group` | msg-service `conversation` 成员投影。 |
+
+msg membership projector 使用手动提交 consumer；新消费组没有已提交 offset 时从可见的
+最早事件开始，不能从最新 offset 推断当前成员全集。
 
 ## 3. Outbox CDC 路由
 
@@ -89,11 +99,18 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | 项 | 说明 |
 | --- | --- |
 | 生产者 | group 写操作事务内 Outbox。 |
-| 消费者 | group cache projector。 |
+| 消费者 | group Redis cache projector；msg group membership projector。 |
 | Key | `group_uuid`。 |
-| 语义 | 维护群资料、成员、用户群列表、入群申请等 Redis 投影。 |
+| 语义 | 分别维护群 Redis 缓存，以及 msg 的成员会话/群状态投影。 |
 
 基础契约只接受 `schema_version=2` 且 `projection_version>0`。版本由 group 写事务递增 `groups.cache_version` 后生成；JSON 字符串包装、`payload/after/data` 包装、未知字段、缺省版本或未知 schema 均按永久错误首轮写入 `dead_events`，不做兼容解析。
+
+两个 consumer group 都会收到每一条事件，不能配置成相同 group ID：
+
+- group projector 把最终群快照和成员/申请变化用版本 Lua 投影到 Redis；
+- msg projector 在一个 MySQL 事务内检查 `idempotent_events` 和单群连续版本，然后增量更新 `conversation.membership_*`、`group_conversation.group_status/projection_version`；
+- message-push 不消费 `group.cache`，也不负责把它转发给 msg 或 group；
+- msg 要求每个群从 `version=1/group_created` 开始，后续 `projection_version` 必须等于 `current+1`；缺首事件、版本跳号、重复建群或解散后继续变更都会被拒绝，原事件进入 `dead_events(source=msg-service:group-membership)`。
 
 常见 action：
 
@@ -178,6 +195,8 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | Outbox 重复投递 | 消费者通过 `idempotent_events` 去重。 |
 | payload 解析失败 | 视为永久错误，记录并跳过，避免毒消息阻塞。 |
 | Redis 临时失败 | 返回可重试错误，由消费者重试。 |
+| msg 成员投影 DB 临时失败 | 不提交 offset，在预算内原地重试。 |
+| msg 单群投影版本缺口 | 视为永久错误并写死信，禁止跨过缺口继续构造不完整成员视图。 |
 | Connect gRPC 临时失败 | message-push 本地有限重试，最终失败由客户端补拉自愈。 |
 | msg outbox 写入失败 | 与业务事务一起回滚，请求返回失败。 |
 | CDC/Kafka 投递失败 | 不在 msg 请求内等待，由 Debezium/Kafka Connect 重试；客户端可 Pull 自愈。 |

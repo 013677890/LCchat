@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/msg/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/domain/message"
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/groupcli"
@@ -45,6 +46,7 @@ const (
 func provideLoggerConfig() config.LoggerConfig { return config.DefaultLoggerConfig() }
 func provideAsyncConfig() config.AsyncConfig   { return config.DefaultAsyncConfig() }
 func provideMySQLConfig() config.MySQLConfig   { return config.DefaultMySQLConfig() }
+func provideKafkaConfig() config.KafkaConfig   { return config.DefaultKafkaConfig() }
 
 func provideRedisConfig() config.RedisConfig {
 	cfg := config.DefaultRedisConfig()
@@ -135,7 +137,38 @@ func provideMsgService(repo message.Repository, cfg message.Config, gc *groupcli
 	return svc
 }
 
-// provideConvService 创建会话领域服务，并注入群成员查询器（用于群已读/群历史访问回退）。
+// provideMsgGroupMembershipProjector 为 msg 创建独立的 group.cache 消费组。
+// GroupCacheGroupID 属于 group-service 的 Redis projector，二者必须使用不同 group ID，
+// 否则 Kafka 会把同一事件负载均衡给两个服务，造成任一投影随机漏事件。
+func provideMsgGroupMembershipProjector(
+	cfg config.KafkaConfig,
+	repo conversation.GroupMembershipProjectorRepository,
+	db *gorm.DB,
+) (*consumer.GroupMembershipProjector, error) {
+	switch {
+	case len(cfg.Brokers) == 0:
+		return nil, fmt.Errorf("msg group membership projector 缺少 Kafka brokers")
+	case cfg.GroupCacheTopic == "":
+		return nil, fmt.Errorf("msg group membership projector 缺少 group.cache topic")
+	case cfg.MsgGroupMembershipGroupID == "":
+		return nil, fmt.Errorf("msg group membership projector 缺少独立 consumer group id")
+	case cfg.MsgGroupMembershipGroupID == cfg.GroupCacheGroupID:
+		return nil, fmt.Errorf(
+			"msg group membership projector consumer group id 不能与 group cache projector 相同: %s",
+			cfg.MsgGroupMembershipGroupID,
+		)
+	}
+	return consumer.NewGroupMembershipProjector(
+		cfg.Brokers,
+		cfg.GroupCacheTopic,
+		cfg.MsgGroupMembershipGroupID,
+		repo,
+		db,
+	), nil
+}
+
+// provideConvService 创建会话领域服务，并注入群成员权威点查器。
+// 点查只覆盖 group.cache 尚未投影到本地的短暂可见性窗口。
 func provideConvService(repo conversation.Repository, gc *groupcli.Client) *conversation.Service {
 	svc := conversation.NewService(repo)
 	if gc != nil {
@@ -201,6 +234,7 @@ var msgInfraProviderSet = wire.NewSet(
 	provideLoggerConfig,
 	provideAsyncConfig,
 	provideMySQLConfig,
+	provideKafkaConfig,
 	provideRedisConfig,
 	provideLogger,
 	provideAsyncPool,
@@ -215,6 +249,7 @@ var msgInfraProviderSet = wire.NewSet(
 	provideMsgGroupClient,
 	provideMsgPermissionChecker,
 	provideMsgService,
+	provideMsgGroupMembershipProjector,
 	provideMsgGRPCAddress,
 	provideMsgMetricsAddress,
 	provideMsgGRPCShutdownTimeout,
@@ -227,6 +262,7 @@ var msgInfraProviderSet = wire.NewSet(
 var msgDomainProviderSet = wire.NewSet(
 	message.NewRepository,
 	conversation.NewRepository,
+	conversation.NewGroupMembershipProjectorRepository,
 	provideConvService,
 	usecase.NewMessageReadWorkflow,
 	usecase.NewSendMessageWorkflow,

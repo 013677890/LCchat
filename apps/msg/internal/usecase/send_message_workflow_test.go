@@ -63,8 +63,9 @@ type workflowRepairCall struct {
 }
 
 type workflowConversationRepo struct {
-	upsertCalls int
-	repairs     []workflowRepairCall
+	upsertCalls  int
+	repairs      []workflowRepairCall
+	groupUpserts []*model.GroupConversation
 }
 
 func (r *workflowConversationRepo) GetByOwnerAndConvId(context.Context, string, string) (*model.Conversation, error) {
@@ -102,10 +103,8 @@ func (r *workflowConversationRepo) Delete(context.Context, string, string) error
 func (r *workflowConversationRepo) UpdateSettings(context.Context, string, string, *bool, *bool) error {
 	return nil
 }
-func (r *workflowConversationRepo) BatchInitGroupMemberConv(context.Context, []string, string) error {
-	return nil
-}
-func (r *workflowConversationRepo) UpsertGroupConv(context.Context, *model.GroupConversation) error {
+func (r *workflowConversationRepo) UpsertGroupConv(_ context.Context, conv *model.GroupConversation) error {
+	r.groupUpserts = append(r.groupUpserts, conv)
 	return nil
 }
 func (r *workflowConversationRepo) GetGroupConv(context.Context, string) (*model.GroupConversation, error) {
@@ -128,7 +127,7 @@ func TestSendMessageWorkflowIdempotentHitRepairsP2PConversationProjection(t *tes
 	msgService := msgsvc.NewService(&workflowMessageRepo{cached: cached})
 	convRepo := &workflowConversationRepo{}
 	convService := convsvc.NewService(convRepo)
-	workflow := NewSendMessageWorkflow(msgService, convService, nil, nil)
+	workflow := NewSendMessageWorkflow(msgService, convService, nil)
 
 	resp, err := workflow.Execute(context.Background(), "a", "dev-1", &pb.SendMessageRequest{
 		TargetUuid:  "b",
@@ -156,4 +155,45 @@ func TestSendMessageWorkflowIdempotentHitRepairsP2PConversationProjection(t *tes
 	assert.False(t, convRepo.repairs[1].isSender)
 	assert.Equal(t, int64(9), convRepo.repairs[1].conv.MaxSeq)
 	assert.Equal(t, 9, convRepo.repairs[1].conv.UnreadCount)
+}
+
+func TestSendMessageWorkflowIdempotentHitRepairsGroupProjectionInConstantWrites(t *testing.T) {
+	now := time.Now()
+	cached := &model.Message{
+		ConvId:      "group-1",
+		Seq:         9,
+		MsgId:       "msg-9",
+		ClientMsgId: "client-9",
+		FromUuid:    "sender-1",
+		DeviceId:    "dev-1",
+		MsgType:     int16(model.MsgTypeText),
+		Content:     `{"text":"hello group"}`,
+		SendTime:    now,
+	}
+	msgService := msgsvc.NewService(&workflowMessageRepo{cached: cached})
+	convRepo := &workflowConversationRepo{}
+	convService := convsvc.NewService(convRepo)
+	workflow := NewSendMessageWorkflow(msgService, convService, nil)
+
+	resp, err := workflow.Execute(context.Background(), "sender-1", "dev-1", &pb.SendMessageRequest{
+		TargetUuid:  "group-1",
+		ConvType:    pb.ConvType_CONV_TYPE_GROUP,
+		ClientMsgId: "client-9",
+		MsgType:     int32(model.MsgTypeText),
+		Content:     `{"text":"hello group"}`,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "msg-9", resp.GetMsgId())
+
+	// 无论群成员数量多大，幂等修复始终只有“一条发送者个人行 + 一条共享群行”。
+	require.Len(t, convRepo.repairs, 1)
+	assert.Equal(t, "sender-1", convRepo.repairs[0].owner)
+	assert.Equal(t, "group-1", convRepo.repairs[0].target)
+	assert.True(t, convRepo.repairs[0].isSender)
+	assert.Equal(t, model.ConversationMembershipActive, convRepo.repairs[0].conv.MembershipStatus)
+
+	require.Len(t, convRepo.groupUpserts, 1)
+	assert.Equal(t, "group-1", convRepo.groupUpserts[0].GroupUuid)
+	assert.Equal(t, int64(9), convRepo.groupUpserts[0].MaxSeq)
 }

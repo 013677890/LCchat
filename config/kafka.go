@@ -20,8 +20,9 @@ type KafkaConfig struct {
 	MsgPushTopic               string `json:"msgPushTopic" yaml:"msgPushTopic"`                             // 消息推送 topic（msg-service → Push-Job）
 	RealtimePushTopic          string `json:"realtimePushTopic" yaml:"realtimePushTopic"`                   // 非消息类实时提醒 topic
 	RealtimePushGroupID        string `json:"realtimePushGroupId" yaml:"realtimePushGroupId"`               // 非消息类实时提醒消费者组 ID
-	GroupCacheTopic            string `json:"groupCacheTopic" yaml:"groupCacheTopic"`                       // 群缓存投影 topic
+	GroupCacheTopic            string `json:"groupCacheTopic" yaml:"groupCacheTopic"`                       // 群事实投影 topic（group Redis 与 msg 会话投影分别消费）
 	GroupCacheGroupID          string `json:"groupCacheGroupId" yaml:"groupCacheGroupId"`                   // 群缓存投影消费者组 ID
+	MsgGroupMembershipGroupID  string `json:"msgGroupMembershipGroupId" yaml:"msgGroupMembershipGroupId"`   // msg 群成员会话投影消费者组 ID
 }
 
 // KafkaProducerConfig Kafka 生产者配置
@@ -63,6 +64,7 @@ func DefaultKafkaConfig() KafkaConfig {
 		RealtimePushGroupID:        getenvString("KAFKA_REALTIME_PUSH_GROUP_ID", "realtime-push-consumer-group"),
 		GroupCacheTopic:            getenvString("KAFKA_GROUP_CACHE_TOPIC", "group.cache"),
 		GroupCacheGroupID:          getenvString("KAFKA_GROUP_CACHE_GROUP_ID", "group-cache-projector-group"),
+		MsgGroupMembershipGroupID:  getenvString("KAFKA_MSG_GROUP_MEMBERSHIP_GROUP_ID", "msg-group-membership-projector-group"),
 
 		ProducerConfig: KafkaProducerConfig{
 			BatchSize:    100,

@@ -56,16 +56,19 @@ python scripts/gateway_blackbox_test.py   # 黑盒接口测试（需服务已启
 - 业务服务在**同一 MySQL 事务**内写业务表 + `outbox_events`（`pkg/outbox.InsertEvent`），Debezium 监听 binlog，EventRouter 按 `event_type` 字段路由到同名 Kafka Topic。数据库侧不维护 pending/failed 状态机，无进程内分发循环。
 - CDC Outbox 事件：`user_created`、`account.deleted`（auth）、`group.cache`（group）、`msg.push`（msg）。直接 Producer 事件：`profile_display_changed`（user）、`realtime.push`（relation/group）、`redis-retry-queue`。
 - 消费端幂等：`idempotent_events` 表，唯一键 `(event_type, event_id)`，用 `pkg/outbox.CheckIdempotent/MarkIdempotent`。
+- `group.cache` 有两个独立消费组：group-service 投影 Redis；msg-service 按单群连续版本投影 `conversation.membership_*` 和 `group_conversation.group_status`。两者 group ID 禁止相同，message-push 不参与该链路。
 - 毒消息处理：手动提交消费者在有界重试耗尽后旁路到 `dead_events` 表并提交 offset，解除队头阻塞（`pkg/outbox/deadletter.go`、`pkg/kafka/deadletter.go`）。
 - connector 由 compose 的 `cdc-init` 服务跑 `scripts/cdc/register_outbox_connector.sh` 注册。
 
 ### 消息发送与下行推送链路
 
-发送：gateway → msg `SendMessage` → usecase 调 relation/group 校验权限 → message domain 幂等检查（三元组 `from_uuid+device_id+client_msg_id`，Redis TTL 10 分钟 + DB 唯一约束）→ Redis `INCR msg:seq:{conv_id}` 分配 seq → 同事务写 `message` + outbox(`msg.push`) → conversation domain 更新会话（单聊写扩散、群聊更新 `group_conversation` 热数据）。
+发送：gateway → msg `SendMessage` → usecase 调 relation/group 校验权限 → message domain 幂等检查（三元组 `from_uuid+device_id+client_msg_id`，Redis TTL 10 分钟 + DB 唯一约束）→ Redis `INCR msg:seq:{conv_id}` 分配 seq → 同事务写 `message` + outbox(`msg.push`) → conversation domain 更新会话（单聊写扩散；群聊只更新发送方个人行和一条 `group_conversation` 热数据，不扫描全体成员；共享热数据按 seq 整组单调推进）。幂等命中会修复固定数量的相关会话派生行，不恢复群成员写扩散。
+
+群成员会话：group 写事务 → outbox(`group.cache`, schema v2, 单群严格递增版本) → Debezium → Kafka → msg 独立 `GroupMembershipProjector` → 同事务更新成员 `conversation.membership_*` / 共享 `group_conversation`、推进版本并写消费幂等。GROUP 行只允许 Active/Left，`membership_status=0` 不作为旧数据兼容态；当前空库直接使用新基线，无双读、回填或旧结构 fallback。
 
 下行：Debezium → Kafka `msg.push` → message-push 消费（P2P 查接收方路由；群聊调 group 拿成员再扩散；多端同步查发送方其他设备）→ 读取 Redis 路由 `user:routing:{user_uuid}`（Hash, field=device_id, value=`connectAddr|lastActiveMs`, TTL 180s）并按 connect 节点分组 → 节点间有界并发（`MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY`，未配置时默认 32，显式配置非法则启动失败），节点内按用户串行处理：完整用户目标必须调用一次 `PushToUser`，需要排除当前设备的目标逐设备调用 `PushToDevice`；两种 RPC 都是 `EventHandler` 的强制发送契约，不提供旧单设备 sender 的降级路径 → connect 写 WebSocket。
 
-非阻断原则：**消息落库成功即发送成功**，后续会话更新/Kafka 投递/推送失败只 `logger.Warn` 不回滚；客户端对单会话用 `PullMessages`、登录恢复/重连对多个已有位点的会话用 `BatchSyncMessages` 自愈。connect 是纯管道：不消费 Kafka、不做业务判断。
+非阻断原则：**`message` 与 `msg.push` Outbox 同事务提交成功即发送成功**；后续会话派生更新失败只 `logger.Warn`，事务提交后的 CDC/Kafka/实时推送失败也不回滚消息。客户端对单会话用 `PullMessages`、登录恢复/重连对多个已有位点的会话用 `BatchSyncMessages` 自愈。connect 是纯管道：不消费 Kafka、不做业务判断。
 
 ### ID 体系（易混淆，注意区分）
 

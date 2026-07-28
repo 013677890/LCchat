@@ -219,14 +219,22 @@ CREATE TABLE IF NOT EXISTS `conversation` (
   `unread_count` BIGINT NOT NULL DEFAULT 0 COMMENT '未读数',
   `mute` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '免打扰',
   `pin` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '置顶',
-  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0正常 1关闭/删除',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '用户个人会话状态:0正常 1关闭/删除',
+  `membership_status` TINYINT NOT NULL DEFAULT 0 COMMENT '群成员投影状态:0不适用(P2P) 1有效成员 2已退出',
+  `membership_version` BIGINT NOT NULL DEFAULT 0 COMMENT '最后生效的group投影版本',
+  `membership_joined_at` DATETIME(3) DEFAULT NULL COMMENT '本次有效成员关系的入群时间',
+  `membership_left_at` DATETIME(3) DEFAULT NULL COMMENT '成员退出或被移除时间',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` DATETIME(3) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uidx_owner_conv` (`owner_uuid`, `target_uuid`),
   KEY `idx_owner_status_update` (`owner_uuid`, `status`, `updated_at`),
-  KEY `idx_conversation_deleted_at` (`deleted_at`)
+  KEY `idx_owner_type_membership` (`owner_uuid`, `type`, `membership_status`, `status`),
+  KEY `idx_conversation_deleted_at` (`deleted_at`),
+  CONSTRAINT `chk_conversation_membership_status`
+    CHECK ((`type` = 1 AND `membership_status` = 0) OR (`type` = 2 AND `membership_status` IN (1, 2))),
+  CONSTRAINT `chk_conversation_membership_version` CHECK (`membership_version` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话元数据';
 CREATE TABLE IF NOT EXISTS `message` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增id',
@@ -257,10 +265,14 @@ CREATE TABLE IF NOT EXISTS `group_conversation` (
   `max_seq` BIGINT NOT NULL DEFAULT 0 COMMENT '群消息当前最大seq',
   `last_msg_id` CHAR(64) DEFAULT NULL COMMENT '最后一条消息的ID(ULID)',
   `last_msg_preview` VARCHAR(255) DEFAULT NULL COMMENT '最后消息预览',
-  `last_msg_at` DATETIME(3) DEFAULT NULL COMMENT '最后消息时间(做活跃度排序)',
+  `last_msg_at` DATETIME(3) DEFAULT NULL COMMENT '群首次可见或最后消息时间(做活跃度排序)',
+  `group_status` TINYINT NOT NULL DEFAULT 0 COMMENT 'group-service群状态:0正常 1禁用 2解散',
+  `projection_version` BIGINT NOT NULL DEFAULT 0 COMMENT '最后连续消费的group.cache投影版本',
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '状态最后变更时间',
   PRIMARY KEY (`group_uuid`),
-  KEY `idx_last_msg_at` (`last_msg_at`)
+  KEY `idx_last_msg_at` (`last_msg_at`),
+  CONSTRAINT `chk_group_conversation_status` CHECK (`group_status` IN (0, 1, 2)),
+  CONSTRAINT `chk_group_conversation_projection_version` CHECK (`projection_version` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群会话状态(热数据,每条群消息更新一次)';
 FLUSH PRIVILEGES;
 SET FOREIGN_KEY_CHECKS = 1;

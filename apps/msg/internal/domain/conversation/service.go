@@ -34,7 +34,7 @@ type lastMsgPreviewPayload struct {
 //   - ❌ 不直接写 Kafka
 type Service struct {
 	repo    Repository
-	groupQr GroupMembershipQuerier // 可选；nil 时群会话回退到“依赖本地会话行”的旧行为
+	groupQr GroupMembershipQuerier
 }
 
 // GroupMembershipQuerier 查询用户在群内的成员资格/角色。
@@ -50,7 +50,9 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// SetGroupMembershipQuerier 注入群成员查询实现（可选依赖，启动阶段调用一次）。
+// SetGroupMembershipQuerier 注入群成员权威点查实现（启动阶段调用一次）。
+// Kafka 投影尚未为新成员建行时，读取链路只允许通过该接口确认身份；未注入时明确失败，
+// 禁止仅凭一条不完整的本地 conversation 行放行。
 func (s *Service) SetGroupMembershipQuerier(q GroupMembershipQuerier) {
 	s.groupQr = q
 }
@@ -131,6 +133,12 @@ func buildMessageConversation(
 		MaxSeq:      msg.Seq,
 		Status:      0, // 新消息会重新激活已删除的会话
 	}
+	if convType == pb.ConvType_CONV_TYPE_GROUP {
+		// 发送权限已经在 workflow Step 0 由 group-service 权威确认。
+		// Kafka member_added/group_created 事件随后会用正 projection_version 覆盖 version=0；
+		// 这里显式写 Active，禁止创建 membership_status=0 的非法 GROUP 行。
+		conv.MembershipStatus = model.ConversationMembershipActive
+	}
 
 	if isSender {
 		conv.ReadSeq = msg.Seq
@@ -145,7 +153,7 @@ func buildMessageConversation(
 
 // UpsertGroupConv 发群消息时更新群会话热数据
 //
-// 每发一条群消息 UPDATE 一次 max_seq + last_msg_*
+// 每发一条群消息只 UPDATE 一行 max_seq + last_msg_*；仓储按 seq 整组单调推进。
 func (s *Service) UpsertGroupConv(ctx context.Context, msg *model.Message) error {
 	preview := buildLastMsgPreview(msg)
 	sendTime := msg.SendTime
@@ -164,12 +172,6 @@ func (s *Service) UpsertGroupConv(ctx context.Context, msg *model.Message) error
 	return nil
 }
 
-// EnsureGroupMembersConv 确保群成员在 conversation 表有行（INSERT IGNORE）。
-// 首次发群消息时由 workflow 异步调用，后续消息因行已存在会被跳过。
-func (s *Service) EnsureGroupMembersConv(ctx context.Context, memberUUIDs []string, groupUUID string) error {
-	return s.repo.BatchInitGroupMemberConv(ctx, memberUUIDs, groupUUID)
-}
-
 // GetByOwnerAndConvId 获取单个个人会话记录
 func (s *Service) GetByOwnerAndConvId(ctx context.Context, ownerUuid, convId string) (*model.Conversation, error) {
 	return s.repo.GetByOwnerAndConvId(ctx, ownerUuid, convId)
@@ -178,13 +180,25 @@ func (s *Service) GetByOwnerAndConvId(ctx context.Context, ownerUuid, convId str
 // ResolveReadAccess 校验用户对会话的读取权限并返回 clear_seq（拉取历史时用于过滤已删除位点）。
 //
 // 规则：
-//   - 本地有会话行：返回该行 clear_seq（尊重用户删除位点）。
-//   - 群会话且本地无行：回退校验群成员资格；是成员则放行，clear_seq=0（从未删除过）。
-//   - 其余（单聊无行 / 非群成员 / 未注入查询器）：返回 ErrConversationNotFound。
+//   - P2P：必须存在当前用户的本地会话行。
+//   - GROUP Active：同时要求成员投影有效且群共享状态为 normal。
+//   - GROUP Left/群已解散：直接拒绝，conversation 行存在也不能作为权限凭证。
+//   - GROUP 投影尚未建行：向 group-service 做权威单成员点查；确认有效后临时放行，
+//     clear_seq=0，随后 group.cache 消费者会补齐正式成员投影。
 //
-// 这样群成员在 conversation 行尚未异步建好（发送竞态、新入群成员）时仍可拉取群历史，
-// 而不是被本地行的缺失误判为无权访问。
+// 本地投影解决正常读取的性能与退群后的长期权限收敛；缺行点查只处理 Kafka 可见性窗口。
 func (s *Service) ResolveReadAccess(ctx context.Context, ownerUuid, convId string) (int64, error) {
+	if isGroupConv(convId) {
+		conv, err := s.resolveGroupAccess(ctx, ownerUuid, convId)
+		if err != nil {
+			return 0, err
+		}
+		if conv == nil {
+			return 0, nil
+		}
+		return conv.ClearSeq, nil
+	}
+
 	conv, err := s.repo.GetByOwnerAndConvId(ctx, ownerUuid, convId)
 	if err == nil {
 		return conv.ClearSeq, nil
@@ -192,16 +206,55 @@ func (s *Service) ResolveReadAccess(ctx context.Context, ownerUuid, convId strin
 	if !errors.Is(err, ErrConversationNotFound) {
 		return 0, err
 	}
-	if isGroupConv(convId) && s.groupQr != nil {
-		role, qErr := s.groupQr.QueryMemberRole(ctx, convId, ownerUuid)
-		if qErr != nil {
-			return 0, qErr
-		}
-		if role >= 0 {
-			return 0, nil // 是群成员，从未删除过本地会话 → clear_seq=0
-		}
-	}
 	return 0, ErrConversationNotFound
+}
+
+// resolveGroupAccess 使用本地成员投影处理稳定态，仅在 conversation 尚未投影时调用
+// group-service 点查。这避免正常消息补拉产生额外 RPC，同时不再永久信任退群用户的旧行。
+func (s *Service) resolveGroupAccess(
+	ctx context.Context,
+	ownerUuid, groupUuid string,
+) (*model.Conversation, error) {
+	conv, err := s.repo.GetByOwnerAndConvId(ctx, ownerUuid, groupUuid)
+	if err == nil {
+		if conv.Type != int8(pb.ConvType_CONV_TYPE_GROUP) {
+			return nil, ErrInvalidGroupMembershipState
+		}
+		switch conv.MembershipStatus {
+		case model.ConversationMembershipLeft:
+			return nil, ErrConversationNotFound
+		case model.ConversationMembershipActive:
+			groupConv, groupErr := s.repo.GetGroupConv(ctx, groupUuid)
+			if groupErr == nil {
+				if groupConv.GroupStatus != model.GroupConversationStatusNormal {
+					return nil, ErrConversationNotFound
+				}
+				return conv, nil
+			}
+			if !errors.Is(groupErr, ErrConversationNotFound) {
+				return nil, groupErr
+			}
+			// group.cache 与 msg.push 存在短暂竞态时可能缺共享群行；此时继续走下面的
+			// 权威点查，不从不完整本地状态猜测权限。
+		default:
+			return nil, ErrInvalidGroupMembershipState
+		}
+	} else if !errors.Is(err, ErrConversationNotFound) {
+		return nil, err
+	}
+
+	if s.groupQr == nil {
+		return nil, ErrGroupMembershipQuerierUnavailable
+	}
+	role, err := s.groupQr.QueryMemberRole(ctx, groupUuid, ownerUuid)
+	if err != nil {
+		return nil, err
+	}
+	if role < 0 {
+		return nil, ErrConversationNotFound
+	}
+	// 返回 nil 表示权威服务已放行，但个人会话投影仍在 Kafka 可见性窗口内。
+	return nil, nil
 }
 
 // ==================== GetConversations ====================
@@ -291,7 +344,11 @@ func (s *Service) GetConversations(ctx context.Context, ownerUuid string, update
 	for _, conv := range merged {
 		// 群聊未读数动态计算（此时 conv.MaxSeq 已经是真实的群 MaxSeq）
 		if conv.Type == int8(pb.ConvType_CONV_TYPE_GROUP) {
-			unread := int(conv.MaxSeq - conv.ReadSeq)
+			readFloor := conv.ReadSeq
+			if conv.ClearSeq > readFloor {
+				readFloor = conv.ClearSeq
+			}
+			unread := int(conv.MaxSeq - readFloor)
 			if unread < 0 {
 				unread = 0
 			}
@@ -313,43 +370,39 @@ func (s *Service) GetConversations(ctx context.Context, ownerUuid string, update
 // DB 层面 read_seq = GREATEST(read_seq, readSeq)，并与已读同步事件同事务写入 outbox。
 // 返回最新计算得到的 unread_count。
 //
-// 群会话特殊处理：成员的 conversation 行由发送链路异步补建，可能尚不存在。
-// 此时若已注入群成员查询器，则校验成员资格后按需 upsert 建行写入已读位点，
-// 避免群成员在行建好前标记已读直接失败。
+// 群会话先通过显式成员投影/权威点查完成权限裁决，再统一按需 upsert 已读位点；
+// 不允许先更新一条可能属于已退群用户的旧 conversation 行。
 func (s *Service) MarkRead(ctx context.Context, ownerUuid, convId string, readSeq int64) (int32, error) {
 	events, err := buildMarkReadOutboxEvents(ctx, ownerUuid, convId, readSeq)
 	if err != nil {
 		return 0, err
 	}
-	conv, err := s.repo.UpdateReadSeqWithOutbox(ctx, ownerUuid, convId, readSeq, events)
-	if err == nil {
-		return int32(conv.UnreadCount), nil
-	}
 
-	// 群会话本地无行：校验成员资格后按需建行写入已读位点。
-	if errors.Is(err, ErrConversationNotFound) && isGroupConv(convId) && s.groupQr != nil {
-		role, qErr := s.groupQr.QueryMemberRole(ctx, convId, ownerUuid)
-		if qErr != nil {
-			return 0, qErr
+	if isGroupConv(convId) {
+		if _, err := s.resolveGroupAccess(ctx, ownerUuid, convId); err != nil {
+			return 0, err
 		}
-		if role < 0 {
-			return 0, ErrConversationNotFound // 非群成员，不建行
-		}
-		conv, err = s.repo.UpsertGroupReadSeqWithOutbox(ctx, ownerUuid, convId, readSeq, events)
+		conv, err := s.repo.UpsertGroupReadSeqWithOutbox(ctx, ownerUuid, convId, readSeq, events)
 		if err != nil {
 			return 0, err
 		}
 		return int32(conv.UnreadCount), nil
 	}
-	return 0, err
+
+	conv, err := s.repo.UpdateReadSeqWithOutbox(ctx, ownerUuid, convId, readSeq, events)
+	if err != nil {
+		return 0, err
+	}
+	return int32(conv.UnreadCount), nil
 }
 
 // ==================== DeleteConversation ====================
 
 // DeleteConversation 逻辑删除会话
 //
-// status=1 + clear_seq=max_seq + read_seq=max_seq + unread=0
-// 收到新消息时 Upsert 自动 status=0 重新激活
+// status=1 + clear_seq=权威 max_seq + read_seq=权威 max_seq + unread=0。
+// P2P 收到新消息时由 Upsert 重新激活；GROUP 通过共享 max_seq>clear_seq 派生重新可见，
+// 不给全体成员写扩散。
 func (s *Service) DeleteConversation(ctx context.Context, ownerUuid, convId string) error {
 	if err := s.repo.Delete(ctx, ownerUuid, convId); err != nil {
 		return err
@@ -426,6 +479,7 @@ func modelToConvItem(conv *model.Conversation) *pb.ConversationItem {
 		Mute:        conv.Mute,
 		Pin:         conv.Pin,
 		UpdatedAt:   conv.UpdatedAt.UnixMilli(),
+		Status:      int32(conv.Status),
 	}
 
 	if conv.LastMsgId != "" {

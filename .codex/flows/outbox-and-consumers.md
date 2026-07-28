@@ -9,18 +9,21 @@ dead-letter behavior, or idempotency.
 - Profile display changed: `profile_display_changed`.
 - Account deleted: `account.deleted`.
 - Message push: `msg.push`.
-- Group cache projector: `group.cache`.
+- Group projections: `group.cache` is consumed independently by the group Redis
+  projector and the msg membership projector.
 
 ## Outbox Contract
 - Business transactions insert `outbox_events`.
 - Debezium/Kafka Connect routes records by `event_type`.
 - Event key is `entity_id`; for group cache this is `group_uuid`.
-- Consumers decode raw JSON, JSON strings, and Debezium-like wrappers under
-  `payload`, `after`, or `data`; recursive unwrap stops after depth 4.
+- Current Outbox JSON events are delivered as a top-level JSON object via
+  `table.expand.json.payload=true`. `group.cache` and `msg.push` deliberately
+  reject JSON strings, Debezium-style wrappers, unknown fields, and old schemas.
 
 ## Manual Consumer Contract
 - `pkg/kafka.NewManualCommitConsumer` commits offset only after handler success.
-- Decode/invalid-payload errors usually log and return nil to skip poison payloads.
+- Decode/invalid-payload errors use `kafka.Permanent`; with a configured sink they
+  are written to `dead_events` before the offset is committed.
 - Processing errors return non-nil so the same message is retried.
 - A configured `DeadLetterSink` lets the consumer park a message after retry budget
   exhaustion and then commit offset.
@@ -36,6 +39,7 @@ dead-letter behavior, or idempotency.
   - `user-service:account.deleted`
   - `relation-service:account.deleted`
   - `group-service:group.cache`
+  - `msg-service:group-membership`
 
 ## Retry/Timeout Defaults
 - Manual consumer per-attempt timeout default: 10s.
@@ -49,3 +53,5 @@ dead-letter behavior, or idempotency.
 - The common pattern is still `Check -> business -> Mark`.
 - That pattern is not true exactly-once for non-idempotent business side effects unless
   the business write and `MarkIdempotent` happen in one transaction.
+- Msg's `group.cache` membership projector does put its business updates,
+  per-group version advancement, and `MarkIdempotent` in one MySQL transaction.
