@@ -43,6 +43,7 @@ HTTP API 见 [api](../api)。gateway 不暴露业务 gRPC 服务。
 - `/api/v1/auth` 下所有路由都需要 JWT。
 - 全局 IP 限流和登录用户限流均依赖 Redis，Redis 不可用时 Fail-Open。
 - 修改密码、换绑邮箱、注销账号使用更严格的用户限流。
+- 下游 gRPC **默认不重试**；仅对只读 full method 显式配置重试白名单（见 [调用链路与治理](../architecture/调用链路与治理.md)）。写方法（注册、建群、加好友、发消息等）不会被 gRPC 自动重放。
 
 ## 不变量
 

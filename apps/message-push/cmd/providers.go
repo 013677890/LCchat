@@ -164,12 +164,14 @@ func provideMessagePushGroupGRPCAddress() messagePushGroupGRPCAddress {
 
 // 群聊扩散依赖 group-service 提供群成员列表，因此该连接是启动必需依赖。
 func provideMessagePushGroupGRPCConn(_ *zap.Logger, addr messagePushGroupGRPCAddress) (*grpc.ClientConn, error) {
-	// message-push 访问 group-service 只会命中 GroupService，
-	// 因此把重试范围收敛到这一组 service，避免配置面无谓扩大。
+	// message-push → group 只读取群成员列表做扩散，配置式重试仅允许这两个只读 full method。
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
-		Retry:   grpcx.DefaultClientRetryConfig("group.GroupService"),
+		Retry: grpcx.DefaultClientRetryConfig(
+			"/group.GroupService/GetGroupMemberIds",
+			"/group.GroupService/GetMemberList",
+		),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("message-push 创建 group-service gRPC 连接失败（addr=%s）: %w", string(addr), err)

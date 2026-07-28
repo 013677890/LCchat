@@ -36,15 +36,15 @@ func (m *ClientManager) Get(addr string) (connectpb.ConnectServiceClient, error)
 
 	// 首次访问某个 connect 地址时才建立连接。
 	// 建好后放入缓存，后续相同地址的推送请求直接复用。
-	// 这条连接只调用 connect.ConnectService，
-	// 因此 service config、timeout 与日志策略都可以直接复用统一 builder。
+	// PushToUser / PushToDevice 不配置 gRPC 自动重试，避免与外层 Kafka 消费重试叠加造成重复投递。
+	// 负载均衡、timeout、internal-caller、日志仍走统一 builder。
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
 		InternalCaller: &grpcx.InternalCallerClientConfig{
 			Caller: "message-push",
 		},
-		Retry: grpcx.DefaultClientRetryConfig("connect.ConnectService"),
+		// Retry 刻意留空：默认不重试。
 	})
 	if err != nil {
 		return nil, fmt.Errorf("创建 connect gRPC 连接失败: %w", err)

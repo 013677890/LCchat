@@ -91,12 +91,14 @@ func provideMsgRelationGRPCAddress() msgRelationGRPCAddress {
 }
 
 func provideMsgGroupGRPCConn(_ *zap.Logger, addr msgGroupGRPCAddress) (msgGroupGRPCConn, error) {
-	// msg 访问 group-service 当前只会命中 GroupService，
-	// 因此重试策略也只声明这一组实际会调用的方法，避免把无关 service 塞进同一份配置。
+	// msg → group 只做发送前权限检查，配置式重试仅允许这两个只读 full method。
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
-		Retry:   grpcx.DefaultClientRetryConfig("group.GroupService"),
+		Retry: grpcx.DefaultClientRetryConfig(
+			"/group.GroupService/CheckGroupMember",
+			"/group.GroupService/CheckGroupSendPermission",
+		),
 	})
 	if err != nil {
 		return msgGroupGRPCConn{}, fmt.Errorf("msg 创建 group-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
@@ -105,14 +107,13 @@ func provideMsgGroupGRPCConn(_ *zap.Logger, addr msgGroupGRPCAddress) (msgGroupG
 }
 
 func provideMsgRelationGRPCConn(_ *zap.Logger, addr msgRelationGRPCAddress) (msgRelationGRPCConn, error) {
-	// relation 侧只会校验好友与黑名单，
-	// 这里显式列出两个 service，保证重试配置与实际调用面完全一致。
+	// msg → relation 只做好友/黑名单检查，配置式重试仅允许这两个只读 full method。
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
 		Retry: grpcx.DefaultClientRetryConfig(
-			"relation.FriendService",
-			"relation.BlacklistService",
+			"/relation.FriendService/CheckIsFriend",
+			"/relation.BlacklistService/CheckIsBlacklist",
 		),
 	})
 	if err != nil {

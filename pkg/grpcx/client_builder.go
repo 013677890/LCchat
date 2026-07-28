@@ -45,13 +45,19 @@ type ClientOptions struct {
 	MaxSendMsgSize int
 }
 
-// ClientRetryConfig 定义 gRPC ServiceConfig 中的重试策略。
+// ClientRetryConfig 定义 gRPC ServiceConfig 中的方法级重试策略。
 //
-// 注意：ServiceNames 必须是精确的 protobuf service 名称（如 group.GroupService），
-// 不能偷懒写成某个固定模板，否则不同服务会共用错误的重试规则。
+// 原则：默认不重试；只有 Methods 中显式列出的 full method 才会写入 retryPolicy。
+// Methods 必须是完整形式 `/package.Service/Method`（例如 `/group.GroupService/GetGroupInfo`），
+// 禁止只填 service 名、禁止运行时按 Get/List 前缀推断、禁止静默降级为 Service 级重试。
 type ClientRetryConfig struct {
-	ServiceNames         []string
-	Timeout              time.Duration
+	// Methods 可重试 full method 白名单。空列表表示不启用配置式重试。
+	Methods []string
+
+	// Timeout 写入 methodConfig.timeout，仅作用于 Methods 中的方法。
+	// 为 0 时不写入该字段，由 ClientTimeout 拦截器与父 context 负责 deadline。
+	Timeout time.Duration
+
 	WaitForReady         bool
 	MaxAttempts          int
 	InitialBackoff       time.Duration
@@ -60,21 +66,15 @@ type ClientRetryConfig struct {
 	RetryableStatusCodes []string
 }
 
-// DefaultClientRetryConfig 返回仓库统一的默认重试骨架。
-// 调用方拿到的是一份可修改副本，可在不同连接上覆写 attempts / timeout / codes。
-func DefaultClientRetryConfig(serviceNames ...string) *ClientRetryConfig {
-	filtered := make([]string, 0, len(serviceNames))
-	for _, serviceName := range serviceNames {
-		serviceName = strings.TrimSpace(serviceName)
-		if serviceName == "" {
-			continue
-		}
-		filtered = append(filtered, serviceName)
-	}
-
+// DefaultClientRetryConfig 返回仓库统一的默认重试骨架，并绑定到指定 full method 白名单。
+// 调用方拿到的是一份可修改副本，可在不同连接上覆写 attempts / codes 等。
+// fullMethods 的合法性在 NewClient / buildClientServiceConfig 时严格校验；非法配置直接报错。
+func DefaultClientRetryConfig(fullMethods ...string) *ClientRetryConfig {
+	methods := make([]string, 0, len(fullMethods))
+	methods = append(methods, fullMethods...)
 	return &ClientRetryConfig{
-		ServiceNames:         filtered,
-		Timeout:              2 * time.Second,
+		Methods:              methods,
+		Timeout:              0,
 		WaitForReady:         true,
 		MaxAttempts:          5,
 		InitialBackoff:       100 * time.Millisecond,
@@ -150,22 +150,82 @@ func buildClientCallOptions(opts ClientOptions) []grpc.CallOption {
 	return callOptions
 }
 
+// parsedRetryMethod 是校验通过后的 full method 拆分结果。
+type parsedRetryMethod struct {
+	FullMethod string
+	Service    string
+	Method     string
+}
+
+// parseRetryFullMethod 严格解析 `/package.Service/Method`。
+// service 与 method 任一为空、格式不符或重复斜杠均返回错误，禁止静默降级。
+func parseRetryFullMethod(fullMethod string) (parsedRetryMethod, error) {
+	fullMethod = strings.TrimSpace(fullMethod)
+	if fullMethod == "" {
+		return parsedRetryMethod{}, fmt.Errorf("grpc retry full method 不能为空")
+	}
+	if !strings.HasPrefix(fullMethod, "/") {
+		return parsedRetryMethod{}, fmt.Errorf("grpc retry full method 必须以 / 开头: %q", fullMethod)
+	}
+	// 去掉前导 / 后必须恰好拆成 service 与 method 两段；段内禁止空白，避免静默规范化掩盖配置错误。
+	body := fullMethod[1:]
+	parts := strings.Split(body, "/")
+	if len(parts) != 2 {
+		return parsedRetryMethod{}, fmt.Errorf("grpc retry full method 必须是 /package.Service/Method: %q", fullMethod)
+	}
+	service := parts[0]
+	method := parts[1]
+	if service == "" || method == "" {
+		return parsedRetryMethod{}, fmt.Errorf("grpc retry full method 的 service 与 method 均不能为空: %q", fullMethod)
+	}
+	if strings.TrimSpace(service) != service || strings.TrimSpace(method) != method ||
+		strings.ContainsAny(service, " \t\r\n") || strings.ContainsAny(method, " \t\r\n") {
+		return parsedRetryMethod{}, fmt.Errorf("grpc retry full method 不能包含空白: %q", fullMethod)
+	}
+	normalized := "/" + service + "/" + method
+	return parsedRetryMethod{
+		FullMethod: normalized,
+		Service:    service,
+		Method:     method,
+	}, nil
+}
+
+// normalizeRetryMethods 校验并去重 full method 列表；重复项直接拒绝。
+func normalizeRetryMethods(methods []string) ([]parsedRetryMethod, error) {
+	if len(methods) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(methods))
+	out := make([]parsedRetryMethod, 0, len(methods))
+	for _, raw := range methods {
+		parsed, err := parseRetryFullMethod(raw)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[parsed.FullMethod]; ok {
+			return nil, fmt.Errorf("grpc retry full method 重复: %s", parsed.FullMethod)
+		}
+		seen[parsed.FullMethod] = struct{}{}
+		out = append(out, parsed)
+	}
+	return out, nil
+}
+
 func buildClientServiceConfig(cfg *ClientRetryConfig, loadBalancingPolicy string) (string, error) {
 	loadBalancingPolicy = normalizeClientLoadBalancingPolicy(loadBalancingPolicy)
-	serviceNames := make([]string, 0)
+
+	var parsedMethods []parsedRetryMethod
 	if cfg != nil {
-		serviceNames = make([]string, 0, len(cfg.ServiceNames))
-		for _, serviceName := range cfg.ServiceNames {
-			serviceName = strings.TrimSpace(serviceName)
-			if serviceName == "" {
-				continue
-			}
-			serviceNames = append(serviceNames, serviceName)
+		var err error
+		parsedMethods, err = normalizeRetryMethods(cfg.Methods)
+		if err != nil {
+			return "", err
 		}
 	}
 
-	type serviceNameEntry struct {
+	type methodNameEntry struct {
 		Service string `json:"service"`
+		Method  string `json:"method"`
 	}
 	type retryPolicy struct {
 		MaxAttempts          int      `json:"maxAttempts"`
@@ -175,10 +235,10 @@ func buildClientServiceConfig(cfg *ClientRetryConfig, loadBalancingPolicy string
 		RetryableStatusCodes []string `json:"retryableStatusCodes"`
 	}
 	type methodConfig struct {
-		Name         []serviceNameEntry `json:"name"`
-		WaitForReady bool               `json:"waitForReady"`
-		Timeout      string             `json:"timeout"`
-		RetryPolicy  retryPolicy        `json:"retryPolicy"`
+		Name         []methodNameEntry `json:"name"`
+		WaitForReady bool              `json:"waitForReady,omitempty"`
+		Timeout      string            `json:"timeout,omitempty"`
+		RetryPolicy  *retryPolicy      `json:"retryPolicy,omitempty"`
 	}
 	type serviceConfig struct {
 		LoadBalancingConfig []map[string]any `json:"loadBalancingConfig,omitempty"`
@@ -192,11 +252,7 @@ func buildClientServiceConfig(cfg *ClientRetryConfig, loadBalancingPolicy string
 		}}
 	}
 
-	if len(serviceNames) > 0 {
-		timeout := cfg.Timeout
-		if timeout <= 0 {
-			timeout = 2 * time.Second
-		}
+	if cfg != nil && len(parsedMethods) > 0 {
 		maxAttempts := cfg.MaxAttempts
 		if maxAttempts <= 1 {
 			maxAttempts = 2
@@ -218,23 +274,30 @@ func buildClientServiceConfig(cfg *ClientRetryConfig, loadBalancingPolicy string
 			retryableCodes = []string{"UNAVAILABLE", "DEADLINE_EXCEEDED", "UNKNOWN"}
 		}
 
-		names := make([]serviceNameEntry, 0, len(serviceNames))
-		for _, serviceName := range serviceNames {
-			names = append(names, serviceNameEntry{Service: serviceName})
+		// 每个 full method 单独一条 name 项，强制 service+method 精确匹配。
+		names := make([]methodNameEntry, 0, len(parsedMethods))
+		for _, m := range parsedMethods {
+			names = append(names, methodNameEntry{
+				Service: m.Service,
+				Method:  m.Method,
+			})
 		}
 
-		payload.MethodConfig = []methodConfig{{
+		mc := methodConfig{
 			Name:         names,
 			WaitForReady: cfg.WaitForReady,
-			Timeout:      formatServiceConfigDuration(timeout),
-			RetryPolicy: retryPolicy{
+			RetryPolicy: &retryPolicy{
 				MaxAttempts:          maxAttempts,
 				InitialBackoff:       formatServiceConfigDuration(initialBackoff),
 				MaxBackoff:           formatServiceConfigDuration(maxBackoff),
 				BackoffMultiplier:    backoffMultiplier,
 				RetryableStatusCodes: retryableCodes,
 			},
-		}}
+		}
+		if cfg.Timeout > 0 {
+			mc.Timeout = formatServiceConfigDuration(cfg.Timeout)
+		}
+		payload.MethodConfig = []methodConfig{mc}
 	}
 
 	if len(payload.LoadBalancingConfig) == 0 && len(payload.MethodConfig) == 0 {

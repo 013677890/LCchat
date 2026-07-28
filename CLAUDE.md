@@ -85,6 +85,16 @@ msg 服务用 DDD 分层：`handler` → 跨领域操作走 `usecase`（SendMess
 
 gateway 特有：`internal/dto`（请求/响应 DTO，用 `ConvertToProto*` / `Convert*FromProto` 转换）、`internal/router/v1`（handler）、`internal/service`（gRPC 调用封装）、`internal/middleware`。
 
+### gRPC 客户端重试（方法级白名单）
+
+**默认不重试；只有显式列出的 full method 才写入 ServiceConfig retryPolicy。**
+
+- API：`grpcx.DefaultClientRetryConfig("/package.Service/Method", ...)`，生成的 `name` 必须同时含 `service` 与 `method`，禁止 Service 级宽匹配。
+- 非法 full method / 重复方法在 `NewClient` 时直接报错，禁止静默降级。
+- gateway 仅对只读方法开白名单（设备查询、资料搜索、关系列表/检查、群 Get/List/Search/Check、消息 Pull/Get 等）；Register/Login/CreateGroup/SendFriendApply/SendMessage 等写接口不重试。
+- 内部客户端：msg→group/relation 仅 Check*；message-push→group 仅成员读取；connect→auth 仅幂等设备状态更新；message-push→connect **不**配置 gRPC 自动重试。
+- 完整策略见 `doc/architecture/调用链路与治理.md`；装配事实源 `apps/gateway/internal/pb/client_connection.go`。
+
 ## 错误处理与日志约定
 
 - 业务错误统一用 `pkg/apperr`：`apperr.New(code)`（普通业务失败）、`apperr.Wrap(err, code, "中文上下文")`（底层错误上抛）。禁止用 `status.Error(codes.Xxx, ...)` 表达业务错误。

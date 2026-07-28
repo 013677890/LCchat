@@ -85,12 +85,16 @@ func connectInternalMethodWhitelist() map[string][]string {
 
 // auth-service gRPC 连接失败时允许降级运行，因此这里返回 nil 连接和 nil 错误。
 func provideAuthGRPCConn(log *zap.Logger, addr connectAuthGRPCAddress) (*grpc.ClientConn, error) {
-	// connect 只依赖 auth.DeviceService 做设备在线状态同步，
-	// 因此重试与超时配置都围绕这一组 service 收敛，不再手写零散拦截器链。
+	// connect 只调用设备状态同步写接口；二者均为幂等/最后写入覆盖：
+	// UpdateDeviceStatus 设备不存在按成功处理，UpdateDeviceActive 以最新时间戳覆盖。
+	// 配置式重试仅绑定这两个 full method，不放开 DeviceService 的查询类接口。
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
-		Retry:   grpcx.DefaultClientRetryConfig("auth.DeviceService"),
+		Retry: grpcx.DefaultClientRetryConfig(
+			"/auth.DeviceService/UpdateDeviceActive",
+			"/auth.DeviceService/UpdateDeviceStatus",
+		),
 	})
 	if err != nil {
 		logger.Warn(context.Background(), "auth-service gRPC 连接创建失败，降级为无设备状态同步模式",

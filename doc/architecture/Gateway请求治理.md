@@ -73,7 +73,17 @@ Gateway 统一使用 `pkg/result` 输出响应：
 
 业务错误直接返回标准业务码；上游系统错误通过 `result.FailServer` 挂入 Gin 错误链，由最终日志统一记录。
 
+## 下游 gRPC 重试
+
+gateway 出站连接在 `apps/gateway/internal/pb/client_connection.go` 中装配。原则：
+
+- **默认不重试**，只有显式列出的 full method 才写入 ServiceConfig `retryPolicy`。
+- 白名单只含只读查询（设备状态、资料、关系列表、群 Get/List/Search/Check、消息 Pull/Get 等）。
+- 写接口与 `SendMessage` 不进白名单，避免响应丢失时自动重放产生重复副作用。
+- 详细规则与内部客户端对照表见 [调用链路与治理](./调用链路与治理.md)。
+
 ## 维护要求
 - 新增接口必须同时更新 [api](../api)、本文件的路由分层和超时预算描述。
 - 新增中间件必须说明顺序原因，尤其是日志、超时、鉴权、限流之间的先后关系。
 - 新增限流或安全策略必须同步更新 [data/Redis-Key设计.md](../data/Redis-Key设计.md) 与 [ops/监控指标.md](../ops/监控指标.md)。
+- 新增或变更下游 gRPC 方法时：写方法默认不加配置式重试；只读方法若需重试，必须在 `client_connection.go` 对应白名单中显式追加完整 full method，并同步更新 [调用链路与治理](./调用链路与治理.md)。
