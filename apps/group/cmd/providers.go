@@ -17,6 +17,7 @@ import (
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
@@ -160,22 +161,28 @@ func provideGroupService(
 	return service.NewGroupService(groupRepo, producer)
 }
 
-// provideGroupCacheProjector 构造 group.cache 投影消费者。
+// provideGroupCacheProjector 构造 group.cache 分区级并行投影消费者。
 //
-// 这里把消费者的 topic / groupID 解析放在 provider，而不是 consumer 内部，原因是：
+// 这里把消费者的 topic / groupID / worker 并发解析放在 provider，而不是 consumer 内部，原因是：
 //  1. 配置读取职责应留在启动装配层；
 //  2. consumer 只关心“如何消费并处理消息”；
-//  3. 后续若需要按环境覆盖 topic / groupID，改这里即可。
+//  3. 后续若需要按环境覆盖 topic / groupID / concurrency，改这里即可。
+//
+// KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY：未配置默认 3；显式值必须是 1～64 正整数，非法直接启动失败。
 func provideGroupCacheProjector(
 	cfg config.KafkaConfig,
 	projectorRepo repository.IGroupCacheProjectorRepository,
 	db *gorm.DB,
-) *consumer.CacheProjector {
+) (*consumer.CacheProjector, error) {
 	groupID := cfg.GroupCacheGroupID
 	if groupID == "" {
 		groupID = "group-cache-projector-group"
 	}
-	return consumer.NewCacheProjector(cfg.Brokers, cfg.GroupCacheTopic, groupID, projectorRepo, db)
+	workers, err := kafka.ParsePoolWorkers(os.Getenv("KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY"))
+	if err != nil {
+		return nil, fmt.Errorf("KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY: %w", err)
+	}
+	return consumer.NewCacheProjector(cfg.Brokers, cfg.GroupCacheTopic, groupID, workers, projectorRepo, db)
 }
 
 // provideGroupMetricsServer 复用 grpcx 的统一 metrics HTTP server。

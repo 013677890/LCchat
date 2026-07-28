@@ -21,6 +21,9 @@
 - Group send requires `group.GroupService.CheckGroupMember`.
 - Msg independently consumes strict `group.cache` v2 events to maintain its local
   group membership conversation projection; message-push is not in that path.
+- Membership projector uses `ManualConsumerPool` (default 3 Readers, same group
+  id). Different partitions run in parallel; one Reader stays serial
+  Fetch→handle→commit. Same `group_uuid` stays ordered via Kafka key.
 - Missing relation/group clients are internal errors, not fail-open.
 - Message ID uses ULID.
 - `conv_id`:

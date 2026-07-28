@@ -57,6 +57,7 @@ python scripts/gateway_blackbox_test.py   # 黑盒接口测试（需服务已启
 - CDC Outbox 事件：`user_created`、`account.deleted`（auth）、`group.cache`（group）、`msg.push`（msg）。直接 Producer 事件：`profile_display_changed`（user）、`realtime.push`（relation/group）、`redis-retry-queue`。
 - 消费端幂等：`idempotent_events` 表，唯一键 `(event_type, event_id)`，用 `pkg/outbox.CheckIdempotent/MarkIdempotent`。
 - `group.cache` 有两个独立消费组：group-service 投影 Redis；msg-service 按单群连续版本投影 `conversation.membership_*` 和 `group_conversation.group_status`。两者 group ID 禁止相同，message-push 不参与该链路。
+- `group.cache` 固定 **3 partitions**（Compose `kafka-topics-init`）；group/msg 各进程用 `pkg/kafka.ManualConsumerPool` 启动 N 个独立 Reader（默认 N=3，`KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY` / `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY`）。不同 partition 并行，同 partition 串行；同群 key=`group_uuid` 严格有序。禁止应用在线 alter partitions。
 - 毒消息处理：手动提交消费者在有界重试耗尽后旁路到 `dead_events` 表并提交 offset，解除队头阻塞（`pkg/outbox/deadletter.go`、`pkg/kafka/deadletter.go`）。
 - connector 由 compose 的 `cdc-init` 服务跑 `scripts/cdc/register_outbox_connector.sh` 注册。
 

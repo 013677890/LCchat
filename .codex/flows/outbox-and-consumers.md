@@ -11,6 +11,16 @@ dead-letter behavior, or idempotency.
 - Message push: `msg.push`.
 - Group projections: `group.cache` is consumed independently by the group Redis
   projector and the msg membership projector.
+- `group.cache` is created with a fixed **3 partitions**. Kafka key is
+  `group_uuid` (`outbox.entity_id`). Same group is always ordered; different
+  groups may run in parallel across partitions.
+- Each of group/msg starts N independent manual-commit Readers in the same
+  consumer group (`pkg/kafka.ManualConsumerPool`). Defaults:
+  `KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY=3`,
+  `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY=3`.
+  Explicit values must be integers in 1..64 or startup fails.
+  Worker count above partition count only yields idle workers.
+  Do not alter partitions online from the app.
 
 ## Outbox Contract
 - Business transactions insert `outbox_events`.

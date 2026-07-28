@@ -6,7 +6,7 @@ group 服务使用 MySQL Outbox、Debezium、Kafka 和 Redis projector 维护群
 
 - 群业务表、`groups.cache_version` 和 `outbox_events` 在同一个 MySQL 事务内提交或回滚。
 - 每写一条 `group.cache` 事件，`cache_version` 都先递增一次；同一事务写两条事件时分别获得 `N+1`、`N+2`。
-- `entity_id` 固定为 `group_uuid`，作为 Kafka key；同群正常消费顺序仍由单分区顺序保证。
+- `entity_id` 固定为 `group_uuid`，作为 Kafka key；同群事件哈希到同一 partition，由该 partition 上的单个 Reader 串行消费，保证严格有序。
 - Redis 还会在 Lua 内比较 `projection_version`。因此重复事件、乱序事件、消费者部分成功后重试以及晚到的读回填都不能覆盖更高版本。
 - 业务写请求提交后不再直接异步 patch Redis，避免“请求协程 patch”和 Kafka projector 两个无序写者互相覆盖。
 
@@ -55,14 +55,16 @@ group gRPC 写请求
        -> groups.cache_version = cache_version + 1
        -> outbox_events(event_type=group.cache, entity_id=group_uuid)
   -> Debezium EventRouter(expand JSON)
-  -> Kafka group.cache
+  -> Kafka group.cache (固定 3 partitions；key=group_uuid)
        ├─ consumer group: group-cache-projector-group
-       │    -> group CacheProjector
+       │    -> N 个独立 Reader（默认 N=3，KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY）
+       │    -> 不同 partition 并行；同 partition 串行 Fetch/Handle/Commit
        │    -> 严格校验 + idempotent_events
        │    -> 版本感知 Lua 投影 Redis
        │    -> commit offset
        └─ consumer group: msg-group-membership-projector-group
-            -> msg GroupMembershipProjector
+            -> N 个独立 Reader（默认 N=3，KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY）
+            -> 不同 partition 并行；同 partition 串行；同群严格有序
             -> 严格校验 + 单群连续版本检查
             -> 事务内增量更新 conversation / group_conversation
             -> 事务内标记 idempotent_events
@@ -70,6 +72,14 @@ group gRPC 写请求
 ```
 
 不是 `Kafka -> message-push -> group`。`group.cache` 由 group-service 和 msg-service 使用不同 consumer group 各自完整消费；message-push 只消费 `msg.push` / `realtime.push`。
+
+并行投影不改变一致性边界：
+
+- 同群全部事件仍因 `entity_id=group_uuid` 进入同一 partition，Reader 内串行处理；
+- 不同群可跨 partition 并行；
+- Redis Lua 版本栅栏与 msg 连续 `projection_version` 校验保持不变；
+- 任一 partition worker 致命退出会取消同进程其余 worker 并等待收敛，禁止静默降级并发；
+- 禁止应用启动时 `alter topic --partitions`；已有积压 topic 扩分区必须停写排空后重建或迁移。
 
 ### 3.1 msg 成员会话投影
 

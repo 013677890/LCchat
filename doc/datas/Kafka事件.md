@@ -35,9 +35,25 @@
 | --- | --- | --- |
 | `KAFKA_GROUP_CACHE_GROUP_ID` | `group-cache-projector-group` | group-service Redis 投影。 |
 | `KAFKA_MSG_GROUP_MEMBERSHIP_GROUP_ID` | `msg-group-membership-projector-group` | msg-service `conversation` 成员投影。 |
+| `KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY` | `3` | group Redis projector 每进程独立 Reader 数。 |
+| `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY` | `3` | msg membership projector 每进程独立 Reader 数。 |
+
+并发配置规则：未配置默认 `3`；显式值必须是 `1～64` 正整数；零、负数或非法文本导致服务启动失败，禁止静默回退。
+
+### `group.cache` 分区与并行语义
+
+| 规则 | 说明 |
+| --- | --- |
+| 固定 partition 数 | 目标 **3** partitions（Compose `kafka-topics-init` / scale 脚本以 `--partitions 3` 创建）。 |
+| Kafka key | Outbox `entity_id=group_uuid`，同群事件进入同一 partition，保证严格有序。 |
+| 不同 consumer group | group 与 msg 各自完整消费，互不抢消息。 |
+| 进程内并行 | 每服务启动 N 个独立 `kafka.Reader`（同 group ID），由 Kafka 分配不同 partition。 |
+| 同 partition 串行 | 每个 Reader 严格 `Fetch → handle 成功 → Commit → 下一条`。 |
+| worker > partition | 多余 worker 只会空闲，不会共享 Reader 并发 Fetch。 |
+| 禁止在线扩分区 | 应用不得 `alter --partitions`；扩容会改变 key 哈希落点。有积压时需停写、排空后重建或换新 topic 迁移。 |
 
 msg membership projector 使用手动提交 consumer；新消费组没有已提交 offset 时从可见的
-最早事件开始，不能从最新 offset 推断当前成员全集。
+最早事件开始，不能从最新 offset 推断当前成员全集。事件幂等、死信、重试预算语义与单 Reader 时代相同，**不会**采用 message-push 的“重试耗尽后直接丢弃”。
 
 ## 3. Outbox CDC 路由
 

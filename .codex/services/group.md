@@ -35,6 +35,10 @@
 - Events are emitted by `group_event_mapper` inside the same DB transaction as group writes.
 - Projector validates minimal payload shape and projects final snapshots into Redis.
 - Dead-letter source: `group-service:group.cache`.
+- Uses `pkg/kafka.ManualConsumerPool`: N independent Readers (default 3 via
+  `KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY`), same consumer group, Kafka assigns
+  partitions. Different partitions parallel; same partition serial; same
+  `group_uuid` ordered by key. Topic fixed at 3 partitions.
 
 ## Traps
 - Projector must not re-run permission checks; it consumes committed facts.

@@ -20,47 +20,76 @@ import (
 //
 // 它和 group-service 自己的 Redis cache projector 订阅同一 topic 但使用不同 group ID：
 // 两个消费者都会收到每一条事件，既不会互相抢消息，也不需要 message-push 中转。
+//
+// 并行模型与 group Redis projector 一致：
+//   - 进程内 N 个独立 Reader，同一 group ID，Kafka 分配不同 partition；
+//   - Reader 内串行；不同群可并行；同群因 key=group_uuid 严格有序；
+//   - 严格连续 projection_version、同事务幂等与死信语义保持不变。
 type GroupMembershipProjector struct {
-	consumer *kafka.Consumer
-	repo     conversation.GroupMembershipProjectorRepository
+	pool *kafka.ManualConsumerPool
+	repo conversation.GroupMembershipProjectorRepository
 }
 
-// NewGroupMembershipProjector 创建 msg 群成员会话投影消费者。
+// NewGroupMembershipProjector 创建 msg 群成员会话分区级并行投影消费者。
+//
+// workers 必须由调用方用 kafka.ParsePoolWorkers 严格解析后传入。
+// NewManualCommitConsumer 在消费组没有已提交位点时使用 kafka-go 的 FirstOffset
+// 默认值。成员投影必须从该消费组可见的最早事件开始，不能从最新位置猜当前全集。
 func NewGroupMembershipProjector(
 	brokers []string,
 	topic, groupID string,
+	workers int,
 	repo conversation.GroupMembershipProjectorRepository,
 	db *gorm.DB,
-) *GroupMembershipProjector {
-	return &GroupMembershipProjector{
-		// NewManualCommitConsumer 在消费组没有已提交位点时使用 kafka-go 的 FirstOffset
-		// 默认值。成员投影必须从该消费组可见的最早事件开始，不能从最新位置猜当前全集。
-		consumer: kafka.NewManualCommitConsumer(brokers, topic, groupID, kafka.ManualConsumerConfig{
+) (*GroupMembershipProjector, error) {
+	pool, err := kafka.NewManualConsumerPool(kafka.ManualConsumerPoolConfig{
+		Name:    "msg-group-membership-projector",
+		Brokers: brokers,
+		Topic:   topic,
+		GroupID: groupID,
+		Workers: workers,
+		Config: kafka.ManualConsumerConfig{
 			MinBytes:       1,
 			MaxBytes:       10 << 20,
 			MaxWait:        500 * time.Millisecond,
 			ErrorBackoff:   time.Second,
 			DeadLetterSink: outbox.NewDeadLetterSink(db, "msg-service:group-membership"),
-		}),
-		repo: repo,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("创建 msg group membership projector consumer pool 失败: %w", err)
 	}
+	return &GroupMembershipProjector{
+		pool: pool,
+		repo: repo,
+	}, nil
 }
 
-// Start 启动阻塞式消费循环。
+// Start 启动阻塞式分区并行消费；任一 worker 致命退出会取消并等待其余 worker。
 func (p *GroupMembershipProjector) Start(ctx context.Context) error {
-	if p == nil || p.consumer == nil || p.repo == nil {
+	if p == nil || p.pool == nil || p.repo == nil {
 		return fmt.Errorf("msg group membership projector 未完整初始化")
 	}
-	logger.Info(ctx, "Msg group membership projector 启动中")
-	return p.consumer.Start(ctx, p.handle)
+	logger.Info(ctx, "Msg group membership projector 启动中",
+		logger.Int("worker_count", p.pool.WorkerCount()),
+	)
+	return p.pool.Start(ctx, p.handle)
 }
 
-// Close 关闭底层 Kafka reader。
+// Close 关闭全部底层 Kafka Reader。
 func (p *GroupMembershipProjector) Close() error {
-	if p == nil || p.consumer == nil {
+	if p == nil || p.pool == nil {
 		return nil
 	}
-	return p.consumer.Close()
+	return p.pool.Close()
+}
+
+// WorkerCount 返回并行 Reader 数量。
+func (p *GroupMembershipProjector) WorkerCount() int {
+	if p == nil || p.pool == nil {
+		return 0
+	}
+	return p.pool.WorkerCount()
 }
 
 func (p *GroupMembershipProjector) handle(ctx context.Context, message []byte) error {

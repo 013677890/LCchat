@@ -60,6 +60,8 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      # 业务 topic 由 kafka-topics-init 以固定 3 partitions 优先创建；保留 auto-create 供 Connect 内部 topic 兜底。
+      # 应用服务 must 依赖 kafka-topics-init，避免业务 topic 被先以 1 分区自动创建。
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "${KAFKA_PORT:-9092}:9092"
@@ -69,6 +71,24 @@ services:
       timeout: 5s
       retries: 20
       start_period: 20s
+    networks:
+      - chat-network
+  # 空数据基线：业务 topic 固定 3 partitions。禁止应用在线 alter partitions（会改变 key 哈希落点）。
+  kafka-topics-init:
+    image: ${KAFKA_IMAGE:-apache/kafka:3.9.2}
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint:
+      - bash
+      - -ec
+      - |
+        topics="redis-retry-queue user_created profile_display_changed account.deleted msg.push realtime.push group.cache"
+        for topic in $$topics; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
+        done
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic group.cache
     networks:
       - chat-network
   kafka-connect:
@@ -91,6 +111,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
     ports:
       - "${KAFKA_CONNECT_PORT:-8083}:8083"
     healthcheck:
@@ -179,6 +201,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       cdc-init:
         condition: service_completed_successfully
     ports:
@@ -224,6 +248,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       cdc-init:
         condition: service_completed_successfully
     ports:
@@ -261,6 +287,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       cdc-init:
         condition: service_completed_successfully
     ports:
@@ -290,6 +318,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_GROUP_CACHE_TOPIC: group.cache
       KAFKA_GROUP_CACHE_GROUP_ID: group-cache-projector-group
+      KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY: ${KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY:-3}
       GROUP_GRPC_ADDR: ":9095"
       GROUP_METRICS_ADDR: ":9195"
       GROUP_CACHE_RECONCILE_INTERVAL: ${GROUP_CACHE_RECONCILE_INTERVAL:-6h}
@@ -302,6 +331,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       cdc-init:
         condition: service_completed_successfully
     ports:
@@ -333,6 +364,7 @@ services:
       KAFKA_GROUP_CACHE_TOPIC: group.cache
       KAFKA_GROUP_CACHE_GROUP_ID: group-cache-projector-group
       KAFKA_MSG_GROUP_MEMBERSHIP_GROUP_ID: msg-group-membership-projector-group
+      KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY: ${KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY:-3}
       GROUP_GRPC_ADDR: "group:9095"
       RELATION_GRPC_ADDR: "relation:9093"
       MSG_GRPC_ADDR: ":9092"
@@ -345,6 +377,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
       group:
         condition: service_healthy
     ports:
@@ -459,6 +493,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
     ports:
       - "${MESSAGE_PUSH_HTTP_PORT:-8084}:8084"
     healthcheck:

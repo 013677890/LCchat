@@ -18,6 +18,7 @@ import (
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -138,9 +139,11 @@ func provideMsgService(repo message.Repository, cfg message.Config, gc *groupcli
 	return svc
 }
 
-// provideMsgGroupMembershipProjector 为 msg 创建独立的 group.cache 消费组。
+// provideMsgGroupMembershipProjector 为 msg 创建独立的 group.cache 分区级并行消费组。
 // GroupCacheGroupID 属于 group-service 的 Redis projector，二者必须使用不同 group ID，
 // 否则 Kafka 会把同一事件负载均衡给两个服务，造成任一投影随机漏事件。
+//
+// KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY：未配置默认 3；显式值必须是 1～64 正整数，非法直接启动失败。
 func provideMsgGroupMembershipProjector(
 	cfg config.KafkaConfig,
 	repo conversation.GroupMembershipProjectorRepository,
@@ -159,13 +162,18 @@ func provideMsgGroupMembershipProjector(
 			cfg.MsgGroupMembershipGroupID,
 		)
 	}
+	workers, err := kafka.ParsePoolWorkers(os.Getenv("KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY"))
+	if err != nil {
+		return nil, fmt.Errorf("KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY: %w", err)
+	}
 	return consumer.NewGroupMembershipProjector(
 		cfg.Brokers,
 		cfg.GroupCacheTopic,
 		cfg.MsgGroupMembershipGroupID,
+		workers,
 		repo,
 		db,
-	), nil
+	)
 }
 
 // provideConvService 创建会话领域服务，并注入群成员权威点查器。
