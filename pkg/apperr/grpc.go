@@ -57,6 +57,15 @@ func ToStatus(err error) error {
 }
 
 // FromStatus 将 gRPC status 还原为统一应用错误。
+//
+// 仅接受：
+//  1. 错误链中的本地 *apperr.Error；
+//  2. status details 中 ErrorInfo.Metadata["biz_code"]（现行跨服务协议）；
+//  3. 无业务明细时，按标准 gRPC 传输码做粗粒度映射（Unavailable/DeadlineExceeded 等基础设施错误）。
+//
+// 已删除的旧路径（不再解析）：
+//   - status.Message() 为纯数字业务码；
+//   - 把 gRPC codes.Code 数值当作业务码（例如 code>=10000）。
 func FromStatus(err error) error {
 	if err == nil {
 		return nil
@@ -69,14 +78,11 @@ func FromStatus(err error) error {
 		return err
 	}
 
-	// 尝试从 status 中提取业务码与文案
 	st, ok := status.FromError(err)
 	if !ok {
-		// 错误链中没有应用错误对象，创建一个内部错误
 		return Wrap(err, consts.CodeInternalError, consts.GetMessage(consts.CodeInternalError))
 	}
 
-	// 尝试从 status 的 details 中提取业务码
 	code := 0
 	for _, detail := range st.Details() {
 		info, ok := detail.(*errdetails.ErrorInfo)
@@ -91,16 +97,8 @@ func FromStatus(err error) error {
 		}
 	}
 	if code == 0 {
-		// 如果业务码提取失败，则尝试从 status 的 message 中提取业务码
-		if parsed, parseErr := strconv.Atoi(st.Message()); parseErr == nil {
-			code = parsed
-		}
-	}
-	if code == 0 {
-		// 如果业务码提取失败，则尝试从 status 的 code 中提取业务码
 		code = bizCodeFromGRPCCode(st.Code())
 	}
-	// 创建一个应用错误对象
 	return NewWithMessage(code, st.Message())
 }
 

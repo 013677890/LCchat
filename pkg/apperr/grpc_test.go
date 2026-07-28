@@ -64,3 +64,21 @@ func TestFromStatusKeepsLocalAppError(t *testing.T) {
 	assert.True(t, IsLogged(got), "应保留已记录日志标记")
 	assert.Equal(t, consts.CodeInternalError, Code(got))
 }
+
+// TestFromStatusRejectsLegacyMessageNumericBizCode 验证不再把 status message 纯数字当业务码。
+func TestFromStatusRejectsLegacyMessageNumericBizCode(t *testing.T) {
+	// 旧协议：status.Error(codes.Unknown, "11001") 曾被解析为业务码 11001。
+	legacy := status.Error(codes.Unknown, "11001")
+	got := FromStatus(legacy)
+	assert.Equal(t, consts.CodeInternalError, Code(got), "纯数字 message 不得再当作业务码")
+	assert.NotEqual(t, 11001, Code(got))
+}
+
+// TestFromStatusMapsTransportCodeWithoutDetails 验证无 biz_code 时仅按传输层码粗映射。
+func TestFromStatusMapsTransportCodeWithoutDetails(t *testing.T) {
+	got := FromStatus(status.Error(codes.Unavailable, "connection refused"))
+	assert.Equal(t, consts.CodeServiceUnavailable, Code(got))
+
+	got = FromStatus(status.Error(codes.DeadlineExceeded, "deadline"))
+	assert.Equal(t, consts.CodeTimeoutError, Code(got))
+}
