@@ -13,7 +13,10 @@ type KafkaConfig struct {
 	ConsumerConfig KafkaConsumerConfig `json:"consumer" yaml:"consumer"`
 
 	// 业务 Topic 配置
-	RedisRetryTopic            string `json:"redisRetryTopic" yaml:"redisRetryTopic"`                       // Redis 重试队列 topic
+	AuthRedisRetryTopic        string `json:"authRedisRetryTopic" yaml:"authRedisRetryTopic"`               // auth 缓存失效补偿 topic
+	AuthRedisRetryGroupID      string `json:"authRedisRetryGroupId" yaml:"authRedisRetryGroupId"`           // auth 缓存失效补偿消费者组
+	UserRedisRetryTopic        string `json:"userRedisRetryTopic" yaml:"userRedisRetryTopic"`               // user 缓存失效补偿 topic
+	UserRedisRetryGroupID      string `json:"userRedisRetryGroupId" yaml:"userRedisRetryGroupId"`           // user 缓存失效补偿消费者组
 	UserCreatedTopic           string `json:"userCreatedTopic" yaml:"userCreatedTopic"`                     // 注册完成事件 topic
 	ProfileDisplayChangedTopic string `json:"profileDisplayChangedTopic" yaml:"profileDisplayChangedTopic"` // 资料展示字段变更事件 topic
 	AccountDeletedTopic        string `json:"accountDeletedTopic" yaml:"accountDeletedTopic"`               // 账号注销事件 topic
@@ -55,7 +58,10 @@ func DefaultKafkaConfig() KafkaConfig {
 
 	return KafkaConfig{
 		Brokers:                    brokers,
-		RedisRetryTopic:            getenvString("KAFKA_RETRY_TOPIC", "redis-retry-queue"),
+		AuthRedisRetryTopic:        getenvString("KAFKA_AUTH_REDIS_RETRY_TOPIC", "auth.redis.invalidate"),
+		AuthRedisRetryGroupID:      getenvString("KAFKA_AUTH_REDIS_RETRY_GROUP_ID", "auth-redis-invalidate-group"),
+		UserRedisRetryTopic:        getenvString("KAFKA_USER_REDIS_RETRY_TOPIC", "user.redis.invalidate"),
+		UserRedisRetryGroupID:      getenvString("KAFKA_USER_REDIS_RETRY_GROUP_ID", "user-redis-invalidate-group"),
 		UserCreatedTopic:           getenvString("KAFKA_USER_CREATED_TOPIC", "user_created"),
 		ProfileDisplayChangedTopic: getenvString("KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC", "profile_display_changed"),
 		AccountDeletedTopic:        getenvString("KAFKA_ACCOUNT_DELETED_TOPIC", "account.deleted"),

@@ -50,7 +50,7 @@ func initializeUserApp() (*UserApp, error) {
 	mainUserGRPCShutdownTimeout := provideUserGRPCShutdownTimeout()
 	kafkaConfig := provideUserKafkaConfig()
 	producer := provideUserKafkaProducer(client, kafkaConfig)
-	v := provideUserRedisRetryConsumer(client, producer, kafkaConfig, logger)
+	v := provideUserRedisRetryConsumer(client, kafkaConfig, logger, db)
 	userCreatedConsumer := provideUserUserCreatedConsumer(kafkaConfig, internalProfileService, db)
 	accountDeletedConsumer := provideUserAccountDeletedConsumer(kafkaConfig, iUserRepository, db)
 	asyncConfig := provideUserAsyncConfig()

@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
@@ -101,8 +100,6 @@ func (r *authRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, passw
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
-	// 登录态展示缓存依赖 user_account 快照，密码修改后顺手失效同一个用户缓存。
-	r.invalidateUserCache(ctx, userUUID)
 	return nil
 }
 
@@ -118,8 +115,6 @@ func (r *authRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email st
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
-	// 邮箱更新后旧缓存中的登录展示与账号快照都已过期，需要一起失效。
-	r.invalidateUserCache(ctx, userUUID)
 	return nil
 }
 
@@ -148,7 +143,6 @@ func (r *authRepositoryImpl) UpdateLoginDisplay(ctx context.Context, userUUID, n
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
-	r.invalidateUserCache(ctx, userUUID)
 	return nil
 }
 
@@ -165,7 +159,6 @@ func (r *authRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 	if result.RowsAffected == 0 {
 		return ErrRecordNotFound
 	}
-	r.invalidateUserCache(ctx, userUUID)
 	return nil
 }
 
@@ -195,7 +188,6 @@ func (r *authRepositoryImpl) DeleteWithOutboxEvent(ctx context.Context, userUUID
 	if err != nil {
 		return err
 	}
-	r.invalidateUserCache(ctx, userUUID)
 	return nil
 }
 
@@ -221,11 +213,7 @@ func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyC
 	key := rediskey.VerifyCodeKey(email, codeType)
 	err := r.redisClient.Set(ctx, key, verifyCode, expireDuration).Err()
 	if err != nil {
-		// 验证码写入属于高可靠 Redis 写，失败时保留同步报错并追加异步补偿。
-		task := mq.BuildSetTask(key, verifyCode, expireDuration).
-			WithSource("AuthRepository.StoreVerifyCode").
-			WithMaxRetries(5)
-		LogAndRetryRedisError(ctx, task, err)
+		// 验证码有严格时效，禁止异步写回已经过期或被新验证码替换的旧值。
 		return WrapRedisError(err)
 	}
 	return nil
@@ -240,11 +228,7 @@ func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string,
 	key := rediskey.VerifyCodeKey(email, codeType)
 	err := r.redisClient.Del(ctx, key).Err()
 	if err != nil {
-		// 验证码删除允许短暂最终一致，失败后通过补偿任务兜底清理。
-		task := mq.BuildDelTask(key).
-			WithSource("AuthRepository.DeleteVerifyCode").
-			WithMaxRetries(5)
-		LogAndRetryRedisError(ctx, task, err)
+		// 同一个 key 可被新验证码复用，延迟 DEL 可能误删新值，只允许调用方同步重试。
 		return WrapRedisError(err)
 	}
 	return nil
@@ -329,20 +313,6 @@ func (r *authRepositoryImpl) BatchGetAccountStatus(ctx context.Context, userUUID
 	}
 
 	return items, nil
-}
-
-// invalidateUserCache 删除登录态依赖的用户缓存，并在失败时投递补偿任务。
-func (r *authRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID string) {
-	if r.redisClient == nil || userUUID == "" {
-		return
-	}
-	key := rediskey.UserProfileKey(userUUID)
-	if err := r.redisClient.Del(ctx, key).Err(); err != nil {
-		// 用户信息缓存失效允许最终一致，失败后异步补偿即可。
-		task := mq.BuildDelTask(key).
-			WithSource("AuthRepository.invalidateUserCache")
-		LogAndRetryRedisError(ctx, task, err)
-	}
 }
 
 // createUser 根据手机号是否为空决定插入列集合。

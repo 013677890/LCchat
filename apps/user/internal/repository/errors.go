@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/013677890/LCchat-Backend/apps/user/mq"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -86,10 +84,4 @@ func WrapRedisError(err error) error {
 // 日志记录redis错误
 func LogRedisError(ctx context.Context, err error) {
 	logger.Warn(ctx, "Redis 操作错误，已降级处理", logger.ErrorField("error", err))
-}
-
-// LogAndRetryRedisError 日志记录redis错误并发送到kafka重试
-// task: 要重试的 Redis 任务（由调用方构造）
-func LogAndRetryRedisError(ctx context.Context, task mq.RedisTask, err error) {
-	redisretry.LogAndRetryRedisError(ctx, task, err)
 }

@@ -20,7 +20,10 @@ data:
   REDIS_MAX_RETRIES: "3"
 
   KAFKA_BROKERS: kafka.example.internal:9092
-  KAFKA_RETRY_TOPIC: redis-retry-queue
+  KAFKA_AUTH_REDIS_RETRY_TOPIC: auth.redis.invalidate
+  KAFKA_AUTH_REDIS_RETRY_GROUP_ID: auth-redis-invalidate-group
+  KAFKA_USER_REDIS_RETRY_TOPIC: user.redis.invalidate
+  KAFKA_USER_REDIS_RETRY_GROUP_ID: user-redis-invalidate-group
   KAFKA_RETRY_GROUP_ID: redis-retry-consumer-group
   KAFKA_USER_CREATED_TOPIC: user_created
   KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC: profile_display_changed

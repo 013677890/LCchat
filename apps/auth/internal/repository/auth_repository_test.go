@@ -132,6 +132,22 @@ func TestAuthRepositoryUpdateEmailDuplicateReturnsDuplicateKey(t *testing.T) {
 	require.ErrorIs(t, err, ErrDuplicateKey)
 }
 
+func TestAuthRepositoryLeavesUserOwnedProfileCacheUntouched(t *testing.T) {
+	repo, mr := newAuthRepositoryWithRedisForTest(t)
+	ctx := context.Background()
+	seedAuthAccount(t, repo, "u1")
+
+	profileKey := rediskey.UserProfileKey("u1")
+	require.NoError(t, mr.Set(profileKey, `{"nickname":"user-owned"}`))
+
+	require.NoError(t, repo.UpdatePassword(ctx, "u1", "new-hash"))
+	require.NoError(t, repo.UpdateEmail(ctx, "u1", "new@test.com"))
+	require.NoError(t, repo.UpdateLoginDisplay(ctx, "u1", "new-nick", "new-avatar"))
+	require.NoError(t, repo.DeleteWithOutboxEvent(ctx, "u1", "account_deleted", `{"event_id":"e1"}`))
+
+	require.True(t, mr.Exists(profileKey))
+}
+
 func TestCheckAndIncrementVerifyCodeRateLimitAtomic(t *testing.T) {
 	repo, mr := newAuthRepositoryWithRedisForTest(t)
 	ctx := context.Background()

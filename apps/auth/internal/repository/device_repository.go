@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -137,8 +137,8 @@ func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model
 
 // storeDeviceInfoCache 将单设备会话快照写入 Redis Hash。
 //
-// 这里属于 DB 成功后的补偿型缓存刷新：主流程以数据库写入为准，缓存失败时通过补偿任务
-// 异步重试，避免因为缓存抖动阻塞登录链路。
+// 主流程以数据库写入为准；缓存刷新失败时只补偿删除整个用户设备缓存，
+// 避免延迟重放旧快照覆盖更新后的数据库状态。
 func (r *deviceRepositoryImpl) storeDeviceInfoCache(ctx context.Context, session *model.DeviceSession, loginAt time.Time) {
 	if r.redisClient == nil {
 		return
@@ -167,12 +167,9 @@ func (r *deviceRepositoryImpl) storeDeviceInfoCache(ctx context.Context, session
 	// 每次写设备快照时顺手续期整个 Hash，保持热点用户缓存常驻。
 	pipe.Expire(ctx, key, rediskey.DeviceInfoTTL)
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		// 设备信息缓存写入属于 DB 成功后的补偿型缓存刷新，失败时异步重试即可。
-		task := mq.BuildPipelineTask([]mq.RedisCmd{
-			{Command: "hset", Args: []interface{}{key, session.DeviceId, string(value)}},
-			{Command: "expire", Args: []interface{}{key, int(rediskey.DeviceInfoTTL.Seconds())}},
-		}).WithSource("DeviceRepository.storeDeviceInfoCache")
-		LogAndRetryRedisError(ctx, task, err)
+		task := redisretry.BuildDelTask(key).
+			WithSource("DeviceRepository.storeDeviceInfoCache")
+		redisretry.LogAndRetryRedisError(ctx, task, err)
 	}
 }
 
@@ -185,11 +182,7 @@ func (r *deviceRepositoryImpl) TouchDeviceInfoTTL(ctx context.Context, userUUID 
 	key := r.deviceInfoKey(userUUID)
 	err := r.redisClient.Expire(ctx, key, rediskey.DeviceInfoTTL).Err()
 	if err != nil {
-		// TTL 续期属于缓存保活场景，允许通过异步补偿恢复最终一致。
-		task := mq.BuildPipelineTask([]mq.RedisCmd{
-			{Command: "expire", Args: []interface{}{key, int(rediskey.DeviceInfoTTL.Seconds())}},
-		}).WithSource("DeviceRepository.TouchDeviceInfoTTL")
-		LogAndRetryRedisError(ctx, task, err)
+		// 延迟续期可能延长已经失效的旧快照，因此只把错误交给调用方同步处理。
 		return WrapRedisError(err)
 	}
 	return nil
@@ -439,20 +432,14 @@ func (r *deviceRepositoryImpl) BatchSetActiveTimestamps(ctx context.Context, ite
 	cutoff := pkgdeviceactive.CutoffUnix(time.Now())
 	pipe := r.redisClient.Pipeline()
 
-	// retryCmds 和 pipeline 保持一一对应，便于失败时按原语义做补偿重放。
-	retryCmds := make([]mq.RedisCmd, 0, len(grouped)*3)
 	for userUUID, deviceSet := range grouped {
 		// 每个用户独立维护一个活跃时间 ZSet。
 		key := r.deviceActiveKey(userUUID)
 
-		// zItems 给当前 pipeline 执行使用；zArgs 给补偿任务原样重放使用。
 		zItems := make([]redis.Z, 0, len(deviceSet))
-		zArgs := make([]interface{}, 0, 1+len(deviceSet)*2)
-		zArgs = append(zArgs, key)
 		for deviceID := range deviceSet {
 			// score 统一使用传入 ts；member 使用 device_id，便于后续按设备读取最近活跃时间。
 			zItems = append(zItems, redis.Z{Score: float64(ts), Member: deviceID})
-			zArgs = append(zArgs, float64(ts), deviceID)
 		}
 
 		// 理论上 deviceSet 已非空；这里再做一次保护，防止异常输入污染后续命令。
@@ -468,18 +455,10 @@ func (r *deviceRepositoryImpl) BatchSetActiveTimestamps(ctx context.Context, ite
 
 		// 最后续期整个 ZSet，保证热点用户的在线态索引持续可读。
 		pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
-		retryCmds = append(retryCmds,
-			mq.RedisCmd{Command: "zadd", Args: zArgs},
-			mq.RedisCmd{Command: "zremrangebyscore", Args: []interface{}{key, "-inf", strconv.FormatInt(cutoff, 10)}},
-			mq.RedisCmd{Command: "expire", Args: []interface{}{key, int(rediskey.DeviceActiveTTL.Seconds())}},
-		)
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
-		// 设备活跃时间允许最终一致，失败后通过 Kafka 补偿重放即可。
-		task := mq.BuildPipelineTask(retryCmds).
-			WithSource("DeviceRepository.BatchSetActiveTimestamps")
-		LogAndRetryRedisError(ctx, task, err)
+		// 旧时间戳异步重放会覆盖更新的 score，在线态只能由下一次心跳修复。
 		return WrapRedisError(err)
 	}
 
@@ -671,10 +650,7 @@ func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, d
 	value := md5Hash(accessToken)
 	err := r.redisClient.Set(ctx, key, value, expireDuration).Err()
 	if err != nil {
-		// Token 写入是登录态主链路的高可靠 Redis 写，失败时同步报错并追加异步补偿。
-		task := mq.BuildSetTask(key, value, expireDuration).
-			WithSource("DeviceRepository.StoreAccessToken")
-		LogAndRetryRedisError(ctx, task, err)
+		// 登录态写入失败必须让登录链路失败，禁止稍后写入已经失效的 token。
 		return WrapRedisError(err)
 	}
 	return nil
@@ -689,10 +665,7 @@ func (r *deviceRepositoryImpl) StoreRefreshToken(ctx context.Context, userUUID, 
 	// RefreshToken 当前仍按明文保存，便于后续刷新链路做字面量比对。
 	err := r.redisClient.Set(ctx, key, refreshToken, expireDuration).Err()
 	if err != nil {
-		// RefreshToken 写入同样需要高可靠兜底，失败时异步补偿重试。
-		task := mq.BuildSetTask(key, refreshToken, expireDuration).
-			WithSource("DeviceRepository.StoreRefreshToken")
-		LogAndRetryRedisError(ctx, task, err)
+		// RefreshToken 同样可能在重试期间被轮换，禁止异步写回旧值。
 		return WrapRedisError(err)
 	}
 	return nil
@@ -724,12 +697,7 @@ func (r *deviceRepositoryImpl) DeleteTokens(ctx context.Context, userUUID, devic
 	pipe.Del(ctx, accessKey)
 	pipe.Del(ctx, refreshKey)
 	if _, err := pipe.Exec(ctx); err != nil {
-		// Token 删除允许短暂最终一致，失败后异步补偿可继续清理残留登录态。
-		task := mq.BuildPipelineTask([]mq.RedisCmd{
-			{Command: "del", Args: []interface{}{accessKey}},
-			{Command: "del", Args: []interface{}{refreshKey}},
-		}).WithSource("DeviceRepository.DeleteTokens")
-		LogAndRetryRedisError(ctx, task, err)
+		// 设备重新登录会复用这些 key，延迟 DEL 可能误删新 token。
 		return WrapRedisError(err)
 	}
 	return nil
@@ -780,12 +748,9 @@ func (r *deviceRepositoryImpl) DeleteByUserUUID(ctx context.Context, userUUID st
 		pipe.Del(ctx, deviceInfoKey)
 		pipe.Del(ctx, deviceActiveKey)
 		if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-			// 注销后缓存清理允许降级为最终一致，失败后通过补偿任务继续删除。
-			task := mq.BuildPipelineTask([]mq.RedisCmd{
-				{Command: "del", Args: []interface{}{deviceInfoKey}},
-				{Command: "del", Args: []interface{}{deviceActiveKey}},
-			}).WithSource("DeviceRepository.DeleteByUserUUID")
-			LogAndRetryRedisError(ctx, task, err)
+			task := redisretry.BuildDelTask(deviceInfoKey, deviceActiveKey).
+				WithSource("DeviceRepository.DeleteByUserUUID")
+			redisretry.LogAndRetryRedisError(ctx, task, err)
 		}
 	}
 
@@ -855,12 +820,9 @@ func (r *deviceRepositoryImpl) UpdateOnlineStatus(ctx context.Context, userUUID,
 	pipe.HSet(ctx, cacheKey, deviceID, value)
 	pipe.Expire(ctx, cacheKey, rediskey.DeviceInfoTTL)
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		// 在线状态缓存刷新允许最终一致，失败后异步重试即可。
-		task := mq.BuildPipelineTask([]mq.RedisCmd{
-			{Command: "hset", Args: []interface{}{cacheKey, deviceID, string(value)}},
-			{Command: "expire", Args: []interface{}{cacheKey, int(rediskey.DeviceInfoTTL.Seconds())}},
-		}).WithSource("DeviceRepository.UpdateOnlineStatus")
-		LogAndRetryRedisError(ctx, task, err)
+		task := redisretry.BuildDelTask(cacheKey).
+			WithSource("DeviceRepository.UpdateOnlineStatus")
+		redisretry.LogAndRetryRedisError(ctx, task, err)
 	}
 
 	return nil

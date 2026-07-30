@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/consumer"
-	"github.com/013677890/LCchat-Backend/apps/user/mq"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
@@ -19,6 +18,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
@@ -34,7 +34,7 @@ type UserApp struct {
 	grpcServer             *grpc.Server
 	grpcListener           net.Listener
 	grpcShutdownTimeout    time.Duration
-	redisConsumer          *mq.RedisRetryConsumer
+	redisConsumer          *redisretry.RedisRetryConsumer
 	userCreatedConsumer    *consumer.UserCreatedConsumer
 	accountDeletedConsumer *consumer.AccountDeletedConsumer
 	kafkaProducer          *kafka.Producer
@@ -51,7 +51,7 @@ func NewUserApp(
 	built *grpcx.BuiltServer,
 	grpcListener net.Listener,
 	grpcShutdownTimeout userGRPCShutdownTimeout,
-	redisConsumer *mq.RedisRetryConsumer,
+	redisConsumer *redisretry.RedisRetryConsumer,
 	userCreatedConsumer *consumer.UserCreatedConsumer,
 	accountDeletedConsumer *consumer.AccountDeletedConsumer,
 	kafkaProducer *kafka.Producer,
@@ -241,7 +241,7 @@ func (a *UserApp) installProcessGlobals(ctx context.Context) error {
 	})
 
 	if a.kafkaProducer != nil {
-		mq.SetGlobalProducer(a.kafkaProducer)
+		redisretry.SetGlobalProducer(a.kafkaProducer)
 	}
 	_ = ctx
 	return nil

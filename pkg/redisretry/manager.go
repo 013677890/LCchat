@@ -3,10 +3,13 @@ package redisretry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 )
+
+var errProducerNotConfigured = errors.New("Redis DEL 补偿 producer 未初始化")
 
 var (
 	globalProducer *kafka.Producer
@@ -20,18 +23,20 @@ func SetGlobalProducer(producer *kafka.Producer) {
 	globalProducer = producer
 }
 
-// GetGlobalProducer 获取全局 Kafka Producer 实例。
-func GetGlobalProducer() *kafka.Producer {
+func getGlobalProducer() *kafka.Producer {
 	producerMu.RLock()
 	defer producerMu.RUnlock()
 	return globalProducer
 }
 
-// SendRedisTask 使用全局 Producer 发送 Redis 重试任务。
-func SendRedisTask(ctx context.Context, task RedisTask) error {
-	producer := GetGlobalProducer()
+func sendRedisTask(ctx context.Context, task RedisTask) error {
+	if err := task.Validate(); err != nil {
+		return err
+	}
+
+	producer := getGlobalProducer()
 	if producer == nil {
-		return nil
+		return errProducerNotConfigured
 	}
 
 	data, err := json.Marshal(task)
@@ -39,5 +44,5 @@ func SendRedisTask(ctx context.Context, task RedisTask) error {
 		return err
 	}
 
-	return producer.Send(ctx, data)
+	return producer.SendWithKey(ctx, []byte(task.Keys[0]), data)
 }

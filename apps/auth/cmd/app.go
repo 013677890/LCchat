@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/consumer"
-	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	"github.com/013677890/LCchat-Backend/config"
 	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
@@ -19,6 +18,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -33,7 +33,7 @@ type AuthApp struct {
 	grpcServer                    *grpc.Server
 	grpcListener                  net.Listener
 	grpcShutdownTimeout           time.Duration
-	redisConsumer                 *mq.RedisRetryConsumer
+	redisConsumer                 *redisretry.RedisRetryConsumer
 	profileDisplayChangedConsumer *consumer.ProfileDisplayChangedConsumer
 	kafkaProducer                 *kafka.Producer
 	db                            *gorm.DB
@@ -47,7 +47,7 @@ func NewAuthApp(
 	built *grpcx.BuiltServer,
 	grpcListener net.Listener,
 	grpcShutdownTimeout authGRPCShutdownTimeout,
-	redisConsumer *mq.RedisRetryConsumer,
+	redisConsumer *redisretry.RedisRetryConsumer,
 	profileDisplayChangedConsumer *consumer.ProfileDisplayChangedConsumer,
 	kafkaProducer *kafka.Producer,
 	db *gorm.DB,
@@ -197,7 +197,7 @@ func (a *AuthApp) installProcessGlobals(ctx context.Context) error {
 	deviceCfg := config.DefaultDeviceActiveConfig()
 	pkgdeviceactive.SetOnlineWindow(deviceCfg.OnlineWindow)
 	if a.kafkaProducer != nil {
-		mq.SetGlobalProducer(a.kafkaProducer)
+		redisretry.SetGlobalProducer(a.kafkaProducer)
 	}
 	_ = ctx
 	return nil

@@ -20,7 +20,10 @@ data:
 
   # Kafka advertised.listeners 为 kafka:9092，因此这里保持同名 Service。
   KAFKA_BROKERS: kafka:9092
-  KAFKA_RETRY_TOPIC: redis-retry-queue
+  KAFKA_AUTH_REDIS_RETRY_TOPIC: auth.redis.invalidate
+  KAFKA_AUTH_REDIS_RETRY_GROUP_ID: auth-redis-invalidate-group
+  KAFKA_USER_REDIS_RETRY_TOPIC: user.redis.invalidate
+  KAFKA_USER_REDIS_RETRY_GROUP_ID: user-redis-invalidate-group
   KAFKA_RETRY_GROUP_ID: redis-retry-consumer-group
   KAFKA_USER_CREATED_TOPIC: user_created
   KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC: profile_display_changed

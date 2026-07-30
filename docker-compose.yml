@@ -84,7 +84,7 @@ services:
       - bash
       - -ec
       - |
-        topics="redis-retry-queue user_created profile_display_changed account.deleted msg.push realtime.push group.cache"
+        topics="auth.redis.invalidate user.redis.invalidate user_created profile_display_changed account.deleted msg.push realtime.push group.cache"
         for topic in $$topics; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
         done
@@ -183,6 +183,8 @@ services:
       MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s&readTimeout=10s&writeTimeout=10s
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
+      KAFKA_AUTH_REDIS_RETRY_TOPIC: auth.redis.invalidate
+      KAFKA_AUTH_REDIS_RETRY_GROUP_ID: auth-redis-invalidate-group
       KAFKA_USER_CREATED_TOPIC: user_created
       KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC: profile_display_changed
       KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
@@ -230,6 +232,8 @@ services:
       MYSQL_DSN: root:root@tcp(mysql:3306)/chat_server?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s&readTimeout=10s&writeTimeout=10s
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
+      KAFKA_USER_REDIS_RETRY_TOPIC: user.redis.invalidate
+      KAFKA_USER_REDIS_RETRY_GROUP_ID: user-redis-invalidate-group
       KAFKA_USER_CREATED_TOPIC: user_created
       KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC: profile_display_changed
       KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted

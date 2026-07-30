@@ -7,13 +7,13 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/013677890/LCchat-Backend/apps/user/mq"
 	"github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/013677890/LCchat-Backend/pkg/redisbloom"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/redis/go-redis/v9"
@@ -590,9 +590,9 @@ func (r *userRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID, 
 
 	cacheKey := rediskey.UserProfileKey(userUUID)
 	if err := r.redisClient.Del(ctx, cacheKey).Err(); err != nil {
-		task := mq.BuildDelTask(cacheKey).
+		task := redisretry.BuildDelTask(cacheKey).
 			WithSource(source)
-		LogAndRetryRedisError(ctx, task, err)
+		redisretry.LogAndRetryRedisError(ctx, task, err)
 	}
 }
 

@@ -6,7 +6,8 @@
 
 | Topic | 默认环境变量 | 生产者 | 消费者 | 说明 |
 | --- | --- | --- | --- | --- |
-| `redis-retry-queue` | `KAFKA_RETRY_TOPIC` | 缓存重试逻辑 | 重试消费者 | Redis 重试队列。 |
+| `auth.redis.invalidate` | `KAFKA_AUTH_REDIS_RETRY_TOPIC` | auth | auth | 只补偿 auth 所属缓存的安全 `DEL`。 |
+| `user.redis.invalidate` | `KAFKA_USER_REDIS_RETRY_TOPIC` | user | user | 只补偿 user 所属缓存的安全 `DEL`。 |
 | `user_created` | `KAFKA_USER_CREATED_TOPIC` | auth Outbox | user | 注册成功后初始化用户资料。 |
 | `profile_display_changed` | `KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC` | user | auth | 昵称/头像变化后回写登录展示冗余。 |
 | `account.deleted` | `KAFKA_ACCOUNT_DELETED_TOPIC` | auth Outbox | user/relation/group 等 | 账号注销后的下游清理。 |
@@ -39,6 +40,14 @@
 | `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY` | `3` | msg membership projector 每进程独立 Reader 数。 |
 
 并发配置规则：未配置默认 `3`；显式值必须是 `1～64` 正整数；零、负数或非法文本导致服务启动失败，禁止静默回退。
+
+### Redis 缓存失效补偿
+
+auth 和 user 使用不同 Topic 与 consumer group，任务不会跨服务竞争，也不会因不同 group 广播到两个服务。payload 只包含待删除的 key 和追踪元数据，不接受 `SET`、`HSET`、Pipeline 或 Lua 等可写回旧值的命令。
+
+消费者使用手动提交：`DEL` 成功后提交 offset；Redis 暂时失败时原地重试同一条消息；payload 非法或重试预算耗尽时，只有写入当前服务数据库的 `dead_events` 成功后才提交。初次投递使用第一个 key 作为 Kafka key。
+
+升级时不要把旧 `redis-retry-queue` 直接接到新消费者；旧消息可能包含 `SET/HSET` 等已废弃写命令，应在停掉旧消费者后单独审计或清理。
 
 ### `group.cache` 分区与并行语义
 

@@ -55,7 +55,7 @@ func initializeAuthApp() (*AuthApp, error) {
 	mainAuthGRPCShutdownTimeout := provideAuthGRPCShutdownTimeout()
 	kafkaConfig := provideAuthKafkaConfig()
 	producer := provideAuthKafkaProducer(client, kafkaConfig)
-	v := provideAuthRedisRetryConsumer(client, producer, kafkaConfig, logger)
+	v := provideAuthRedisRetryConsumer(client, kafkaConfig, logger, db)
 	profileDisplayChangedConsumer := provideAuthProfileDisplayChangedConsumer(kafkaConfig, iInternalAuthService, db)
 	authApp, err := NewAuthApp(logger, server, builtServer, listener, mainAuthGRPCShutdownTimeout, v, profileDisplayChangedConsumer, producer, db, client)
 	if err != nil {

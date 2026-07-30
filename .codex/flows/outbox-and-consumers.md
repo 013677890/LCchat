@@ -4,7 +4,8 @@ Use this when changing account/profile/group events, manual Kafka consumers,
 dead-letter behavior, or idempotency.
 
 ## Topics
-- Redis retry: `redis-retry-queue`.
+- Auth Redis invalidation: `auth.redis.invalidate`, consumed only by auth.
+- User Redis invalidation: `user.redis.invalidate`, consumed only by user.
 - User created: `user_created`.
 - Profile display changed: `profile_display_changed`.
 - Account deleted: `account.deleted`.
@@ -38,6 +39,8 @@ dead-letter behavior, or idempotency.
 - A configured `DeadLetterSink` lets the consumer park a message after retry budget
   exhaustion and then commit offset.
 - If dead-letter parking fails, offset is not committed and the partition remains blocked.
+- Redis invalidation payloads contain keys only. Never add SET/HSET/Pipeline/Lua replay;
+  stale writes can overwrite newer state.
 
 ## Current Dead-Letter Behavior
 - Table/model: `dead_events` / `pkg/outbox.DeadEvent`.
@@ -45,8 +48,10 @@ dead-letter behavior, or idempotency.
 - Schema lives in `config/mysql/001_schema.sql` and `scripts/migration/004_dead_events.sql`.
 - Sources currently configured:
   - `auth-service:profile_display_changed`
+  - `auth-service:redis-invalidation`
   - `user-service:user_created`
   - `user-service:account.deleted`
+  - `user-service:redis-invalidation`
   - `relation-service:account.deleted`
   - `group-service:group.cache`
   - `msg-service:group-membership`

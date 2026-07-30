@@ -11,14 +11,15 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/repository"
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/service"
-	"github.com/013677890/LCchat-Backend/apps/auth/mq"
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
+	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/google/wire"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -64,25 +65,25 @@ func provideAuthRedisClient(log *zap.Logger, cfg config.RedisConfig) (*goredis.C
 	return client, nil
 }
 
-// Redis 重试链路建立在 Redis 可用前提之上，因此降级模式下不再启动 Kafka producer。
+// 缓存失效补偿建立在 Redis 可用前提之上，因此降级模式下不再启动 Kafka producer。
 func provideAuthKafkaProducer(redisClient *goredis.Client, cfg config.KafkaConfig) *kafka.Producer {
 	if redisClient == nil {
 		return nil
 	}
-	return kafka.NewProducer(cfg.Brokers, cfg.RedisRetryTopic)
+	return kafka.NewProducer(cfg.Brokers, cfg.AuthRedisRetryTopic)
 }
 
 // Consumer 只在这里构造，真正启动放到 AuthApp.Run，避免 provider 隐式拉起后台 goroutine。
-func provideAuthRedisRetryConsumer(redisClient *goredis.Client, producer *kafka.Producer, cfg config.KafkaConfig, log *zap.Logger) *mq.RedisRetryConsumer {
-	if redisClient == nil || producer == nil {
+func provideAuthRedisRetryConsumer(redisClient *goredis.Client, cfg config.KafkaConfig, log *zap.Logger, db *gorm.DB) *redisretry.RedisRetryConsumer {
+	if redisClient == nil {
 		return nil
 	}
-	return mq.NewRedisRetryConsumer(
+	return redisretry.NewRedisRetryConsumer(
 		cfg.Brokers,
-		cfg.RedisRetryTopic,
-		cfg.ConsumerConfig.GroupID,
+		cfg.AuthRedisRetryTopic,
+		cfg.AuthRedisRetryGroupID,
 		redisClient,
-		producer,
+		outbox.NewDeadLetterSink(db, "auth-service:redis-invalidation"),
 		kafka.NewZapLoggerAdapter(log),
 	)
 }
