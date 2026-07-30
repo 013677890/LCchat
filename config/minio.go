@@ -57,32 +57,3 @@ func DefaultMinIOConfig() MinIOConfig {
 		IdleConnTimeout:     90 * time.Second,
 	}
 }
-
-// ProductionMinIOConfig 返回生产环境的配置示例
-func ProductionMinIOConfig() MinIOConfig {
-	return MinIOConfig{
-		// 连接配置（生产环境需要从环境变量或配置中心读取）
-		Endpoint:        "minio.example.com:9000",
-		AccessKeyID:     "",   // 从环境变量读取
-		SecretAccessKey: "",   // 从环境变量读取
-		UseSSL:          true, // 生产环境使用 HTTPS
-
-		// Bucket 配置
-		BucketName: "chatserver-prod",
-		Location:   "us-east-1",
-
-		// 上传配置
-		MaxFileSize:   20 * 1024 * 1024, // 20MB
-		AllowedTypes:  []string{"image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"},
-		UploadTimeout: 60 * time.Second,
-
-		// 访问配置
-		PublicRead: true,
-		BaseURL:    "https://cdn.example.com", // 使用 CDN 地址
-
-		// 连接池配置
-		MaxIdleConns:        200,
-		MaxIdleConnsPerHost: 20,
-		IdleConnTimeout:     120 * time.Second,
-	}
-}

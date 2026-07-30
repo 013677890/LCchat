@@ -8,6 +8,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -165,8 +166,8 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 		countCmd := pipe.ZCard(ctx, cacheKey)
 		rangeCmd := pipe.ZRevRangeWithScores(ctx, cacheKey, int64(offset), int64(offset+pageSize-1))
 		emptyScoreCmd := pipe.ZScore(ctx, cacheKey, "__EMPTY__")
-		if getRandomBool(0.01) {
-			pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
+		if cachex.Chance(0.01) {
+			pipe.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.BlacklistTTL))
 		}
 
 		_, err := pipe.Exec(ctx)
@@ -204,7 +205,7 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 				return relations, realTotal, nil
 			}
 		} else if err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
 				LogRedisError(ctx, err)
@@ -249,8 +250,8 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 		// exists + zscore 一起执行，用于区分“key 不存在”和“目标不在集合里”。
 		existsCmd := pipe.Exists(ctx, cacheKey)
 		scoreCmd := pipe.ZScore(ctx, cacheKey, targetUUID)
-		if getRandomBool(0.01) {
-			pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
+		if cachex.Chance(0.01) {
+			pipe.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.BlacklistTTL))
 		}
 
 		_, err := pipe.Exec(ctx)
@@ -262,14 +263,14 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 				if scoreCmd.Err() == goredis.Nil {
 					return false, nil
 				}
-				if isRedisWrongType(scoreCmd.Err()) {
+				if cachex.IsRedisWrongType(scoreCmd.Err()) {
 					_ = r.redisClient.Del(ctx, cacheKey).Err()
 				} else {
 					LogRedisError(ctx, scoreCmd.Err())
 				}
 			}
 		} else if err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
 				LogRedisError(ctx, err)
@@ -366,11 +367,11 @@ func (r *blacklistRepositoryImpl) rebuildBlacklistCacheAsync(ctx context.Context
 			}
 
 			// 非空黑名单集合使用常规 TTL，热点 key 后续靠读路径小概率续期维持。
-			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
+			pipe.Expire(runCtx, cacheKey, cachex.JitterTTL(rediskey.BlacklistTTL))
 		}
 
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -391,7 +392,7 @@ func (r *blacklistRepositoryImpl) updateBlacklistCacheAsync(ctx context.Context,
 	cacheKey := rediskey.BlacklistRelationKey(userUUID)
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaAddBlacklistIfExists)
-		expireSeconds := int(getRandomExpireTime(rediskey.BlacklistTTL).Seconds())
+		expireSeconds := int(cachex.JitterTTL(rediskey.BlacklistTTL).Seconds())
 		// 仅在 key 已存在时做补丁写入；缓存整体缺失时交给后续读路径统一全量重建。
 		_, err := luaScript.Run(runCtx, r.redisClient,
 			[]string{cacheKey},
@@ -401,7 +402,7 @@ func (r *blacklistRepositoryImpl) updateBlacklistCacheAsync(ctx context.Context,
 		).Result()
 
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -421,7 +422,7 @@ func (r *blacklistRepositoryImpl) removeBlacklistCacheAsync(ctx context.Context,
 	cacheKey := rediskey.BlacklistRelationKey(userUUID)
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaRemoveBlacklistIfExists)
-		expireSeconds := int(getRandomExpireTime(rediskey.BlacklistTTL).Seconds())
+		expireSeconds := int(cachex.JitterTTL(rediskey.BlacklistTTL).Seconds())
 		_, err := luaScript.Run(runCtx, r.redisClient,
 			[]string{cacheKey},
 			targetUUID,
@@ -429,7 +430,7 @@ func (r *blacklistRepositoryImpl) removeBlacklistCacheAsync(ctx context.Context,
 		).Result()
 
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -450,7 +451,7 @@ func (r *blacklistRepositoryImpl) removeFriendCacheAsync(ctx context.Context, us
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaRemoveFriendMetaIfExists)
 		placeholderJSON := buildFriendMetaJSON("", "", "", 0)
-		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
 		_, err := luaScript.Run(runCtx, r.redisClient,
 			[]string{cacheKey},
 			friendUUID,
@@ -459,7 +460,7 @@ func (r *blacklistRepositoryImpl) removeFriendCacheAsync(ctx context.Context, us
 		).Result()
 
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -480,7 +481,7 @@ func (r *blacklistRepositoryImpl) restoreFriendCacheAsync(ctx context.Context, u
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaInsertFriendMetaIfExists)
 		metaJSON := buildFriendMetaJSON("", "", "", time.Now().UnixMilli())
-		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
 		_, err := luaScript.Run(runCtx, r.redisClient,
 			[]string{cacheKey},
 			friendUUID,
@@ -489,7 +490,7 @@ func (r *blacklistRepositoryImpl) restoreFriendCacheAsync(ctx context.Context, u
 		).Result()
 
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}

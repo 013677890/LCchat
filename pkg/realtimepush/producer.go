@@ -30,11 +30,6 @@ func NewProducer(writer Writer) *Producer {
 	return &Producer{writer: writer}
 }
 
-// NewKafkaProducer 创建使用默认 realtime.push topic 的实时提醒生产者。
-func NewKafkaProducer(brokers []string) *Producer {
-	return NewKafkaTopicProducer(brokers, DefaultTopic)
-}
-
 // NewKafkaTopicProducer 创建指定 topic 的实时提醒生产者。
 func NewKafkaTopicProducer(brokers []string, topic string) *Producer {
 	if topic == "" {

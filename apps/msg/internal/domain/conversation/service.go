@@ -509,9 +509,3 @@ func ComputeUnreadCount(maxSeq, readSeq int64) int {
 	}
 	return count
 }
-
-// NowPtr 返回当前时间的指针
-func NowPtr() *time.Time {
-	now := time.Now()
-	return &now
-}

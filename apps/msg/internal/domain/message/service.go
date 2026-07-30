@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/msg/internal/convid"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
@@ -448,7 +449,10 @@ func buildRecallOutboxPayload(ctx context.Context, convId, msgId, operatorUuid s
 		return "", fmt.Errorf("marshal RecallNotice failed: %w", err)
 	}
 
-	receiverUuid, convType := resolveRecallReceiver(convId, operatorUuid)
+	receiverUuid, convType, err := resolveRecallReceiver(convId, operatorUuid)
+	if err != nil {
+		return "", err
+	}
 	return msgevent.EncodeMsgPush(&pb.MsgPushEvent{
 		EventId:      id.GenerateULID(),
 		ReceiverUuid: receiverUuid,
@@ -464,24 +468,15 @@ func buildRecallOutboxPayload(ctx context.Context, convId, msgId, operatorUuid s
 }
 
 // resolveRecallReceiver 根据会话类型计算撤回通知的下行接收目标。
-func resolveRecallReceiver(convId, operatorUuid string) (string, pb.ConvType) {
+func resolveRecallReceiver(convId, operatorUuid string) (string, pb.ConvType, error) {
 	if strings.HasPrefix(convId, "p2p-") {
-		return extractPeerUUIDFromP2PConvID(convId, operatorUuid), pb.ConvType_CONV_TYPE_P2P
+		peerUUID, err := convid.PeerUUID(convId, operatorUuid)
+		if err != nil {
+			return "", pb.ConvType_CONV_TYPE_UNSPECIFIED, fmt.Errorf("resolve recall P2P peer: %w", err)
+		}
+		return peerUUID, pb.ConvType_CONV_TYPE_P2P, nil
 	}
-	return convId, pb.ConvType_CONV_TYPE_GROUP
-}
-
-// extractPeerUUIDFromP2PConvID 从 P2P 会话 ID 中解析操作者的对端用户 UUID。
-func extractPeerUUIDFromP2PConvID(convId, selfUuid string) string {
-	body := strings.TrimPrefix(convId, "p2p-")
-	parts := strings.SplitN(body, "-", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-	if parts[0] == selfUuid {
-		return parts[1]
-	}
-	return parts[0]
+	return convId, pb.ConvType_CONV_TYPE_GROUP, nil
 }
 
 // ==================== 辅助方法 ====================

@@ -391,6 +391,25 @@ func TestRecallMessage_SelfRecall_Success(t *testing.T) {
 	assert.NotZero(t, notice.GetRecallTime())
 }
 
+func TestRecallMessage_P2P_RejectsOperatorOutsideConversation(t *testing.T) {
+	repositoryUpdated := false
+	repo := &mockRepo{
+		getByIdFn: func(_ context.Context, _, _ string) (*model.Message, error) {
+			return &model.Message{MsgId: "m1", FromUuid: "carol", Status: 0, SendTime: time.Now()}, nil
+		},
+		updateWithOutboxFn: func(context.Context, string, string, int8, string, OutboxEvent) error {
+			repositoryUpdated = true
+			return nil
+		},
+	}
+	svc := NewService(repo, Config{RecallWindow: 2 * time.Minute})
+
+	_, err := svc.RecallMessage(context.Background(), "p2p-alice-bob", "m1", "carol")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not a participant")
+	assert.False(t, repositoryUpdated)
+}
+
 func TestRecallMessage_AlreadyRecalled(t *testing.T) {
 	repo := &mockRepo{
 		getByIdFn: func(_ context.Context, _, _ string) (*model.Message, error) {

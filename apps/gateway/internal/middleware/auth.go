@@ -59,9 +59,3 @@ func GetUserUUID(c *gin.Context) (string, bool) {
 	userUUID := ctxmeta.UserUUIDFromGin(c)
 	return userUUID, userUUID != ""
 }
-
-// GetDeviceID 从 Context 中获取当前设备 ID
-func GetDeviceID(c *gin.Context) (string, bool) {
-	deviceID := ctxmeta.DeviceIDFromGin(c)
-	return deviceID, deviceID != ""
-}

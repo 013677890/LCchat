@@ -9,6 +9,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -47,7 +48,7 @@ func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequ
 
 	cacheKey := rediskey.ApplyPendingKey(apply.TargetUuid)
 	luaScript := goredis.NewScript(luaAddPendingApplyIfExists)
-	expireSeconds := int(getRandomExpireTime(rediskey.ApplyPendingTTL).Seconds())
+	expireSeconds := int(cachex.JitterTTL(rediskey.ApplyPendingTTL).Seconds())
 
 	// 待处理申请列表只在 key 已存在时补丁写入；若缓存已过期，则交给读路径全量重建。
 	_, err := luaScript.Run(ctx, r.redisClient,
@@ -58,7 +59,7 @@ func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequ
 	).Result()
 
 	if err != nil && err != goredis.Nil {
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
 			LogRedisError(ctx, err)
@@ -126,8 +127,8 @@ func (r *applyRepositoryImpl) getPendingListFromCache(ctx context.Context, targe
 	start := int64((page - 1) * pageSize)
 	stop := start + int64(pageSize) - 1
 	membersCmd := pipe.ZRevRange(ctx, cacheKey, start, stop)
-	if getRandomBool(0.01) {
-		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.ApplyPendingTTL))
+	if cachex.Chance(0.01) {
+		pipe.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.ApplyPendingTTL))
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -251,7 +252,7 @@ func (r *applyRepositoryImpl) rebuildPendingCacheAsync(ctx context.Context, targ
 			}
 
 			pipe.ZAdd(runCtx, cacheKey, zs...)
-			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.ApplyPendingTTL))
+			pipe.Expire(runCtx, cacheKey, cachex.JitterTTL(rediskey.ApplyPendingTTL))
 		}
 
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
@@ -510,7 +511,7 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 			},
 		}
 
-		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
 		upsertScript := goredis.NewScript(luaUpsertFriendMetaIfExists)
 		insertScript := goredis.NewScript(luaInsertFriendMetaIfExists)
 
@@ -528,7 +529,7 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 			).Result()
 
 			if err != nil && err != goredis.Nil {
-				if isRedisWrongType(err) {
+				if cachex.IsRedisWrongType(err) {
 					_ = r.redisClient.Del(runCtx, pair.userKey).Err()
 					continue
 				}
@@ -549,7 +550,7 @@ func (r *applyRepositoryImpl) removePendingApplyCache(ctx context.Context, targe
 
 	cacheKey := rediskey.ApplyPendingKey(targetUUID)
 	luaScript := goredis.NewScript(luaRemovePendingApplyIfExists)
-	expireSeconds := int(getRandomExpireTime(rediskey.ApplyPendingTTL).Seconds())
+	expireSeconds := int(cachex.JitterTTL(rediskey.ApplyPendingTTL).Seconds())
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
 		applicantUUID,
@@ -557,7 +558,7 @@ func (r *applyRepositoryImpl) removePendingApplyCache(ctx context.Context, targe
 	).Result()
 
 	if err != nil && err != goredis.Nil {
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 			return
 		}
@@ -688,13 +689,13 @@ func (r *applyRepositoryImpl) ExistsPendingRequest(ctx context.Context, applican
 		pipe := r.redisClient.Pipeline()
 		existsCmd := pipe.Exists(ctx, cacheKey)
 		scoreCmd := pipe.ZScore(ctx, cacheKey, applicantUUID)
-		if getRandomBool(0.01) {
-			pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.ApplyPendingTTL))
+		if cachex.Chance(0.01) {
+			pipe.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.ApplyPendingTTL))
 		}
 
 		_, err := pipe.Exec(ctx)
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
 				LogRedisError(ctx, err)
@@ -706,7 +707,7 @@ func (r *applyRepositoryImpl) ExistsPendingRequest(ctx context.Context, applican
 			if scoreCmd.Err() == goredis.Nil {
 				return false, nil
 			}
-			if isRedisWrongType(scoreCmd.Err()) {
+			if cachex.IsRedisWrongType(scoreCmd.Err()) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
 				LogRedisError(ctx, scoreCmd.Err())

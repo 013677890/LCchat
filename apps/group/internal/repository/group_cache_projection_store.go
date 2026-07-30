@@ -10,6 +10,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -104,7 +105,7 @@ func (r *groupRepositoryImpl) setVersionedGroupInfoProjection(
 		[]string{rediskey.GroupInfoKey(group.Uuid)},
 		projectionVersion,
 		value,
-		int(getRandomExpireTime(rediskey.GroupInfoTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.GroupInfoTTL).Seconds()),
 		createFlag,
 		groupCacheSchemaVersion,
 		repairEqualFlag,
@@ -352,7 +353,7 @@ func (r *groupRepositoryImpl) readVersionedUserGroupsProjection(
 		r.redisClient,
 		[]string{rediskey.UserGroupListKey(userUUID), rediskey.UserGroupVersionKey(userUUID)},
 		groupCacheSchemaVersion,
-		int(getRandomExpireTime(rediskey.UserGroupListTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.UserGroupListTTL).Seconds()),
 		renewFlag,
 	).Slice()
 
@@ -500,7 +501,7 @@ func (r *groupRepositoryImpl) replaceGroupMembersProjection(
 		ctx,
 		rediskey.GroupMembersKey(groupUUID),
 		projectionVersion,
-		int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.GroupMembersTTL).Seconds()),
 		groupMembersEmptyField,
 		groupMembersEmptyValue,
 		fields,
@@ -522,7 +523,7 @@ func (r *groupRepositoryImpl) upsertGroupMembersProjectionIfExists(
 		ctx,
 		rediskey.GroupMembersKey(groupUUID),
 		projectionVersion,
-		int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.GroupMembersTTL).Seconds()),
 		groupMembersEmptyField,
 		groupMembersEmptyValue,
 		fields,
@@ -538,7 +539,7 @@ func (r *groupRepositoryImpl) removeGroupMemberProjectionIfExists(
 		ctx,
 		rediskey.GroupMembersKey(groupUUID),
 		projectionVersion,
-		int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.GroupMembersTTL).Seconds()),
 		groupMembersEmptyField,
 		groupMembersEmptyValue,
 		userUUID,
@@ -560,7 +561,7 @@ func (r *groupRepositoryImpl) replaceGroupJoinRequestsProjection(
 		ctx,
 		rediskey.GroupJoinRequestPendingKey(groupUUID),
 		projectionVersion,
-		int(getRandomExpireTime(rediskey.GroupJoinRequestTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.GroupJoinRequestTTL).Seconds()),
 		groupJoinRequestsEmptyField,
 		groupJoinRequestsEmptyValue,
 		fields,
@@ -582,7 +583,7 @@ func (r *groupRepositoryImpl) upsertGroupJoinRequestProjectionIfExists(
 		ctx,
 		rediskey.GroupJoinRequestPendingKey(groupUUID),
 		projectionVersion,
-		int(getRandomExpireTime(rediskey.GroupJoinRequestTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.GroupJoinRequestTTL).Seconds()),
 		groupJoinRequestsEmptyField,
 		groupJoinRequestsEmptyValue,
 		fields,
@@ -598,7 +599,7 @@ func (r *groupRepositoryImpl) removeGroupJoinRequestProjectionIfExists(
 		ctx,
 		rediskey.GroupJoinRequestPendingKey(groupUUID),
 		projectionVersion,
-		int(getRandomExpireTime(rediskey.GroupJoinRequestTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.GroupJoinRequestTTL).Seconds()),
 		groupJoinRequestsEmptyField,
 		groupJoinRequestsEmptyValue,
 		strconv.FormatInt(applyID, 10),
@@ -634,7 +635,7 @@ func (r *groupRepositoryImpl) patchUserGroupProjection(
 		[]string{rediskey.UserGroupListKey(userUUID), rediskey.UserGroupVersionKey(userUUID)},
 		groupCacheSchemaVersion,
 		projectionVersion,
-		int(getRandomExpireTime(rediskey.UserGroupListTTL).Seconds()),
+		int(cachex.JitterTTL(rediskey.UserGroupListTTL).Seconds()),
 		group.Uuid,
 		group.UpdatedAt.UnixMilli(),
 		activeFlag,
@@ -658,7 +659,7 @@ func (r *groupRepositoryImpl) reconcileUserGroupProjection(
 		return fmt.Errorf("%w: empty user uuid for user-group reconciliation", ErrInvalidProjectorPayload)
 	}
 	args := make([]interface{}, 0, 2+len(targets)*4)
-	args = append(args, groupCacheSchemaVersion, int(getRandomExpireTime(rediskey.UserGroupListTTL).Seconds()))
+	args = append(args, groupCacheSchemaVersion, int(cachex.JitterTTL(rediskey.UserGroupListTTL).Seconds()))
 	for _, target := range targets {
 		if target.group == nil || target.group.Uuid == "" || target.group.CacheVersion <= 0 {
 			return fmt.Errorf("%w: user-group reconcile target missing version", ErrInvalidProjectorPayload)
@@ -1073,7 +1074,7 @@ func (r *groupRepositoryImpl) loadCachedUserGroupProjectionVersions(
 	values, err := r.redisClient.HGetAll(ctx, rediskey.UserGroupVersionKey(userUUID)).Result()
 
 	if err != nil {
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			return result, nil
 		}
 		return nil, WrapRedisError(err)

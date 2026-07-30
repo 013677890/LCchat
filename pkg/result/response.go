@@ -83,11 +83,6 @@ func Fail(c *gin.Context, data interface{}, code int) {
 	Result(c, data, "", code)
 }
 
-// FailWithStatus 返回失败响应，并显式指定 HTTP 状态码。
-func FailWithStatus(c *gin.Context, data interface{}, code int, httpStatus int) {
-	ResultWithStatus(c, data, "", code, httpStatus)
-}
-
 // FailServer 返回失败响应，并将 upstreamErr 挂入 gin 错误链，供 GinLogger 在请求结束时统一记录（含当前层 apperr 堆栈）。
 // 业务错误（如密码错误）请只用 Fail，不要传入 upstreamErr。
 func FailServer(c *gin.Context, upstreamErr error, code int) {
@@ -97,25 +92,9 @@ func FailServer(c *gin.Context, upstreamErr error, code int) {
 	Fail(c, nil, code)
 }
 
-// SuccessWithMessage 返回成功响应并自定义消息
-func SuccessWithMessage(c *gin.Context, data interface{}, message string) {
-	Result(c, data, message, consts.CodeSuccess)
-}
-
-// FailWithMessage 返回失败响应并自定义消息
-func FailWithMessage(c *gin.Context, data interface{}, message string, code int) {
-	Result(c, data, message, code)
-}
-
 // FailWithStatusMessage 返回失败响应，并显式指定 HTTP 状态码与消息。
 func FailWithStatusMessage(c *gin.Context, data interface{}, message string, code int, httpStatus int) {
 	ResultWithStatus(c, data, message, code, httpStatus)
-}
-
-// SystemError 返回系统错误响应(500)
-// 已废弃：建议直接使用 Fail 函数，会自动根据 code 判断返回 200 还是 500
-func SystemError(c *gin.Context, code int) {
-	Result(c, nil, "", code)
 }
 
 func resolveHTTPStatus(code int) int {

@@ -9,11 +9,3 @@ func FormatUnixMilliRFC3339(ms int64) string {
 	}
 	return time.Unix(0, ms*int64(time.Millisecond)).UTC().Format(time.RFC3339)
 }
-
-// TimeToUnixMilli 将 time.Time 转为毫秒时间戳
-func TimeToUnixMilli(t time.Time) int64 {
-	if t.IsZero() {
-		return 0
-	}
-	return t.UnixMilli()
-}

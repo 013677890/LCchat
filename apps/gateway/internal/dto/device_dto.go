@@ -120,19 +120,6 @@ func ConvertDeviceItemFromProto(pb *authpb.DeviceItem) *DeviceItem {
 	}
 }
 
-// ConvertOnlineStatusFromProto 将 Protobuf 在线状态转换为 DTO
-func ConvertOnlineStatusFromProto(pb *authpb.OnlineStatus) *OnlineStatus {
-	if pb == nil {
-		return nil
-	}
-	return &OnlineStatus{
-		UserUUID:        pb.UserUuid,
-		IsOnline:        pb.IsOnline,
-		LastSeenAt:      util.FormatUnixMilliRFC3339(pb.LastSeenAt),
-		OnlinePlatforms: pb.OnlinePlatforms,
-	}
-}
-
 // ConvertOnlineStatusItemFromProto 将 Protobuf 在线状态项转换为 DTO
 func ConvertOnlineStatusItemFromProto(pb *authpb.OnlineStatusItem) *OnlineStatusItem {
 	if pb == nil {

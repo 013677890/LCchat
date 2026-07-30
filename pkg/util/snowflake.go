@@ -50,11 +50,6 @@ func InitSnowflake(machineID int64) error {
 	return nil
 }
 
-// GenID 生成一个全局唯一的 int64 ID
-func GenID() int64 {
-	return currentSnowflakeNode().Generate().Int64()
-}
-
 // GenIDString 生成一个全局唯一的字符串 ID
 func GenIDString() string {
 	return currentSnowflakeNode().Generate().String()

@@ -11,6 +11,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	"github.com/013677890/LCchat-Backend/pkg/redisbloom"
 	goredis "github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
@@ -1020,7 +1021,7 @@ func (r *groupRepositoryImpl) getGroupJoinRequestsFromCache(ctx context.Context,
 	values, err := r.redisClient.HGetAll(ctx, cacheKey).Result()
 
 	if err != nil {
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			return nil, false, nil
 		}
 		return nil, false, WrapRedisError(err)
@@ -1081,8 +1082,8 @@ func (r *groupRepositoryImpl) getGroupJoinRequestsFromCache(ctx context.Context,
 		return nil, false, nil
 	}
 	sortGroupJoinRequests(items)
-	if getRandomBool(0.01) {
-		if expireErr := r.redisClient.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.GroupJoinRequestTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
+	if cachex.Chance(0.01) {
+		if expireErr := r.redisClient.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.GroupJoinRequestTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
 			LogRedisError(ctx, expireErr)
 		}
 	}
@@ -1294,7 +1295,7 @@ func (r *groupRepositoryImpl) getGroupInfoFromCache(ctx context.Context, groupUU
 		if errors.Is(err, goredis.Nil) {
 			return nil, false, nil
 		}
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			return nil, false, nil
 		}
 		return nil, false, WrapRedisError(err)
@@ -1310,8 +1311,8 @@ func (r *groupRepositoryImpl) getGroupInfoFromCache(ctx context.Context, groupUU
 	if entry == nil || entry.GroupUUID != groupUUID {
 		return nil, false, nil
 	}
-	if getRandomBool(0.01) {
-		if expireErr := r.redisClient.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.GroupInfoTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
+	if cachex.Chance(0.01) {
+		if expireErr := r.redisClient.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.GroupInfoTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
 			LogRedisError(ctx, expireErr)
 		}
 	}
@@ -1351,7 +1352,7 @@ func (r *groupRepositoryImpl) getUserGroupsFromCache(ctx context.Context, userUU
 	references, cacheHit, err := r.readVersionedUserGroupsProjection(
 		ctx,
 		userUUID,
-		getRandomBool(0.01),
+		cachex.Chance(0.01),
 	)
 	if err != nil || !cacheHit {
 		return nil, false, err
@@ -1527,7 +1528,7 @@ func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, grou
 	values, err := r.redisClient.HGetAll(ctx, cacheKey).Result()
 
 	if err != nil {
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			return nil, false, nil
 		}
 		return nil, false, WrapRedisError(err)
@@ -1587,8 +1588,8 @@ func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, grou
 		return nil, false, nil
 	}
 	sortGroupMembers(members)
-	if getRandomBool(0.01) {
-		if expireErr := r.redisClient.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.GroupMembersTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
+	if cachex.Chance(0.01) {
+		if expireErr := r.redisClient.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.GroupMembersTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
 			LogRedisError(ctx, expireErr)
 		}
 	}
@@ -1634,8 +1635,8 @@ func (r *groupRepositoryImpl) checkGroupMemberFromCache(ctx context.Context, gro
 		ctx,
 		cacheKey,
 		userUUID,
-		int(getRandomExpireTime(rediskey.GroupMembersTTL).Seconds()),
-		getRandomBool(0.01),
+		int(cachex.JitterTTL(rediskey.GroupMembersTTL).Seconds()),
+		cachex.Chance(0.01),
 	)
 	if err != nil || !cacheHit {
 		return false, false, -1, err

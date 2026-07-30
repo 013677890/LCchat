@@ -183,11 +183,6 @@ func Frames(err error) []uintptr {
 	return nil
 }
 
-// IsCode 判断错误码是否与目标业务码一致。
-func IsCode(err error, code int) bool {
-	return Code(err) == normalizeCode(code)
-}
-
 // normalizeCode 归一化错误码，0 统一转为内部错误码。
 func normalizeCode(code int) int {
 	if code == 0 {

@@ -45,8 +45,3 @@ func TraceLogger() gin.HandlerFunc {
 		c.Next()
 	}
 }
-
-// NewUUID 生成新的 UUID
-func NewUUID() string {
-	return uuid.New().String()
-}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/msg/internal/convid"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/id"
@@ -44,17 +45,18 @@ func buildMarkReadOutboxEvents(ctx context.Context, ownerUuid, convId string, re
 	}}
 
 	if convType == pb.ConvType_CONV_TYPE_P2P {
-		peerUUID := extractPeerUUIDFromP2PConvID(convId, ownerUuid)
-		if peerUUID != "" {
-			specs = append(specs, markReadPushSpec{
-				receiverUUID: peerUUID,
-				pushType:     "MSG_READ_RECEIPT",
-				fromUUID:     ownerUuid,
-				convType:     pb.ConvType_CONV_TYPE_P2P,
-				noticeData:   noticeData,
-				serverTs:     serverTs,
-			})
+		peerUUID, err := convid.PeerUUID(convId, ownerUuid)
+		if err != nil {
+			return nil, fmt.Errorf("resolve mark-read P2P peer: %w", err)
 		}
+		specs = append(specs, markReadPushSpec{
+			receiverUUID: peerUUID,
+			pushType:     "MSG_READ_RECEIPT",
+			fromUUID:     ownerUuid,
+			convType:     pb.ConvType_CONV_TYPE_P2P,
+			noticeData:   noticeData,
+			serverTs:     serverTs,
+		})
 	}
 
 	events := make([]OutboxEvent, 0, len(specs))
@@ -95,17 +97,4 @@ func resolveMarkReadConvType(convId string) pb.ConvType {
 		return pb.ConvType_CONV_TYPE_P2P
 	}
 	return pb.ConvType_CONV_TYPE_GROUP
-}
-
-// extractPeerUUIDFromP2PConvID 从 P2P 会话 ID 中解析当前用户的对端 UUID。
-func extractPeerUUIDFromP2PConvID(convId, selfUuid string) string {
-	body := strings.TrimPrefix(convId, "p2p-")
-	parts := strings.SplitN(body, "-", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-	if parts[0] == selfUuid {
-		return parts[1]
-	}
-	return parts[0]
 }

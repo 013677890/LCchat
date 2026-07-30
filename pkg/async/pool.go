@@ -81,12 +81,6 @@ var ErrTaskPanic = errors.New("async task panic")
 // ErrInvalidPoolSize 表示协程池容量配置非法。
 var ErrInvalidPoolSize = errors.New("async pool size must be positive")
 
-// SubmitRejectedTotal 返回因池满（NonBlocking 模式）而被丢弃的累计任务数。
-// 可供 Prometheus Collector 或健康检查接口采集。
-func SubmitRejectedTotal() int64 {
-	return submitRejected.Load()
-}
-
 // Pool 返回全局协程池（未初始化时为 nil）。
 func Pool() *ants.Pool {
 	globalMu.RLock()

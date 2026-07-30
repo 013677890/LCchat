@@ -59,7 +59,7 @@ python scripts/gateway_blackbox_test.py   # 黑盒接口测试（需服务已启
 - `group.cache` 有两个独立消费组：group-service 投影 Redis；msg-service 按单群连续版本投影 `conversation.membership_*` 和 `group_conversation.group_status`。两者 group ID 禁止相同，message-push 不参与该链路。
 - `group.cache` 固定 **3 partitions**（Compose `kafka-topics-init`）；group/msg 各进程用 `pkg/kafka.ManualConsumerPool` 启动 N 个独立 Reader（默认 N=3，`KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY` / `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY`）。不同 partition 并行，同 partition 串行；同群 key=`group_uuid` 严格有序。禁止应用在线 alter partitions。
 - 毒消息处理：手动提交消费者在有界重试耗尽后旁路到 `dead_events` 表并提交 offset，解除队头阻塞（`pkg/outbox/deadletter.go`、`pkg/kafka/deadletter.go`）。
-- connector 由 compose 的 `cdc-init` 服务跑 `scripts/cdc/register_outbox_connector.sh` 注册。
+- connector 由 compose 的 `cdc-init` 服务跑 `scripts/cdc/register_outbox_connector.sh` 注册，并固定 `table.expand.json.payload=true`；消费者只接受当前顶层 JSON Object，禁止字符串或 `payload`/`after`/`data` 包装兼容。
 
 ### 消息发送与下行推送链路
 
@@ -75,7 +75,7 @@ python scripts/gateway_blackbox_test.py   # 黑盒接口测试（需服务已启
 
 - **user_uuid / 群 UUID**：Snowflake 十进制字符串 `util.GenIDString()`（`pkg/util/snowflake.go`），DB 存 `char(20)`，**不含连字符**。每个进程必须配唯一 `SNOWFLAKE_NODE_ID`（0-1023；compose 默认 auth=101, user=201, group=301, msg=401），多副本共享节点号会产生重复 ID。
 - **msg_id / msg 侧 event_id**：ULID 26 字符（`pkg/id.GenerateULID()`），时间有序。
-- **conv_id**：单聊 = `"p2p-" + join(sort(uuid1, uuid2), "-")`，群聊 = 群 UUID。P2P 解析（`SplitN(body, "-", 2)`）**依赖 UUID 内不含 "-" 的前提**，见 `apps/msg/internal/domain/message/service.go` 的 `computeConvId`/`extractPeerUUIDFromP2PConvID`。
+- **conv_id**：单聊 = `"p2p-" + join(sort(uuid1, uuid2), "-")`，群聊 = 群 UUID。P2P 解析只接受恰好两个参与者且当前用户必须在其中；前缀、分段或参与者不合法时直接报错，不猜测对端。该格式**依赖 UUID 内不含 "-" 的前提**，见 `apps/msg/internal/domain/message/service.go` 的 `computeConvId` 与 `apps/msg/internal/convid/p2p.go` 的 `PeerUUID`。
 - **refresh token**：crypto/rand 32 字节 base64（不是雪花 ID）。
 
 ### 服务内分层

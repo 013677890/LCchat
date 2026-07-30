@@ -114,9 +114,3 @@ func (m *Metrics) UnaryInterceptor() grpc.UnaryServerInterceptor {
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
 }
-
-// DefaultHandler 返回使用默认全局 Registry 的 handler，
-// 兼容已有的 Prometheus 集成（包含 Go runtime 等自带指标）。
-func DefaultHandler() http.Handler {
-	return promhttp.Handler()
-}

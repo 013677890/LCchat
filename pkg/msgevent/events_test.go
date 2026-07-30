@@ -1,7 +1,7 @@
 package msgevent
 
 import (
-	"strings"
+	"encoding/json"
 	"testing"
 
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
@@ -30,7 +30,7 @@ func TestEncodeDecodeMsgPush(t *testing.T) {
 	assert.Equal(t, int64(12), decoded.GetSeq())
 }
 
-func TestDecodeMsgPushAcceptsCDCStringWrappedPayload(t *testing.T) {
+func TestDecodeMsgPushRejectsCDCWrappers(t *testing.T) {
 	encoded, err := EncodeMsgPush(&msgpb.MsgPushEvent{
 		EventId:      "evt-1",
 		ReceiverUuid: "receiver",
@@ -39,25 +39,19 @@ func TestDecodeMsgPushAcceptsCDCStringWrappedPayload(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	wrapped := `"` + strings.ReplaceAll(encoded, `"`, `\"`) + `"`
-	decoded, err := DecodeMsgPush([]byte(wrapped))
-	require.NoError(t, err)
-	assert.Equal(t, "evt-1", decoded.GetEventId())
-	assert.Equal(t, "receiver", decoded.GetReceiverUuid())
-}
-
-func TestDecodeMsgPushAcceptsEnvelopePayload(t *testing.T) {
-	encoded, err := EncodeMsgPush(&msgpb.MsgPushEvent{
-		EventId:      "evt-1",
-		ReceiverUuid: "receiver",
-		Type:         "MSG_RECALL",
-		ConvType:     msgpb.ConvType_CONV_TYPE_P2P,
-	})
+	stringWrapped, err := json.Marshal(encoded)
 	require.NoError(t, err)
 
-	decoded, err := DecodeMsgPush([]byte(`{"payload":` + encoded + `}`))
-	require.NoError(t, err)
-	assert.Equal(t, "MSG_RECALL", decoded.GetType())
+	tests := map[string][]byte{
+		"json string": stringWrapped,
+		"envelope":    []byte(`{"payload":` + encoded + `}`),
+	}
+	for name, message := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := DecodeMsgPush(message)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestDecodeMsgPushRejectsUnknownFields(t *testing.T) {

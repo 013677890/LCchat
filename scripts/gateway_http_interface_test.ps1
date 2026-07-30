@@ -25,7 +25,7 @@ $BaseUrl = 'http://127.0.0.1:8080'
 $CoreServices = @('gateway', 'auth', 'user', 'relation', 'msg')
 $GatewayOnly = @('gateway')
 $script:Results = New-Object System.Collections.Generic.List[object]
-$script:ProgressLog = Join-Path $PSScriptRoot '..\tmp\api_test_progress_v3.log'
+$script:ProgressLog = Join-Path $PSScriptRoot '..\tmp\gateway_http_interface_test.log'
 $script:DocPath = Join-Path $PSScriptRoot '..\doc\dev-notes\gateway_http_interface_test_record.md'
 $script:DocInitialized = $false
 

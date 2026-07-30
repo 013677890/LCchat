@@ -10,12 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// TimeoutMiddleware 请求超时控制中间件。
-// 它基于父请求 ctx 派生 deadline：若父 ctx 已经更短，则自动保留更短的那个。
-func TimeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
-	return TimeoutMiddlewareWithPath(nil, timeout)
-}
-
 // TimeoutMiddlewareWithPath 为不同路由提供超时覆盖。
 // 路由匹配优先使用 gin 的 FullPath（如 /users/:id），取不到时再回退到 URL.Path。
 func TimeoutMiddlewareWithPath(pathTimeouts map[string]time.Duration, defaultTimeout time.Duration) gin.HandlerFunc {

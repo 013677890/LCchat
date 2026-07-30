@@ -8,6 +8,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -272,14 +273,14 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 	metaCmd := pipe.HGet(ctx, cacheKey, friendUUID)
 
 	// 热点 key 使用小概率续期，避免每次读取都追加 EXPIRE 带来额外 RTT。
-	if getRandomBool(0.01) {
-		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
+	if cachex.Chance(0.01) {
+		pipe.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.FriendRelationTTL))
 	}
 
 	_, err := pipe.Exec(ctx)
 	if err != nil && err != goredis.Nil {
 		// key 类型错乱时直接删除，让后续读路径重新回源重建正确结构。
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
 			LogRedisError(ctx, err)
@@ -300,7 +301,7 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 	if metaCmd.Err() == goredis.Nil {
 		return true, false
 	}
-	if isRedisWrongType(metaCmd.Err()) {
+	if cachex.IsRedisWrongType(metaCmd.Err()) {
 		_ = r.redisClient.Del(ctx, cacheKey).Err()
 		return false, false
 	}
@@ -323,14 +324,14 @@ func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID,
 	existsCmd := pipe.Exists(ctx, cacheKey)
 	metaCmd := pipe.HGet(ctx, cacheKey, friendUUID)
 
-	if getRandomBool(0.01) {
-		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
+	if cachex.Chance(0.01) {
+		pipe.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.FriendRelationTTL))
 	}
 
 	_, err := pipe.Exec(ctx)
 	if err != nil && err != goredis.Nil {
 		// 和 checkFriendCache 一样，类型错乱时直接删 key，让后续读路径做全量修复。
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
 			LogRedisError(ctx, err)
@@ -355,7 +356,7 @@ func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID,
 	if metaCmd.Err() == goredis.Nil {
 		return true, nil, false
 	}
-	if isRedisWrongType(metaCmd.Err()) {
+	if cachex.IsRedisWrongType(metaCmd.Err()) {
 		_ = r.redisClient.Del(ctx, cacheKey).Err()
 		return false, nil, false
 	}
@@ -378,14 +379,14 @@ func (r *friendRepositoryImpl) checkBlacklistCache(ctx context.Context, userUUID
 	existsCmd := pipe.Exists(ctx, cacheKey)
 	scoreCmd := pipe.ZScore(ctx, cacheKey, peerUUID)
 
-	if getRandomBool(0.01) {
-		pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.BlacklistTTL))
+	if cachex.Chance(0.01) {
+		pipe.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.BlacklistTTL))
 	}
 
 	_, err := pipe.Exec(ctx)
 	if err != nil && err != goredis.Nil {
 		// blacklist ZSet 类型异常时同样删 key，让后续读路径重建。
-		if isRedisWrongType(err) {
+		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
 			LogRedisError(ctx, err)
@@ -402,7 +403,7 @@ func (r *friendRepositoryImpl) checkBlacklistCache(ctx context.Context, userUUID
 	if scoreCmd.Err() == goredis.Nil {
 		return true, false
 	}
-	if isRedisWrongType(scoreCmd.Err()) {
+	if cachex.IsRedisWrongType(scoreCmd.Err()) {
 		_ = r.redisClient.Del(ctx, cacheKey).Err()
 		return false, false
 	}
@@ -458,8 +459,8 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 		pipe := r.redisClient.Pipeline()
 		existsCmd := pipe.Exists(ctx, cacheKey)
 		valuesCmd := pipe.HMGet(ctx, cacheKey, fields...)
-		if getRandomBool(0.01) {
-			pipe.Expire(ctx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
+		if cachex.Chance(0.01) {
+			pipe.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.FriendRelationTTL))
 		}
 
 		_, err := pipe.Exec(ctx)
@@ -475,7 +476,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 				return result, nil
 			}
 		} else if err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
 				LogRedisError(ctx, err)
@@ -651,7 +652,7 @@ func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, u
 		}
 
 		metaJSON := buildFriendMetaJSON("", "", "", time.Now().UnixMilli())
-		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
 		luaScript := goredis.NewScript(luaInsertFriendMetaIfExists)
 
 		for _, pair := range pairs {
@@ -664,7 +665,7 @@ func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, u
 			).Result()
 
 			if err != nil && err != goredis.Nil {
-				if isRedisWrongType(err) {
+				if cachex.IsRedisWrongType(err) {
 					_ = r.redisClient.Del(runCtx, pair.userKey).Err()
 					continue
 				}
@@ -686,7 +687,7 @@ func (r *friendRepositoryImpl) removeFriendCacheAsync(ctx context.Context, userU
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaRemoveFriendMetaIfExists)
 		placeholderJSON := buildFriendMetaJSON("", "", "", 0)
-		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
 		_, err := luaScript.Run(runCtx, r.redisClient,
 			[]string{cacheKey},
 			friendUUID,
@@ -695,7 +696,7 @@ func (r *friendRepositoryImpl) removeFriendCacheAsync(ctx context.Context, userU
 		).Result()
 
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -740,11 +741,11 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 			}
 
 			// 非空好友集使用常规 TTL，后续靠小概率续期维持热点 key。
-			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
+			pipe.Expire(runCtx, cacheKey, cachex.JitterTTL(rediskey.FriendRelationTTL))
 		}
 
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -796,7 +797,7 @@ func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, u
 			relation.Source,
 			relation.UpdatedAt.UnixMilli(),
 		)
-		expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
 		luaScript := goredis.NewScript(luaUpsertFriendMetaIfExists)
 		_, err := luaScript.Run(runCtx, r.redisClient,
 			[]string{cacheKey},
@@ -806,7 +807,7 @@ func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, u
 		).Result()
 
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -832,7 +833,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 		_, err := pipe.Exec(runCtx)
 
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -853,7 +854,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 			meta.UpdatedAt = updatedAt
 
 			luaScript := goredis.NewScript(luaUpsertFriendMetaIfExists)
-			expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+			expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
 			_, err = luaScript.Run(runCtx, r.redisClient,
 				[]string{cacheKey},
 				friendUUID,
@@ -862,7 +863,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 			).Result()
 
 			if err != nil && err != goredis.Nil {
-				if isRedisWrongType(err) {
+				if cachex.IsRedisWrongType(err) {
 					_ = r.redisClient.Del(runCtx, cacheKey).Err()
 					return
 				}
@@ -872,7 +873,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 		}
 
 		if metaCmd.Err() != goredis.Nil {
-			if isRedisWrongType(metaCmd.Err()) {
+			if cachex.IsRedisWrongType(metaCmd.Err()) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 			} else {
 				LogRedisError(runCtx, metaCmd.Err())
@@ -909,7 +910,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 		_, err := pipe.Exec(runCtx)
 
 		if err != nil && err != goredis.Nil {
-			if isRedisWrongType(err) {
+			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
@@ -930,7 +931,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 			meta.UpdatedAt = updatedAt
 
 			luaScript := goredis.NewScript(luaUpsertFriendMetaIfExists)
-			expireSeconds := int(getRandomExpireTime(rediskey.FriendRelationTTL).Seconds())
+			expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
 			_, err = luaScript.Run(runCtx, r.redisClient,
 				[]string{cacheKey},
 				friendUUID,
@@ -939,7 +940,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 			).Result()
 
 			if err != nil && err != goredis.Nil {
-				if isRedisWrongType(err) {
+				if cachex.IsRedisWrongType(err) {
 					_ = r.redisClient.Del(runCtx, cacheKey).Err()
 					return
 				}
@@ -949,7 +950,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 		}
 
 		if metaCmd.Err() != goredis.Nil {
-			if isRedisWrongType(metaCmd.Err()) {
+			if cachex.IsRedisWrongType(metaCmd.Err()) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 			} else {
 				LogRedisError(runCtx, metaCmd.Err())

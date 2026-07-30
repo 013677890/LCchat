@@ -11,6 +11,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/013677890/LCchat-Backend/pkg/redisbloom"
 	"github.com/013677890/LCchat-Backend/pkg/redisretry"
@@ -406,7 +407,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 						continue
 					}
 					cacheKey := rediskey.UserProfileKey(profile.UserUuid)
-					pipe.Set(runCtx, cacheKey, profileJSON, getRandomExpireTime(rediskey.UserProfileTTL))
+					pipe.Set(runCtx, cacheKey, profileJSON, cachex.JitterTTL(rediskey.UserProfileTTL))
 				}
 
 				// 对不存在的 UUID 写入空占位，避免缓存穿透
@@ -415,7 +416,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 						continue
 					}
 					cacheKey := rediskey.UserProfileKey(uuid)
-					pipe.Set(runCtx, cacheKey, "{}", getRandomExpireTime(rediskey.UserProfileEmptyTTL))
+					pipe.Set(runCtx, cacheKey, "{}", cachex.JitterTTL(rediskey.UserProfileEmptyTTL))
 				}
 
 				if _, err := pipe.Exec(runCtx); err != nil {
@@ -544,7 +545,7 @@ func (r *userRepositoryImpl) setUserProfileEmptyCacheAsync(ctx context.Context, 
 	}
 	cacheKey := rediskey.UserProfileKey(userUUID)
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		if err := r.redisClient.Set(runCtx, cacheKey, "{}", getRandomExpireTime(rediskey.UserProfileEmptyTTL)).Err(); err != nil {
+		if err := r.redisClient.Set(runCtx, cacheKey, "{}", cachex.JitterTTL(rediskey.UserProfileEmptyTTL)).Err(); err != nil {
 			LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)

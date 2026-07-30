@@ -49,13 +49,3 @@ func GRPCMetricsObserver() grpcx.ClientCallObserver {
 		RecordGRPCRequest(result.Service, result.Method, result.Cost.Seconds(), result.Err)
 	}
 }
-
-// GetGRPCRequestsTotal 获取 gRPC 请求总数指标。
-func GetGRPCRequestsTotal() *prometheus.CounterVec {
-	return gRPCRequestsTotal
-}
-
-// GetGRPCRequestDuration 获取 gRPC 请求耗时指标。
-func GetGRPCRequestDuration() *prometheus.HistogramVec {
-	return gRPCRequestDuration
-}

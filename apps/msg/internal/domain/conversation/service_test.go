@@ -409,6 +409,22 @@ func TestMarkRead_P2P_WritesReadReceiptOutbox(t *testing.T) {
 	assertMarkReadEvent(t, gotEvents[1], "p2p-peer-reader", "MSG_READ_RECEIPT", "peer", "", pb.ConvType_CONV_TYPE_P2P, 88)
 }
 
+func TestMarkRead_P2P_RejectsOwnerOutsideConversation(t *testing.T) {
+	repositoryCalled := false
+	repo := &mockRepo{
+		updateReadOutboxFn: func(context.Context, string, string, int64, []OutboxEvent) (*model.Conversation, error) {
+			repositoryCalled = true
+			return &model.Conversation{}, nil
+		},
+	}
+	svc := NewService(repo)
+
+	_, err := svc.MarkRead(context.Background(), "carol", "p2p-alice-bob", 88)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not a participant")
+	assert.False(t, repositoryCalled)
+}
+
 func TestMarkRead_GroupMemberWithoutConversationUpsertsReadSeq(t *testing.T) {
 	var gotEvents []OutboxEvent
 	var upsertCalled bool

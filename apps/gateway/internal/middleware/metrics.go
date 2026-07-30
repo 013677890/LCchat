@@ -147,18 +147,3 @@ func PrometheusMiddleware() gin.HandlerFunc {
 		}
 	}
 }
-
-// GetHTTPRequestsTotal 获取 HTTP 请求总数指标（可用于监控面板）
-func GetHTTPRequestsTotal() *prometheus.CounterVec {
-	return httpRequestsTotal
-}
-
-// GetHTTPBusinessCodeTotal 获取业务状态码统计指标
-func GetHTTPBusinessCodeTotal() *prometheus.CounterVec {
-	return httpBusinessCodeTotal
-}
-
-// GetHTTPRequestDuration 获取 HTTP 请求耗时指标
-func GetHTTPRequestDuration() *prometheus.HistogramVec {
-	return httpRequestDuration
-}

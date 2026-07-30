@@ -32,11 +32,6 @@ func SetEmailConfig(config EmailConfig) {
 	defaultEmailConfig = config
 }
 
-// GetEmailConfig 获取当前邮件配置
-func GetEmailConfig() EmailConfig {
-	return defaultEmailConfig
-}
-
 // GenerateVerifyCode 生成指定位数的数字验证码
 // length: 验证码长度，推荐 6 位
 func GenerateVerifyCode(length int) (string, error) {
@@ -153,20 +148,6 @@ func sendEmail(config EmailConfig, toEmail, subject, body string) error {
 	return nil
 }
 
-// SendCustomEmail 发送自定义内容的邮件
-// toEmail: 收件人邮箱
-// subject: 邮件主题
-// body: 邮件内容（支持 HTML）
-func SendCustomEmail(toEmail, subject, body string) error {
-	config := defaultEmailConfig
-
-	if config.SenderEmail == "" || config.AuthPassword == "" {
-		return fmt.Errorf("邮件配置不完整，请先调用 SetEmailConfig 设置发件人邮箱和授权码")
-	}
-
-	return sendEmail(config, toEmail, subject, body)
-}
-
 // ValidateEmail 简单的邮箱格式验证
 func ValidateEmail(email string) bool {
 	// 简单验证：包含 @ 且 @ 后有 .
@@ -192,25 +173,4 @@ func ValidateEmail(email string) bool {
 
 	// @ 必须存在，且 . 必须在 @ 之后
 	return atIndex > 0 && dotIndex > atIndex+1 && dotIndex < len(email)-1
-}
-
-// GetCommonSMTPConfig 获取常见邮箱的 SMTP 配置
-func GetCommonSMTPConfig(provider string) (host string, port int) {
-	configs := map[string]struct {
-		host string
-		port int
-	}{
-		"qq":      {"smtp.qq.com", 465},
-		"163":     {"smtp.163.com", 465},
-		"126":     {"smtp.126.com", 465},
-		"gmail":   {"smtp.gmail.com", 587},
-		"outlook": {"smtp.office365.com", 587},
-	}
-
-	if config, ok := configs[provider]; ok {
-		return config.host, config.port
-	}
-
-	// 默认返回 QQ 邮箱配置
-	return "smtp.qq.com", 465
 }

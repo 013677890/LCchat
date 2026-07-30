@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"time"
 )
 
@@ -48,21 +50,21 @@ func Encode(payload any) (string, error) {
 	return string(data), nil
 }
 
-// DecodeUserCreated 兼容解析 user_created 事件负载。
+// DecodeUserCreated 严格解析当前 user_created 事件负载。
 func DecodeUserCreated(message []byte) (UserCreatedPayload, error) {
 	return decodeEventPayload(message, func(payload *UserCreatedPayload) bool {
 		return payload.EventID != "" && payload.UserUUID != ""
 	})
 }
 
-// DecodeProfileDisplayChanged 兼容解析 profile_display_changed 事件负载。
+// DecodeProfileDisplayChanged 严格解析当前 profile_display_changed 事件负载。
 func DecodeProfileDisplayChanged(message []byte) (ProfileDisplayChangedPayload, error) {
 	return decodeEventPayload(message, func(payload *ProfileDisplayChangedPayload) bool {
 		return payload.EventID != "" && payload.UserUUID != ""
 	})
 }
 
-// DecodeAccountDeleted 兼容解析 account.deleted 事件负载。
+// DecodeAccountDeleted 严格解析当前 account.deleted 事件负载。
 func DecodeAccountDeleted(message []byte) (AccountDeletedPayload, error) {
 	return decodeEventPayload(message, func(payload *AccountDeletedPayload) bool {
 		return payload.EventID != "" && payload.UserUUID != ""
@@ -71,56 +73,28 @@ func DecodeAccountDeleted(message []byte) (AccountDeletedPayload, error) {
 
 func decodeEventPayload[T any](message []byte, isValid func(*T) bool) (T, error) {
 	var zero T
-	var lastErr error
+	trimmed := bytes.TrimSpace(message)
+	if len(trimmed) == 0 {
+		return zero, errors.New("event payload is empty")
+	}
 
-	for _, candidate := range collectPayloadCandidates(message, 0, map[string]struct{}{}) {
-		var payload T
-		if err := json.Unmarshal(candidate, &payload); err != nil {
-			lastErr = err
-			continue
+	var payload T
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		return zero, fmt.Errorf("event payload is not the current strict JSON contract: %w", err)
+	}
+
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return zero, errors.New("event payload contains multiple JSON values")
 		}
-		if isValid(&payload) {
-			return payload, nil
-		}
+		return zero, fmt.Errorf("event payload contains trailing data: %w", err)
 	}
 
-	if lastErr != nil {
-		return zero, lastErr
+	if !isValid(&payload) {
+		return zero, errors.New("event payload missing required fields")
 	}
-	return zero, errors.New("event payload missing required fields")
-}
-
-func collectPayloadCandidates(raw []byte, depth int, visited map[string]struct{}) [][]byte {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || depth > 4 {
-		return nil
-	}
-
-	key := string(trimmed)
-	if _, exists := visited[key]; exists {
-		return nil
-	}
-	visited[key] = struct{}{}
-
-	results := [][]byte{trimmed}
-
-	var text string
-	if err := json.Unmarshal(trimmed, &text); err == nil {
-		results = append(results, collectPayloadCandidates([]byte(text), depth+1, visited)...)
-	}
-
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(trimmed, &object); err != nil {
-		return results
-	}
-
-	for _, field := range []string{"payload", "after", "data"} {
-		candidate, ok := object[field]
-		if !ok {
-			continue
-		}
-		results = append(results, collectPayloadCandidates(candidate, depth+1, visited)...)
-	}
-
-	return results
+	return payload, nil
 }

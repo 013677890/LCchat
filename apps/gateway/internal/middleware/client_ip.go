@@ -76,14 +76,6 @@ func GetClientIPSafe(c *gin.Context) (string, bool) {
 	return ip, true
 }
 
-// GetClientIPOrDefault 获取 IP，失败时返回默认值
-func GetClientIPOrDefault(c *gin.Context, defaultIP string) string {
-	if ip, ok := GetClientIPSafe(c); ok {
-		return ip
-	}
-	return defaultIP
-}
-
 // ClientIPMiddleware 注入 IP 到 Context
 func ClientIPMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -98,9 +90,4 @@ func ClientIPMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
-}
-
-// ClientIPFromGinContext 从 Gin Context 获取 IP（便捷方法）
-func ClientIPFromGinContext(c *gin.Context) string {
-	return ctxmeta.ClientIPFromGin(c)
 }

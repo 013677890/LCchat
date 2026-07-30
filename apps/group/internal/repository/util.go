@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -455,17 +454,6 @@ func sortGroupMembers(members []*model.GroupMember) {
 	})
 }
 
-// isRedisWrongType 用于识别 Redis key 类型污染。
-//
-// 一旦发现类型错误，调用方按 miss 回源；需要清理时必须放进同一段 Lua，
-// 或交给版本化对账覆盖，避免“先读到旧值、后 DEL 掉并发新值”的删除竞态。
-func isRedisWrongType(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "WRONGTYPE")
-}
-
 // decodeStrictCacheJSON 只接受当前结构声明过的字段，并拒绝尾随 JSON。
 //
 // 缓存不是跨版本兼容接口：新旧二进制混跑时，未知字段不会被静默忽略，而是让该
@@ -484,16 +472,4 @@ func decodeStrictCacheJSON(raw string, dst any) error {
 		return fmt.Errorf("缓存值包含尾随数据: %w", err)
 	}
 	return nil
-}
-
-// getRandomExpireTime 为基础 TTL 增加 10% 抖动，降低缓存雪崩概率。
-func getRandomExpireTime(baseExpire time.Duration) time.Duration {
-	jitterRange := float64(baseExpire) * 0.1
-	jitter := time.Duration(rand.Float64()*float64(jitterRange)*2 - float64(jitterRange))
-	return baseExpire + jitter
-}
-
-// getRandomBool 用于执行低概率续期等轻量后台优化。
-func getRandomBool(probability float64) bool {
-	return rand.Float64() < probability
 }

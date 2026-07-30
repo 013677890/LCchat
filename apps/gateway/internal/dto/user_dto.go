@@ -171,17 +171,6 @@ func ConvertToProtoChangeEmailRequest(dto *ChangeEmailRequest) *authpb.ChangeEma
 	}
 }
 
-// ConvertToProtoChangeTelephoneRequest 将 DTO 转换为 Protobuf 请求
-func ConvertToProtoChangeTelephoneRequest(dto *ChangeTelephoneRequest) *authpb.ChangeTelephoneRequest {
-	if dto == nil {
-		return nil
-	}
-	return &authpb.ChangeTelephoneRequest{
-		NewTelephone: dto.NewTelephone,
-		VerifyCode:   dto.VerifyCode,
-	}
-}
-
 // ConvertToProtoParseQRCodeRequest 将 DTO 转换为 Protobuf 请求
 func ConvertToProtoParseQRCodeRequest(dto *ParseQRCodeRequest) *userpb.ParseQRCodeRequest {
 	if dto == nil {
@@ -246,24 +235,6 @@ func ConvertUpdateProfileResponseFromProto(pb *userpb.UpdateProfileResponse) *Up
 	}
 }
 
-// ConvertUploadAvatarResponseFromProto 将 Protobuf 上传头像响应转换为 DTO
-func ConvertUploadAvatarResponseFromProto(pb *userpb.UploadAvatarResponse) *UploadAvatarResponse {
-	if pb == nil {
-		return nil
-	}
-	return &UploadAvatarResponse{
-		AvatarURL: pb.AvatarUrl,
-	}
-}
-
-// ConvertChangePasswordResponseFromProto 将 Protobuf 修改密码响应转换为 DTO
-func ConvertChangePasswordResponseFromProto(pb *authpb.ChangePasswordResponse) *ChangePasswordResponse {
-	if pb == nil {
-		return nil
-	}
-	return &ChangePasswordResponse{}
-}
-
 // ConvertChangeEmailResponseFromProto 将 Protobuf 换绑邮箱响应转换为 DTO
 func ConvertChangeEmailResponseFromProto(pb *authpb.ChangeEmailResponse) *ChangeEmailResponse {
 	if pb == nil {
@@ -271,16 +242,6 @@ func ConvertChangeEmailResponseFromProto(pb *authpb.ChangeEmailResponse) *Change
 	}
 	return &ChangeEmailResponse{
 		Email: pb.Email,
-	}
-}
-
-// ConvertChangeTelephoneResponseFromProto 将 Protobuf 换绑手机响应转换为 DTO
-func ConvertChangeTelephoneResponseFromProto(pb *authpb.ChangeTelephoneResponse) *ChangeTelephoneResponse {
-	if pb == nil {
-		return nil
-	}
-	return &ChangeTelephoneResponse{
-		Telephone: pb.Telephone,
 	}
 }
 
