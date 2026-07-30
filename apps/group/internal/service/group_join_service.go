@@ -136,6 +136,7 @@ func (s *groupServiceImpl) ListMyJoinGroupApplications(ctx context.Context, req 
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取我的入群申请列表失败")
 	}
+
 	// 用户侧列表需要直接展示群名称和头像，因此在 service 层一次性补齐群资料，
 	// 避免 gateway 为了渲染列表再额外回查一轮群信息。
 	groupUUIDs := collectJoinRequestGroupUUIDs(items)
@@ -150,6 +151,7 @@ func (s *groupServiceImpl) ListMyJoinGroupApplications(ctx context.Context, req 
 		}
 		respItems = append(respItems, buildMyJoinGroupApplicationListItemProto(item, groups[item.GroupUuid]))
 	}
+
 	return &pb.ListMyJoinGroupApplicationsResponse{Items: respItems, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
 }
 
@@ -210,6 +212,7 @@ func (s *groupServiceImpl) ListJoinRequests(ctx context.Context, req *pb.ListJoi
 	if err != nil {
 		return nil, mapGroupWriteError(err, "获取入群申请列表失败")
 	}
+
 	// 审批侧列表按“申请事实 + 申请人资料”输出，先批量补齐资料可以避免逐条查询造成 N+1。
 	userUUIDs := collectJoinRequestApplicantUUIDs(items)
 	profiles, err := s.groupRepo.GetUserProfiles(ctx, userUUIDs)
@@ -223,6 +226,7 @@ func (s *groupServiceImpl) ListJoinRequests(ctx context.Context, req *pb.ListJoi
 		}
 		respItems = append(respItems, buildGroupJoinRequestItemProto(item, profiles[item.ApplicantUuid]))
 	}
+
 	return &pb.ListJoinRequestsResponse{Items: respItems, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
 }
 
@@ -248,6 +252,7 @@ func (s *groupServiceImpl) ListReviewedJoinRequests(ctx context.Context, req *pb
 	if err != nil {
 		return nil, mapGroupWriteError(err, "获取审批记录列表失败")
 	}
+
 	// 审批记录列表同样需要回显申请人资料，这里复用批量聚合策略，避免管理端列表退化成多次回源。
 	userUUIDs := collectJoinRequestApplicantUUIDs(items)
 	profiles, err := s.groupRepo.GetUserProfiles(ctx, userUUIDs)
@@ -261,6 +266,7 @@ func (s *groupServiceImpl) ListReviewedJoinRequests(ctx context.Context, req *pb
 		}
 		respItems = append(respItems, buildReviewedJoinRequestItemProto(item, profiles[item.ApplicantUuid]))
 	}
+
 	return &pb.ListReviewedJoinRequestsResponse{Items: respItems, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
 }
 

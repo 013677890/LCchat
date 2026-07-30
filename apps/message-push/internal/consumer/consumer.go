@@ -99,6 +99,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 				)
 			}
 		}
+
 		if err := reader.CommitMessages(ctx, msg); err != nil {
 			metrics.KafkaCommitErrors.Inc()
 			logger.Warn(ctx, "message-push 提交 Kafka offset 失败",
@@ -116,6 +117,7 @@ func (c *Consumer) runHandleWithRetry(ctx context.Context, payload []byte) error
 			metrics.HandleRetries.WithLabelValues("failed").Observe(float64(attempt))
 			return err
 		}
+
 		// 每次尝试套一层超时预算，防止单条消息（尤其大群扇出）长时间占住分区。
 		// 仅约束本次尝试；外层 ctx 仍用于关停判断与退避，二者互不干扰。
 		attemptCtx, cancel := context.WithTimeout(ctx, handleAttemptTimeout)
@@ -147,6 +149,7 @@ func (c *Consumer) runHandleWithRetry(ctx context.Context, payload []byte) error
 		case <-time.After(backoff):
 		}
 	}
+
 	metrics.HandleRetries.WithLabelValues("failed").Observe(float64(handleMaxAttempts))
 	return lastErr
 }

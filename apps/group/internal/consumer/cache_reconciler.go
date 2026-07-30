@@ -178,10 +178,12 @@ func (r *CacheReconciler) RunOnce(ctx context.Context) error {
 				}
 			}
 		}
+
 		if len(targets) < r.batchSize {
 			break
 		}
 	}
+
 	if omitted := failureCount - len(errs); omitted > 0 {
 		errs = append(errs, fmt.Errorf(
 			"%d additional group cache reconcile errors omitted after %d samples",
@@ -189,5 +191,6 @@ func (r *CacheReconciler) RunOnce(ctx context.Context) error {
 			maxCacheReconcileErrorSamples,
 		))
 	}
+
 	return errors.Join(errs...)
 }

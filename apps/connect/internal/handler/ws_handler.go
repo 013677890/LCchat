@@ -40,10 +40,12 @@ func buildCheckOrigin() func(*http.Request) bool {
 			return origin == "http://"+r.Host || origin == "https://"+r.Host
 		}
 	}
+
 	if raw == "*" {
 		// 显式配置 "*" 时放开所有来源（仅用于本地开发）。
 		return func(_ *http.Request) bool { return true }
 	}
+
 	// 解析白名单并构建快速查找表。
 	allowed := make(map[string]struct{})
 	for _, origin := range strings.Split(raw, ",") {
@@ -52,6 +54,7 @@ func buildCheckOrigin() func(*http.Request) bool {
 			allowed[origin] = struct{}{}
 		}
 	}
+
 	return func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {

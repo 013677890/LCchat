@@ -25,10 +25,12 @@ func buildDeviceUserAgent(deviceInfo *authpb.DeviceInfo) string {
 	osVersion := deviceInfo.GetOsVersion()
 
 	result := ""
+
 	// 第一段优先放 platform，作为设备展示文案的主标签。
 	if platform != "" {
 		result = platform
 	}
+
 	// 第二段拼 appVersion；只有前面已有内容时才补分隔符。
 	if appVersion != "" {
 		if result != "" {
@@ -37,6 +39,7 @@ func buildDeviceUserAgent(deviceInfo *authpb.DeviceInfo) string {
 			result = appVersion
 		}
 	}
+
 	// 最后一段把 osVersion 放进括号，保持设备列表展示更紧凑。
 	if osVersion != "" {
 		if result != "" {

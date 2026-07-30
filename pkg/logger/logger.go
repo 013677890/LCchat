@@ -51,6 +51,7 @@ func Build(cfg config.LoggerConfig) (*zap.Logger, error) {
 		EncodeDuration: zapcore.MillisDurationEncoder,                 // 耗时以毫秒输出
 		EncodeCaller:   zapcore.ShortCallerEncoder,                    // 文件:行 短路径
 	}
+
 	// 根据 Encoding 配置选择编码器
 	var encoder zapcore.Encoder
 	if strings.ToLower(cfg.Encoding) == "console" {
@@ -74,6 +75,7 @@ func Build(cfg config.LoggerConfig) (*zap.Logger, error) {
 		zap.AddCaller(),
 		zap.AddCallerSkip(1), // 跳过封装层，获取真正的业务代码行号
 	}
+
 	if cfg.Development {
 		opts = append(opts, zap.Development(), zap.AddStacktrace(zapcore.ErrorLevel))
 	}
@@ -103,6 +105,7 @@ func buildSyncer(paths []string, fallback zapcore.WriteSyncer) zapcore.WriteSync
 			}
 		}
 	}
+
 	if len(syncers) == 0 {
 		return fallback
 	}

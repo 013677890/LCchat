@@ -81,6 +81,7 @@ func (r *groupRepositoryImpl) ListMyJoinGroupApplications(ctx context.Context, a
 		Find(&items).Error; err != nil {
 		return nil, 0, WrapDBError(err)
 	}
+
 	return items, total, nil
 }
 
@@ -98,11 +99,13 @@ func (r *groupRepositoryImpl) ListReviewedJoinRequests(ctx context.Context, grou
 	if err := r.ensureGroupNormal(ctx, groupUUID); err != nil {
 		return nil, 0, err
 	}
+
 	// 审批记录属于管理视角数据，只允许管理员及以上角色读取，避免普通成员窥视审批历史。
 	// 统一入口同时约束正常成员状态与软删除标记，避免两个列表接口以后出现权限规则漂移。
 	if _, err := r.ensureActiveMemberRole(ctx, groupUUID, operatorUUID, memberRoleAdmin); err != nil {
 		return nil, 0, err
 	}
+
 	// 这里显式排除“申请人主动撤销”，保证审批记录只保留管理员真正处理过的历史。
 	statuses := []int8{joinRequestStatusApproved, joinRequestStatusRejected}
 	if status != nil {
@@ -127,6 +130,7 @@ func (r *groupRepositoryImpl) ListReviewedJoinRequests(ctx context.Context, grou
 		Find(&items).Error; err != nil {
 		return nil, 0, WrapDBError(err)
 	}
+
 	return items, total, nil
 }
 
@@ -151,9 +155,11 @@ func (r *groupRepositoryImpl) GetGroupsByUUIDs(ctx context.Context, groupUUIDs [
 		seen[groupUUID] = struct{}{}
 		unique = append(unique, groupUUID)
 	}
+
 	if len(unique) == 0 {
 		return result, nil
 	}
+
 	// 批量补展示字段前先过滤确定不存在的 group_uuid，避免申请列表里脏 UUID 持续穿透 DB。
 	queryUUIDs := r.filterGroupUUIDsByBloom(ctx, unique)
 	if len(queryUUIDs) == 0 {
@@ -165,6 +171,7 @@ func (r *groupRepositoryImpl) GetGroupsByUUIDs(ctx context.Context, groupUUIDs [
 		Find(&groups).Error; err != nil {
 		return nil, WrapDBError(err)
 	}
+
 	foundGroupUUIDs := make([]string, 0, len(groups))
 	for _, group := range groups {
 		if group == nil || group.Uuid == "" {
@@ -173,6 +180,7 @@ func (r *groupRepositoryImpl) GetGroupsByUUIDs(ctx context.Context, groupUUIDs [
 		result[group.Uuid] = group
 		foundGroupUUIDs = append(foundGroupUUIDs, group.Uuid)
 	}
+
 	r.addGroupUUIDsToBloomAsync(ctx, foundGroupUUIDs)
 	return result, nil
 }

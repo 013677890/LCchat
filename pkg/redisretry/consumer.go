@@ -86,6 +86,7 @@ func (c *RedisRetryConsumer) processMessage(ctx context.Context, message []byte)
 				"task":        task,
 			})
 		}
+
 		return err
 	}
 

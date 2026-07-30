@@ -57,6 +57,7 @@ func LoggingUnaryInterceptor(cfgs ...LoggingConfig) grpc.UnaryServerInterceptor 
 			logger.Duration("cost", cost),
 			logger.String("grpc_code", status.Code(err).String()),
 		}
+
 		if err != nil {
 			appErr := apperr.WithStack(err)
 			code := apperr.Code(appErr)

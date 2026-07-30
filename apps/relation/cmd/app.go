@@ -110,16 +110,19 @@ func (a *RelationApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 metrics server 失败: %w", err))
 		}
 	}
+
 	if a.grpcServer != nil {
 		if err := grpcx.GracefulStop(ctx, a.grpcServer, a.grpcShutdownTimeout); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			errs = append(errs, fmt.Errorf("关闭 grpc server 失败: %w", err))
 		}
 	}
+
 	if a.grpcListener != nil {
 		if err := a.grpcListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			errs = append(errs, fmt.Errorf("关闭 grpc listener 失败: %w", err))
 		}
 	}
+
 	if a.asyncPool != nil {
 		var err error
 		if async.Pool() == a.asyncPool {
@@ -131,21 +134,25 @@ func (a *RelationApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("释放 Async 协程池失败: %w", err))
 		}
 	}
+
 	if a.accountDeletedConsumer != nil {
 		if err := a.accountDeletedConsumer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Relation account.deleted 消费者失败: %w", err))
 		}
 	}
+
 	if a.realtimeProducer != nil {
 		if err := a.realtimeProducer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Relation realtime.push 生产者失败: %w", err))
 		}
 	}
+
 	if a.redisClient != nil {
 		if err := a.redisClient.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Redis 客户端失败: %w", err))
 		}
 	}
+
 	if a.db != nil {
 		sqlDB, err := a.db.DB()
 		if err != nil {
@@ -154,6 +161,7 @@ func (a *RelationApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 MySQL 连接失败: %w", err))
 		}
 	}
+
 	if a.logger != nil {
 		_ = a.logger.Sync()
 	}

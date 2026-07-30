@@ -55,9 +55,11 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 	if currentUserUUID == "" {
 		return nil, apperr.New(consts.CodeUnauthorized)
 	}
+
 	// 2. 调用用户服务获取他人信息(gRPC)
 
 	grpcReq := dto.ConvertToProtoGetOtherProfileRequest(req)
+
 	// 3. 请求内 fan-out 仍走协程池，但必须继承父请求取消和超时语义。
 	group := async.NewGroup(ctx, 5*time.Second)
 
@@ -114,6 +116,7 @@ func (s *UserServiceImpl) GetOtherProfile(ctx context.Context, req *dto.GetOther
 	} else if friendResp != nil {
 		isFriend = friendResp.IsFriend
 	}
+
 	// 6. 资料域当前只返回公开资料字段，非好友场景无需再裁剪账号域信息。
 
 	// 7. 返回响应
@@ -183,6 +186,7 @@ func (s *UserServiceImpl) searchUserByEmail(ctx context.Context, req *dto.Search
 			TotalPages: 1,
 		},
 	}
+
 	return s.fillSearchUserFriendStatus(ctx, resp), nil
 }
 
@@ -220,6 +224,7 @@ func (s *UserServiceImpl) fillSearchUserFriendStatus(ctx context.Context, resp *
 			seen[item.UUID] = struct{}{}
 			peerUUIDs = append(peerUUIDs, item.UUID)
 		}
+
 		if len(peerUUIDs) > 0 {
 			batchResp, err := s.userClient.BatchCheckIsFriend(ctx, &relationpb.BatchCheckIsFriendRequest{UserUuid: currentUserUUID, PeerUuids: peerUUIDs})
 			if err != nil {
@@ -235,6 +240,7 @@ func (s *UserServiceImpl) fillSearchUserFriendStatus(ctx context.Context, resp *
 					}
 					result[item.PeerUuid] = item.IsFriend
 				}
+
 				for _, item := range resp.Items {
 					if item == nil || item.UUID == "" {
 						continue
@@ -244,6 +250,7 @@ func (s *UserServiceImpl) fillSearchUserFriendStatus(ctx context.Context, resp *
 			}
 		}
 	}
+
 	return resp
 }
 

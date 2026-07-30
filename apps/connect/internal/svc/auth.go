@@ -55,6 +55,7 @@ func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clie
 		)
 		return nil, ErrTokenInvalid
 	}
+
 	if claims.UserUUID == "" || claims.DeviceID == "" {
 		logger.Warn(ctx, "连接鉴权失败：JWT claims 缺少必要字段",
 			logger.String("user_uuid", claims.UserUUID),
@@ -63,6 +64,7 @@ func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clie
 		)
 		return nil, ErrTokenInvalid
 	}
+
 	if claims.DeviceID != deviceID {
 		logger.Warn(ctx, "连接鉴权失败：device_id 不匹配",
 			logger.String("user_uuid", claims.UserUUID),
@@ -77,6 +79,7 @@ func (s *ConnectService) Authenticate(ctx context.Context, token, deviceID, clie
 	if s.redisClient != nil {
 		key := rediskey.AccessTokenKey(claims.UserUUID, claims.DeviceID)
 		storedHash, getErr := s.redisClient.Get(ctx, key).Result()
+
 		switch {
 		case getErr == redis.Nil:
 			logger.Warn(ctx, "连接鉴权失败：AccessToken 哈希不存在",

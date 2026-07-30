@@ -52,10 +52,12 @@ func GetClientIPFromContext(ctx context.Context) string {
 		if values := md.Get(ctxmeta.MetadataXRealIP); len(values) > 0 {
 			return values[0]
 		}
+
 		// 其次使用 X-Forwarded-For 的第一个 IP
 		if values := md.Get(ctxmeta.MetadataXForwardedFor); len(values) > 0 {
 			return values[0]
 		}
+
 		// 最后回退 client_ip metadata
 		if values := md.Get(ctxmeta.MetadataClientIP); len(values) > 0 {
 			return values[0]
@@ -67,6 +69,7 @@ func GetClientIPFromContext(ctx context.Context) string {
 		if tcpAddr, ok := p.Addr.(*net.TCPAddr); ok {
 			return tcpAddr.IP.String()
 		}
+
 		// 如果不是 TCP，尝试解析字符串
 		return parseIPFromAddr(p.Addr.String())
 	}

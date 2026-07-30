@@ -141,6 +141,7 @@ func (r *userRepositoryImpl) addUserUUIDsToBloomAsync(ctx context.Context, userU
 		seen[userUUID] = struct{}{}
 		items = append(items, userUUID)
 	}
+
 	if len(items) == 0 {
 		return
 	}
@@ -163,6 +164,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	cacheKey := rediskey.UserProfileKey(uuid)
 	if r.redisClient != nil {
 		cachedData, err := r.redisClient.Get(ctx, cacheKey).Result()
+
 		if err == nil {
 			// 缓存命中，反序列化返回
 			// 先判空
@@ -174,6 +176,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 				return &profile, nil
 			}
 		}
+
 		if err != nil && err != redis.Nil {
 			LogRedisError(ctx, err) // 记录日志 降级处理
 		}
@@ -188,6 +191,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	// ==================== 3. Bloom 判定可能存在，查询 MySQL ====================
 	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Where("user_uuid = ?", uuid).First(&profile).Error
+
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			r.setUserProfileEmptyCacheAsync(ctx, uuid)
@@ -196,6 +200,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 			return nil, WrapDBError(err)
 		}
 	}
+
 	r.addUserUUIDToBloomBestEffort(ctx, profile.UserUuid)
 
 	// ==================== 4. 存入 Redis 缓存 ====================
@@ -235,6 +240,7 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error
+
 		if err == nil {
 			return nil
 		}
@@ -252,6 +258,7 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
+
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "user_uuid"}},
 			DoNothing: true,
@@ -265,6 +272,7 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 		}
 		return nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -297,8 +305,10 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 		}
 
 		cachedValues, err := r.redisClient.MGet(ctx, keys...).Result()
+
 		if err != nil && err != redis.Nil {
 			LogRedisError(ctx, err)
+
 			// Redis 异常时降级走 DB 全量查询
 			cachedValues = nil
 		}
@@ -372,6 +382,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 			foundUUIDs[profile.UserUuid] = struct{}{}
 			foundUUIDList = append(foundUUIDList, profile.UserUuid)
 		}
+
 		r.addUserUUIDsToBloomAsync(ctx, foundUUIDList)
 
 		// 标记不存在的用户
@@ -420,6 +431,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 		if profile, ok := profileMap[uuid]; ok && profile != nil {
 			result = append(result, profile)
 		}
+
 		// profile == nil 表示用户不存在，跳过
 	}
 
@@ -447,6 +459,7 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 			Nickname: profile.Nickname,
 			Avatar:   profile.Avatar,
 		})
+
 		if err != nil {
 			return err
 		}
@@ -456,6 +469,7 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 		}
 		return nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -483,6 +497,7 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 			Nickname: profile.Nickname,
 			Avatar:   profile.Avatar,
 		})
+
 		if err != nil {
 			return err
 		}
@@ -492,6 +507,7 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 		}
 		return nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -562,6 +578,7 @@ func (r *userRepositoryImpl) applyBasicInfoUpdate(db *gorm.DB, userUUID string, 
 		Error; err != nil {
 		return WrapDBError(err)
 	}
+
 	return nil
 }
 

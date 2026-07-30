@@ -109,6 +109,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
 	}
+
 	if !isValid {
 		return nil, apperr.New(consts.CodeVerifyCodeError)
 	}
@@ -139,6 +140,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 		Nickname: user.LoginNickname,
 		Avatar:   user.LoginAvatar,
 	})
+
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "序列化注册事件失败")
 	}
@@ -189,12 +191,14 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		logPasswordLoginFlow(ctx, "get_user", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户失败")
 	}
+
 	if user.Status == 1 {
 		return nil, apperr.New(consts.CodeUserDisabled)
 	}
 
 	// 把 user_uuid 写回上下文，便于后续降级日志和 repository 调用复用同一身份信息。
 	ctx = ctxmeta.WithUserUUID(ctx, user.UserUuid)
+
 	// 密码错误时直接返回业务错误，不继续生成 token。
 	comparePasswordStartedAt := time.Now()
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
@@ -210,6 +214,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	if err != nil {
 		return nil, err
 	}
+
 	// IP 仅用于设备会话落库展示，不参与 token 生成。
 	clientIP := util.GetClientIPFromContext(ctx)
 
@@ -222,6 +227,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		logPasswordLoginFlow(ctx, "generate_token", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成访问令牌失败")
 	}
+
 	refreshToken, err := util.GenerateRefreshToken()
 	snapshot.generateTokenCost = time.Since(generateTokenStartedAt)
 	if err != nil {
@@ -239,7 +245,9 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		logPasswordLoginFlow(ctx, "store_access_token", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 AccessToken 失败")
 	}
+
 	snapshot.storeAccessTokenCost = time.Since(storeAccessTokenStartedAt)
+
 	// RefreshToken 与 AccessToken 一样属于主链路数据，失败时同样直接返回错误。
 	storeRefreshTokenStartedAt := time.Now()
 	if err := s.deviceRepo.StoreRefreshToken(ctx, user.UserUuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
@@ -248,6 +256,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		logPasswordLoginFlow(ctx, "store_refresh_token", err, snapshot)
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 RefreshToken 失败")
 	}
+
 	snapshot.storeRefreshTokenCost = time.Since(storeRefreshTokenStartedAt)
 
 	// 设备会话只承载设备展示与在线态所需的最小字段。
@@ -261,6 +270,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		UserAgent:  buildDeviceUserAgent(req.DeviceInfo),
 		Status:     model.DeviceStatusOnline,
 	}
+
 	// 设备会话落库失败只做告警，不回滚已经成功生成的登录态。
 	upsertSessionStartedAt := time.Now()
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
@@ -268,6 +278,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		logger.Warn(ctx, "设备会话落库失败，按降级处理继续登录", logger.ErrorField("error", err))
 	}
 	snapshot.upsertSessionCost = time.Since(upsertSessionStartedAt)
+
 	// 活跃时间是在线态优化信息，失败时降级即可，由下一次心跳/读写再覆盖。
 	setActiveTimestampStartedAt := time.Now()
 	if err := s.deviceRepo.SetActiveTimestamp(ctx, user.UserUuid, deviceID, time.Now().Unix()); err != nil {
@@ -278,6 +289,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 			logger.ErrorField("error", err),
 		)
 	}
+
 	snapshot.setActiveTimestampCost = time.Since(setActiveTimestampStartedAt)
 	snapshot.totalCost = time.Since(loginStartedAt)
 	logPasswordLoginFlow(ctx, "completed", nil, snapshot)
@@ -312,6 +324,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户失败")
 	}
+
 	if user.Status == 1 {
 		return nil, apperr.New(consts.CodeUserDisabled)
 	}
@@ -330,9 +343,11 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
 	}
+
 	if !isValid {
 		return nil, apperr.New(consts.CodeVerifyCodeError)
 	}
+
 	// 验证码消费成功后尽力删除；即使删除失败，也不影响本次登录结果。
 	if err := s.authRepo.DeleteVerifyCode(ctx, req.Email, 2); err != nil {
 		logger.Warn(ctx, "删除验证码失败", logger.ErrorField("error", err))
@@ -368,6 +383,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 		UserAgent:  buildDeviceUserAgent(req.DeviceInfo),
 		Status:     model.DeviceStatusOnline,
 	}
+
 	// 会话和活跃时间仍按 best-effort 处理，失败不影响已经成功签发的登录态。
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
 		logger.Warn(ctx, "设备会话落库失败，按降级处理继续登录", logger.ErrorField("error", err))
@@ -415,10 +431,12 @@ func (s *authServiceImpl) SendVerifyCode(ctx context.Context, req *authpb.SendVe
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成验证码失败")
 	}
+
 	// 先存 Redis，再发邮件，保证邮件中携带的是当前真实生效验证码。
 	if err := s.authRepo.StoreVerifyCode(ctx, req.Email, code, req.Type, 2*time.Minute); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "存储验证码失败")
 	}
+
 	// 最后才真正发邮件，避免 Redis 未落盘时出现“用户收到验证码但系统不认”的情况。
 	if err := util.SendVerifyCodeEmail(req.Email, code, 2); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "发送验证码邮件失败")
@@ -478,6 +496,7 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *authpb.RefreshT
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取 Refresh Token 失败")
 	}
+
 	if storedRefreshToken != req.RefreshToken {
 		return nil, apperr.New(consts.CodeInvalidToken)
 	}
@@ -487,10 +506,12 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *authpb.RefreshT
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成 Access Token 失败")
 	}
+
 	// 新 AccessToken 会直接覆盖旧值，保证同设备后续访问统一走最新令牌。
 	if err := s.deviceRepo.StoreAccessToken(ctx, userUUID, deviceID, newAccessToken, util.AccessExpire); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新 Access Token 失败")
 	}
+
 	// 设备信息 TTL 续期只影响设备列表缓存命中率，不影响 Refresh 主流程成功与否。
 	if err := s.deviceRepo.TouchDeviceInfoTTL(ctx, userUUID); err != nil {
 		logger.Warn(ctx, "续期设备信息缓存失败",
@@ -528,10 +549,12 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *authpb.LogoutRequest)
 	if userUUID == "" {
 		return apperr.New(consts.CodeInternalError)
 	}
+
 	// 先删 Token，确保该设备马上失去继续访问接口的能力。
 	if err := s.deviceRepo.DeleteTokens(ctx, userUUID, req.DeviceId); err != nil {
 		return apperr.Wrap(err, consts.CodeInternalError, "删除 Token 失败")
 	}
+
 	// 再把设备会话标记为 logged_out；如果会话本身不存在，则按幂等成功处理。
 	if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, model.DeviceStatusLoggedOut); err != nil {
 		if !errors.Is(err, repository.ErrRecordNotFound) {
@@ -542,6 +565,7 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *authpb.LogoutRequest)
 			logger.String("device_id", req.DeviceId),
 		)
 	}
+
 	// 最后尽力补一笔活跃时间，便于设备列表展示最近一次登出前活动时刻。
 	if err := s.deviceRepo.SetActiveTimestamp(ctx, userUUID, req.DeviceId, time.Now().Unix()); err != nil {
 		logger.Warn(ctx, "写入登出活跃时间失败",
@@ -550,6 +574,7 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *authpb.LogoutRequest)
 			logger.ErrorField("error", err),
 		)
 	}
+
 	return nil
 }
 
@@ -583,9 +608,11 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *authpb.ResetPa
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
 	}
+
 	if !isValid {
 		return apperr.New(consts.CodeVerifyCodeError)
 	}
+
 	// 阻止把新密码重置成旧密码，保持与修改密码链路一致的业务语义。
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.NewPassword)); err == nil {
 		return apperr.New(consts.CodePasswordSameAsOld)
@@ -596,6 +623,7 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *authpb.ResetPa
 	if err != nil {
 		return apperr.Wrap(err, consts.CodeInternalError, "生成密码哈希失败")
 	}
+
 	// 密码更新成功即视为重置完成；验证码删除失败只记录降级日志。
 	if err := s.authRepo.UpdatePassword(ctx, user.UserUuid, string(hashedPassword)); err != nil {
 		return apperr.Wrap(err, consts.CodeInternalError, "更新密码失败")

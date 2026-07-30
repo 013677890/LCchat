@@ -108,6 +108,7 @@ func (s *ConnectService) ParseMessageAck(data []byte) (*MessageAckData, error) {
 				return nil, readErr
 			}
 			ack.ConvID = strings.TrimSpace(string(value))
+
 		case 2: // seq
 			if wireType != 0 {
 				return nil, errors.New("invalid seq wire type")
@@ -117,6 +118,7 @@ func (s *ConnectService) ParseMessageAck(data []byte) (*MessageAckData, error) {
 				return nil, readErr
 			}
 			ack.Seq = int64(value)
+
 		case 3: // msg_id
 			if wireType != 2 {
 				return nil, errors.New("invalid msg_id wire type")
@@ -126,6 +128,7 @@ func (s *ConnectService) ParseMessageAck(data []byte) (*MessageAckData, error) {
 				return nil, readErr
 			}
 			ack.MsgID = strings.TrimSpace(string(value))
+
 		default:
 			if err := skipProtoField(data, &idx, wireType); err != nil {
 				return nil, err
@@ -139,6 +142,7 @@ func (s *ConnectService) ParseMessageAck(data []byte) (*MessageAckData, error) {
 	if ack.Seq <= 0 {
 		return nil, errors.New("seq must be positive")
 	}
+
 	return &ack, nil
 }
 

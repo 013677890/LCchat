@@ -101,6 +101,7 @@ func (r *groupRepositoryImpl) addGroupUUIDsToBloomAsync(ctx context.Context, gro
 		seen[groupUUID] = struct{}{}
 		items = append(items, groupUUID)
 	}
+
 	if len(items) == 0 {
 		return
 	}

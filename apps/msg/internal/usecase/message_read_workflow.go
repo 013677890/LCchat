@@ -215,6 +215,7 @@ func executeBatchSyncMessages(
 
 	results := make([]*pb.ConversationSyncResult, len(prepared))
 	group := async.NewGroup(ctx, 0)
+
 	// 并发组负责请求取消、等待收敛和 panic 恢复；信号量只限制真正进入 Redis/MySQL
 	// 读取区间的任务数。即使一次提交 50 个会话，也最多有 8 个同时访问存储。
 	readSlots := make(chan struct{}, batchSyncConcurrency)
@@ -243,8 +244,10 @@ func executeBatchSyncMessages(
 					NextSeq:   item.afterSeq,
 					ErrorCode: int32(apperr.Code(pullErr)),
 				}
+
 				return nil
 			}
+
 			if resp == nil {
 				// 防御下游违反 “response 与 error 不可同时为 nil” 的函数契约。
 				results[index] = &pb.ConversationSyncResult{
@@ -252,10 +255,12 @@ func executeBatchSyncMessages(
 					NextSeq:   item.afterSeq,
 					ErrorCode: int32(consts.CodeInternalError),
 				}
+
 				return nil
 			}
 
 			nextSeq := item.afterSeq
+
 			// PullMessages 保证 messages 按 seq 升序。这里仍从尾部跳过潜在 nil 项，
 			// 避免某个异常元素把可安全推进的 next_seq 重置为 0。
 			for messageIndex := len(resp.Messages) - 1; messageIndex >= 0; messageIndex-- {
@@ -273,6 +278,7 @@ func executeBatchSyncMessages(
 				NextSeq:   nextSeq,
 				ErrorCode: int32(consts.CodeSuccess),
 			}
+
 			return nil
 		}); err != nil {
 			// Go 可能在父请求恰好取消时拒绝新任务；返回前仍需等待此前已提交的任务
@@ -368,6 +374,7 @@ func prepareBatchSyncRequest(req *pb.BatchSyncMessagesRequest) ([]preparedConver
 			item.Limit > batchSyncMaxLimit {
 			return nil, apperr.New(consts.CodeParamError)
 		}
+
 		if _, duplicated := seenConversationIDs[item.ConvId]; duplicated {
 			// 重复会话会让客户端无法确定应采用哪一个 next_seq，严格拒绝而不是静默合并。
 			return nil, apperr.New(consts.CodeParamError)

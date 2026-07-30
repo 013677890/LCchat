@@ -48,6 +48,7 @@ func (f Filter) Ensure(ctx context.Context, client *goredis.Client) error {
 		strconv.FormatFloat(f.ErrorRate, 'f', -1, 64),
 		strconv.FormatInt(f.Capacity, 10),
 	).Err()
+
 	if err != nil && !isBloomAlreadyExists(err) {
 		return err
 	}
@@ -102,6 +103,7 @@ func (f Filter) MExists(ctx context.Context, client *goredis.Client, items []str
 		}
 		result[i] = exists
 	}
+
 	return result, true, nil
 }
 

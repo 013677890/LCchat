@@ -98,6 +98,7 @@ func deliveryMetadata(ctx context.Context, message *pb.MessageEnvelope) manager.
 		)
 		return metadata
 	}
+
 	metadata.ConvID = strings.TrimSpace(item.GetConvId())
 	return metadata
 }

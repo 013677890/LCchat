@@ -162,6 +162,7 @@ func provideMsgGroupMembershipProjector(
 			cfg.MsgGroupMembershipGroupID,
 		)
 	}
+
 	workers, err := kafka.ParsePoolWorkers(os.Getenv("KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY"))
 	if err != nil {
 		return nil, fmt.Errorf("KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY: %w", err)

@@ -31,6 +31,7 @@ func RecoverMiddleware(stack bool) gin.HandlerFunc {
 						}
 					}
 				}
+
 				if brokenPipe {
 					logger.Warn(ctx, "客户端在握手阶段提前断开连接",
 						logger.Any("error", recovered),
@@ -60,6 +61,7 @@ func RecoverMiddleware(stack bool) gin.HandlerFunc {
 				c.Abort()
 			}
 		}()
+
 		c.Next()
 	}
 }

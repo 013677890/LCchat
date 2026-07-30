@@ -66,6 +66,7 @@ func (r *RedisRepository) ListUsersRoutes(ctx context.Context, userUUIDs []strin
 		}
 		cmds[userUUID] = pipe.HGetAll(ctx, rediskey.UserRoutingKey(userUUID))
 	}
+
 	if len(cmds) == 0 {
 		return result, nil
 	}
@@ -77,6 +78,7 @@ func (r *RedisRepository) ListUsersRoutes(ctx context.Context, userUUIDs []strin
 	now := time.Now()
 	for userUUID, cmd := range cmds {
 		values, err := cmd.Result()
+
 		if err != nil && err != redis.Nil {
 			return nil, fmt.Errorf("解析用户路由结果失败: %w", err)
 		}
@@ -85,6 +87,7 @@ func (r *RedisRepository) ListUsersRoutes(ctx context.Context, userUUIDs []strin
 			result[userUUID] = routes
 		}
 	}
+
 	return result, nil
 }
 
@@ -104,6 +107,7 @@ func (r *RedisRepository) parseUserRoutes(userUUID string, values map[string]str
 		if !ok || addr == "" || deviceID == "" {
 			continue
 		}
+
 		// 路由值里带最近活跃时间时，读取阶段直接过滤过期设备。
 		// 这样即使 Redis 清理存在短暂延迟，也不会把消息投递到长时间离线的旧节点。
 		if cutoffMs > 0 && activeMs > 0 && activeMs < cutoffMs {
@@ -116,6 +120,7 @@ func (r *RedisRepository) parseUserRoutes(userUUID string, values map[string]str
 			LastActiveMs:    activeMs,
 		})
 	}
+
 	return routes
 }
 

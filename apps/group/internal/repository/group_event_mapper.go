@@ -216,6 +216,7 @@ func (r *groupRepositoryImpl) insertGroupCacheEvent(tx *gorm.DB, payload groupev
 	if err != nil {
 		return err
 	}
+
 	// 事件版本完全由服务端事务生成。即使内部调用方误填，也会被覆盖，不能借此
 	// 伪造旧版本或跳号；消费端也只接受当前 schema_version。
 	payload.SchemaVersion = groupevent.GroupCacheSchemaVersion
@@ -263,6 +264,7 @@ func (r *groupRepositoryImpl) nextGroupCacheProjectionVersion(tx *gorm.DB, group
 		Scan(&projectionVersion).Error; err != nil {
 		return 0, WrapDBError(err)
 	}
+
 	if projectionVersion <= 0 {
 		return 0, fmt.Errorf("%w: allocated invalid cache version %d", ErrDatabase, projectionVersion)
 	}
@@ -320,6 +322,7 @@ func buildGroupMemberSnapshots(members []*model.GroupMember) []groupevent.GroupM
 			MuteUntilUnixMs: buildMuteUntilUnixMs(member),
 		})
 	}
+
 	return result
 }
 

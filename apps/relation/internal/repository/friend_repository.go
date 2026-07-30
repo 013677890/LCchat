@@ -52,12 +52,14 @@ func (r *friendRepositoryImpl) GetFriendList(ctx context.Context, userUUID, grou
 	query := r.db.WithContext(ctx).
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, 0)
+
 	// group_tag 非空时继续收窄到某个分组视图。
 	if groupTag != "" {
 		query = query.Where("group_tag = ?", groupTag)
 	}
 
 	var total int64
+
 	// 先 count 再分页查询，让上层能直接返回完整分页信息。
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, 0, WrapDBError(err)
@@ -195,6 +197,7 @@ func (r *friendRepositoryImpl) CleanupAccountRelations(ctx context.Context, user
 		}
 		affectedUsers = append(affectedUsers, row.UserUUID)
 	}
+
 	r.invalidateRelationCachesAsync(ctx, affectedUsers)
 	return nil
 }
@@ -263,6 +266,7 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
 	pipe := r.redisClient.Pipeline()
+
 	// exists 用来区分“整个 Hash 不存在”和“Hash 存在但 field 缺失”两种情况。
 	existsCmd := pipe.Exists(ctx, cacheKey)
 	metaCmd := pipe.HGet(ctx, cacheKey, friendUUID)
@@ -292,6 +296,7 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 		_, _ = parseFriendMetaJSON(metaCmd.Val())
 		return true, true
 	}
+
 	if metaCmd.Err() == goredis.Nil {
 		return true, false
 	}
@@ -346,6 +351,7 @@ func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID,
 		}
 		return true, meta, true
 	}
+
 	if metaCmd.Err() == goredis.Nil {
 		return true, nil, false
 	}
@@ -436,6 +442,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 	if len(peerUUIDs) == 0 {
 		return result, nil
 	}
+
 	// 先把所有请求对象初始化成 false，后续命中缓存或数据库时再改成 true。
 	for _, peerUUID := range peerUUIDs {
 		result[peerUUID] = false
@@ -464,6 +471,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 						result[peerUUIDs[index]] = true
 					}
 				}
+
 				return result, nil
 			}
 		} else if err != goredis.Nil {
@@ -476,6 +484,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 	}
 
 	var relations []model.UserRelation
+
 	// 缓存没命中时，按 peer_uuid IN 批量回源数据库，再把命中的关系回填到结果 map。
 	if err := r.db.WithContext(ctx).
 		Select("peer_uuid").
@@ -483,6 +492,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 		Find(&relations).Error; err != nil {
 		return nil, WrapDBError(err)
 	}
+
 	for _, relation := range relations {
 		result[relation.PeerUuid] = true
 	}
@@ -507,11 +517,13 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 			PeerUuid: peerUUID,
 			Status:   0,
 		}
+
 		if meta != nil {
 			relation.Remark = meta.Remark
 			relation.GroupTag = meta.GroupTag
 			relation.Source = meta.Source
 		}
+
 		return relation, nil
 	}
 
@@ -527,6 +539,7 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 	}
 
 	var relation model.UserRelation
+
 	// 缓存无法给出确定答案时，最后再 Unscoped 回源数据库拿历史关系真值。
 	if err := r.db.WithContext(ctx).
 		Unscoped().
@@ -537,6 +550,7 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 		}
 		return nil, WrapDBError(err)
 	}
+
 	return &relation, nil
 }
 
@@ -566,6 +580,7 @@ func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID stri
 			query = query.Where("updated_at > ?", changedAfter)
 		}
 	}
+
 	if err := query.
 		Order("updated_at ASC, id ASC").
 		Limit(limit + 1).
@@ -647,6 +662,7 @@ func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, u
 				metaJSON,
 				expireSeconds,
 			).Result()
+
 			if err != nil && err != goredis.Nil {
 				if isRedisWrongType(err) {
 					_ = r.redisClient.Del(runCtx, pair.userKey).Err()
@@ -718,9 +734,11 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 					relation.UpdatedAt.UnixMilli(),
 				)
 			}
+
 			if len(fields) > 0 {
 				pipe.HSet(runCtx, cacheKey, fields)
 			}
+
 			// 非空好友集使用常规 TTL，后续靠小概率续期维持热点 key。
 			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.FriendRelationTTL))
 		}
@@ -754,6 +772,7 @@ func (r *friendRepositoryImpl) invalidateRelationCachesAsync(ctx context.Context
 			pipe.Del(runCtx, rediskey.FriendRelationKey(userUUID))
 			pipe.Del(runCtx, rediskey.BlacklistRelationKey(userUUID))
 		}
+
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
 			LogRedisError(runCtx, err)
 		}
@@ -785,6 +804,7 @@ func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, u
 			metaJSON,
 			expireSeconds,
 		).Result()
+
 		if err != nil && err != goredis.Nil {
 			if isRedisWrongType(err) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
@@ -819,6 +839,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 			LogRedisError(runCtx, err)
 			return
 		}
+
 		if existsCmd.Val() == 0 {
 			return
 		}
@@ -839,6 +860,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 				buildFriendMetaJSON(meta.Remark, meta.GroupTag, meta.Source, meta.UpdatedAt),
 				expireSeconds,
 			).Result()
+
 			if err != nil && err != goredis.Nil {
 				if isRedisWrongType(err) {
 					_ = r.redisClient.Del(runCtx, cacheKey).Err()
@@ -865,6 +887,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 			First(&relation).Error; err != nil {
 			return
 		}
+
 		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
 	}, async.AsyncRedisPipelineTimeout)
 }
@@ -893,6 +916,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 			LogRedisError(runCtx, err)
 			return
 		}
+
 		if existsCmd.Val() == 0 {
 			return
 		}
@@ -913,6 +937,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 				buildFriendMetaJSON(meta.Remark, meta.GroupTag, meta.Source, meta.UpdatedAt),
 				expireSeconds,
 			).Result()
+
 			if err != nil && err != goredis.Nil {
 				if isRedisWrongType(err) {
 					_ = r.redisClient.Del(runCtx, cacheKey).Err()
@@ -939,6 +964,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 			First(&relation).Error; err != nil {
 			return
 		}
+
 		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
 	}, async.AsyncRedisPipelineTimeout)
 }

@@ -31,6 +31,7 @@ func BreakerIsSuccessful(err error) bool {
 	if err == nil {
 		return true
 	}
+
 	// 客户端取消（如网关请求超时被取消、连接断开）不反映下游健康，不应计入失败。
 	if errors.Is(err, context.Canceled) {
 		return true

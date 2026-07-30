@@ -63,6 +63,7 @@ func Build(cfg config.MinIOConfig) (*MinIOClient, error) {
 			IdleConnTimeout:     cfg.IdleConnTimeout,
 		},
 	})
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create minio client: %w", err)
 	}
@@ -189,6 +190,7 @@ func (c *MinIOClient) Upload(ctx context.Context, reader io.Reader, fileSize int
 				logger.String("detected", detectedContentType),
 				logger.String("object", objectName),
 			)
+
 			// 使用检测到的真实类型
 			contentType = detectedContentType
 		}

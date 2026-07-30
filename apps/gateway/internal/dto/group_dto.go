@@ -244,6 +244,7 @@ func ConvertListMyJoinGroupApplicationsResponseFromProto(pb *grouppb.ListMyJoinG
 			ReviewedAt:   item.GetReviewedAt(),
 		})
 	}
+
 	return &ListMyJoinGroupApplicationsResponse{
 		Items:    items,
 		Total:    pb.GetTotal(),
@@ -329,6 +330,7 @@ func ConvertListJoinRequestsResponseFromProto(pb *grouppb.ListJoinRequestsRespon
 			CreatedAtMilli: item.GetCreatedAt(),
 		})
 	}
+
 	return &ListJoinRequestsResponse{
 		Items:    items,
 		Total:    pb.GetTotal(),
@@ -406,6 +408,7 @@ func ConvertListReviewedJoinRequestsResponseFromProto(pb *grouppb.ListReviewedJo
 			ReviewedAt:    item.GetReviewedAt(),
 		})
 	}
+
 	return &ListReviewedJoinRequestsResponse{
 		Items:    items,
 		Total:    pb.GetTotal(),
@@ -611,6 +614,7 @@ func ConvertSearchGroupsResponseFromProto(pb *grouppb.SearchGroupsResponse) *Sea
 			AddMode:     group.GetAddMode(),
 		})
 	}
+
 	return &SearchGroupsResponse{
 		Groups:   groups,
 		Total:    pb.GetTotal(),

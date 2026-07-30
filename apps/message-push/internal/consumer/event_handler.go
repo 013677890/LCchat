@@ -90,6 +90,7 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		result = "permanent_error"
 		return nil
 	}
+
 	// 路由阶段同时携带“能否按用户广播”的语义，避免在扇出阶段重新猜测事件规则。
 	targets, permanentResult, err := h.resolveEventTargets(ctx, event)
 	if permanentResult {
@@ -99,6 +100,7 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 		result = "retriable_error"
 		return err
 	}
+
 	// 先按原有 user_uuid+device_id 规则去重，确保后续分组不会重复投递同一设备。
 	targets = dedupeDeliveryTargets(targets)
 	if len(targets) == 0 {
@@ -113,6 +115,7 @@ func (h *EventHandler) Handle(ctx context.Context, value []byte) error {
 	envelope, seq := buildMessageEnvelope(event)
 	summary := h.pushEventTargets(ctx, event.Type, targets, envelope)
 	logEventFanout(ctx, event, seq, len(targets), summary)
+
 	// 保持原判定：全部已尝试设备失败才重试，部分成功不重复推送已成功设备。
 	if summary.SuccessCount == 0 && summary.FailedCount > 0 {
 		result = "retriable_error"

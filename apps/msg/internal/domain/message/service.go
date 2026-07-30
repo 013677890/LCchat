@@ -127,8 +127,10 @@ func (s *Service) CreateMessage(ctx context.Context, fromUuid, deviceId string, 
 		if errors.Is(err, ErrIdempotentProcessing) {
 			return nil, ErrIdempotentProcessing
 		}
+
 		// Redis 异常 → 降级：不拦截，靠 DB 唯一索引兜底
 	}
+
 	if acquireResult != nil && acquireResult.CachedMsg != nil {
 		return &CreateResult{Msg: acquireResult.CachedMsg, IsIdempotent: true}, nil
 	}
@@ -229,6 +231,7 @@ func (s *Service) CreateMessage(ctx context.Context, fromUuid, deviceId string, 
 			EntityID:  msg.ConvId,
 			Payload:   payload,
 		})
+
 		if createErr == nil {
 			created = true
 			break
@@ -242,6 +245,7 @@ func (s *Service) CreateMessage(ctx context.Context, fromUuid, deviceId string, 
 			cacheIdempotentResult(existMsg)
 			return &CreateResult{Msg: existMsg, IsIdempotent: true}, nil
 		}
+
 		if errors.Is(createErr, ErrDuplicateMessageSeq) {
 			// 只有 DB 的 uidx_conv_seq 会触发该错误，说明 Redis 计数器已经落后于事实表。
 			// 先把 Redis 修到 DB 最大 seq，再进入下一轮重新 AllocSeq，最多重试有限次数避免死循环。
@@ -250,8 +254,10 @@ func (s *Service) CreateMessage(ctx context.Context, fromUuid, deviceId string, 
 			}
 			continue
 		}
+
 		return nil, fmt.Errorf("CreateMessage: db insert failed: %w", createErr)
 	}
+
 	if !created {
 		return nil, fmt.Errorf("CreateMessage: seq retry exhausted: %w", ErrDuplicateMessageSeq)
 	}

@@ -40,6 +40,7 @@ func MetadataUnaryInterceptor() grpc.UnaryServerInterceptor {
 				ctx = ctxmeta.WithClientIP(ctx, clientIP)
 			}
 		}
+
 		return handler(ctx, req)
 	}
 }

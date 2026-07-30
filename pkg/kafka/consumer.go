@@ -189,6 +189,7 @@ func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler,
 			)
 			handleErr = Permanent(handleErr)
 		}
+
 		if handleErr == nil {
 			return c.commitMessage(ctx, msg)
 		}
@@ -284,6 +285,7 @@ func (c *Consumer) commitMessage(ctx context.Context, msg segmentkafka.Message) 
 				logger.Int64("offset", msg.Offset),
 			)
 		}
+
 		if c.errorBackoff <= 0 {
 			continue
 		}

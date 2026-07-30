@@ -223,6 +223,7 @@ func (s *userServiceImpl) UploadAvatar(ctx context.Context, req *pb.UploadAvatar
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新头像失败")
 	}
+
 	if userInfo == nil {
 		return nil, apperr.New(consts.CodeUserNotFound)
 	}

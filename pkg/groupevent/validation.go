@@ -37,6 +37,7 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 	if payload.EventID == "" || payload.GroupUUID == "" || payload.Action == "" {
 		return invalidGroupCachePayload("missing base fields")
 	}
+
 	if payload.Group != nil {
 		if payload.Group.GroupUUID != payload.GroupUUID {
 			return invalidGroupCachePayload("group snapshot uuid mismatch")
@@ -52,6 +53,7 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 			return invalidGroupCachePayload("group snapshot contains invalid required fields")
 		}
 	}
+
 	if len(payload.Members) > 0 && !validProjectedMemberSnapshots(payload.Members) {
 		return invalidGroupCachePayload("member snapshots contain invalid required fields")
 	}
@@ -72,6 +74,7 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 			!validProjectedGroupOwnership(payload.Group, payload.Members) {
 			return invalidGroupCachePayload("group_created final state is inconsistent")
 		}
+
 	case ActionMemberAdded:
 		if payload.Group == nil {
 			return invalidGroupCachePayload("member_added missing group snapshot")
@@ -86,6 +89,7 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 			!allProjectedMembersHaveRole(payload.Members, projectedMemberRoleMember) {
 			return invalidGroupCachePayload("member_added final state is inconsistent")
 		}
+
 	case ActionMemberRemoved:
 		if payload.Group == nil || payload.UserUUID == "" {
 			return invalidGroupCachePayload("member_removed missing required fields")
@@ -93,6 +97,7 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 		if payload.Group.Status != projectedGroupStatusNormal {
 			return invalidGroupCachePayload("member_removed group must be normal")
 		}
+
 	case ActionGroupDismissed, ActionGroupInfoUpdated, ActionGroupMuteSettingUpdated:
 		if payload.Group == nil {
 			return invalidGroupCachePayload("%s missing group snapshot", payload.Action)
@@ -107,6 +112,7 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 		} else if payload.Group.Status != projectedGroupStatusNormal {
 			return invalidGroupCachePayload("%s group must be normal", payload.Action)
 		}
+
 	case ActionOwnerTransferred, ActionMemberRoleUpdated, ActionMemberProfileUpdated, ActionMemberMuted:
 		if payload.Group == nil {
 			return invalidGroupCachePayload("%s missing group snapshot", payload.Action)
@@ -120,6 +126,7 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 		if !sameProjectedMemberSet(payload.Members, payload.UserUUIDs) {
 			return invalidGroupCachePayload("%s user_uuids must exactly match members", payload.Action)
 		}
+
 		switch payload.Action {
 		case ActionOwnerTransferred:
 			if !validProjectedOwnerTransfer(payload.Group, payload.Members) {
@@ -136,6 +143,7 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 				return invalidGroupCachePayload("%s must contain exactly one member", payload.Action)
 			}
 		}
+
 	case ActionJoinRequestCreated, ActionJoinRequestReviewed, ActionJoinRequestCanceled:
 		if payload.JoinRequest == nil ||
 			payload.JoinRequest.ApplyID <= 0 ||
@@ -143,9 +151,11 @@ func ValidateGroupCachePayload(payload GroupCacheEventPayload) error {
 			payload.JoinRequest.CreatedAtUnixMs <= 0 {
 			return invalidGroupCachePayload("%s missing join request snapshot", payload.Action)
 		}
+
 	default:
 		return invalidGroupCachePayload("unsupported action %s", payload.Action)
 	}
+
 	return nil
 }
 
@@ -244,6 +254,7 @@ func sameProjectedMemberSet(members []GroupMemberSnapshot, userUUIDs []string) b
 		}
 		memberSet[member.UserUUID] = struct{}{}
 	}
+
 	userSet := make(map[string]struct{}, len(userUUIDs))
 	for _, userUUID := range userUUIDs {
 		if userUUID == "" {
@@ -254,10 +265,12 @@ func sameProjectedMemberSet(members []GroupMemberSnapshot, userUUIDs []string) b
 		}
 		userSet[userUUID] = struct{}{}
 	}
+
 	for userUUID := range memberSet {
 		if _, exists := userSet[userUUID]; !exists {
 			return false
 		}
 	}
+
 	return true
 }

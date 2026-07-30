@@ -105,11 +105,13 @@ func (s *ConnectService) InitActiveSyncer(cfg config.DeviceActiveConfig) error {
 			return firstErr
 		},
 	})
+
 	if err != nil {
 		return err
 	}
 
 	s.activeSyncer = syncer
+
 	// 路由 Key TTL 必须 >= 2×UpdateInterval：心跳刷新被节流到每 UpdateInterval 一次，
 	// TTL 需留出余量，否则 Key 可能在下一次刷新前过期，造成瞬时路由黑洞（Defect 10）。
 	s.routeTTL = 2 * cfg.UpdateInterval

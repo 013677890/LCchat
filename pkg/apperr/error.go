@@ -114,11 +114,13 @@ func WithStack(err error) error {
 			cause:   app.cause,
 			stack:   callers(defaultCallersSkip),
 		}
+
 		if app.logged.Load() == 1 {
 			wrapped.logged.Store(1)
 		}
 		return wrapped
 	}
+
 	return &Error{
 		code:    consts.CodeInternalError,
 		message: consts.GetMessage(consts.CodeInternalError),

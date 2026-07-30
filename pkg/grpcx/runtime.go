@@ -70,6 +70,7 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 			metricsCfg.Namespace = opts.Namespace
 		}
 	}
+
 	metrics := NewMetrics(metricsCfg)
 
 	var rateLimitCfg RateLimitConfig
@@ -94,6 +95,7 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 	unaryInters := []grpc.UnaryServerInterceptor{
 		RecoveryUnaryInterceptor(),
 		MetadataUnaryInterceptor(),
+
 		// timeout 要尽早生效，这样后续 validate / rate-limit / metrics / 业务处理
 		// 看到的都是同一个被收紧后的请求级 deadline。
 		TimeoutUnaryInterceptor(timeoutCfg),
@@ -103,6 +105,7 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 		ErrorNormalizeUnaryInterceptor(),
 		LoggingUnaryInterceptor(loggingCfg),
 	}
+
 	unaryInters = append(unaryInters, opts.ExtraUnaryInterceptors...)
 
 	var serverOpts []grpc.ServerOption
@@ -175,6 +178,7 @@ func Run(ctx context.Context, server *grpc.Server, listener net.Listener) error 
 		}
 		return fmt.Errorf("grpc serve failed: %w", err)
 	}
+
 	return nil
 }
 

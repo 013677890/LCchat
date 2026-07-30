@@ -117,6 +117,7 @@ func DecodeGroupCache(message []byte) (GroupCacheEventPayload, error) {
 	if err := decoder.Decode(&payload); err != nil {
 		return GroupCacheEventPayload{}, fmt.Errorf("group.cache payload 不是当前严格 JSON 结构: %w", err)
 	}
+
 	// 第二次 Decode 必须直接到 EOF，明确拒绝尾随第二个 JSON 值或其他脏数据。
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		if err == nil {
@@ -124,6 +125,7 @@ func DecodeGroupCache(message []byte) (GroupCacheEventPayload, error) {
 		}
 		return GroupCacheEventPayload{}, fmt.Errorf("group.cache payload 含尾随数据: %w", err)
 	}
+
 	if payload.SchemaVersion != GroupCacheSchemaVersion {
 		return GroupCacheEventPayload{}, fmt.Errorf(
 			"group.cache schema_version=%d，当前只接受 %d",
@@ -131,6 +133,7 @@ func DecodeGroupCache(message []byte) (GroupCacheEventPayload, error) {
 			GroupCacheSchemaVersion,
 		)
 	}
+
 	if payload.ProjectionVersion <= 0 {
 		return GroupCacheEventPayload{}, fmt.Errorf("group.cache projection_version 必须大于 0")
 	}

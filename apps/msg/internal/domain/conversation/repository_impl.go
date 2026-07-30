@@ -135,6 +135,7 @@ func (r *repositoryImpl) ListGroup(ctx context.Context, ownerUuid string, update
 	err := query.Order(orderExpr + " DESC, c.id DESC").
 		Limit(pageSize).
 		Find(&rows).Error
+
 	if err != nil {
 		return nil, err
 	}
@@ -167,8 +168,10 @@ func (r *repositoryImpl) ListGroup(ctx context.Context, ownerUuid string, update
 			// 恢复会话可见性；这里只改返回视图，不覆盖用户持久化设置。
 			conv.Status = 0
 		}
+
 		convs = append(convs, conv)
 	}
+
 	return convs, nil
 }
 
@@ -205,6 +208,7 @@ func (r *repositoryImpl) Upsert(ctx context.Context, conv *model.Conversation, i
 			Columns:   []clause.Column{{Name: "owner_uuid"}, {Name: "target_uuid"}},
 			DoUpdates: clause.Assignments(updates),
 		}).Create(conv).Error
+
 	if err != nil {
 		return fmt.Errorf("Upsert: db upsert failed: %w", err)
 	}
@@ -235,12 +239,14 @@ func (r *repositoryImpl) RepairForMessage(ctx context.Context, conv *model.Conve
 			"last_msg_id":      conv.LastMsgId,
 			"last_msg_at":      conv.LastMsgAt,
 			"last_msg_preview": conv.LastMsgPrev,
+
 			// 只有消息 seq 真正越过用户的删除位点才能恢复可见。群个人行在读扩散
 			// 模型下可能仍是 max_seq=0，而 clear_seq 已来自共享群行；不能仅凭
 			// “个人 max_seq 落后”就把同一条旧消息重新显示出来。
 			"status":     gorm.Expr("CASE WHEN clear_seq < ? THEN 0 ELSE status END", conv.MaxSeq),
 			"updated_at": time.Now(),
 		}
+
 		if isSender {
 			staleUpdates["read_seq"] = gorm.Expr("CASE WHEN read_seq > ? THEN read_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq)
 		}
@@ -257,6 +263,7 @@ func (r *repositoryImpl) RepairForMessage(ctx context.Context, conv *model.Conve
 				UpdateColumn("read_seq", gorm.Expr("CASE WHEN read_seq > ? THEN read_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq)).Error; err != nil {
 				return fmt.Errorf("RepairForMessage: repair sender read_seq failed: %w", err)
 			}
+
 			return nil
 		}
 
@@ -265,6 +272,7 @@ func (r *repositoryImpl) RepairForMessage(ctx context.Context, conv *model.Conve
 			UpdateColumn("unread_count", gorm.Expr("CASE WHEN read_seq >= max_seq THEN 0 ELSE max_seq - read_seq END")).Error; err != nil {
 			return fmt.Errorf("RepairForMessage: recompute receiver unread failed: %w", err)
 		}
+
 		return nil
 	})
 }
@@ -297,14 +305,17 @@ func (r *repositoryImpl) UpdateReadSeqWithOutbox(ctx context.Context, ownerUuid,
 				return fmt.Errorf("UpdateReadSeqWithOutbox: outbox insert failed: %w", err)
 			}
 		}
+
 		if err := tx.Where("owner_uuid = ? AND conv_id = ?", ownerUuid, convId).First(&conv).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return ErrConversationNotFound
 			}
 			return fmt.Errorf("UpdateReadSeqWithOutbox: db query failed: %w", err)
 		}
+
 		return nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +346,7 @@ func (r *repositoryImpl) UpsertGroupReadSeqWithOutbox(ctx context.Context, owner
 			MembershipStatus:  model.ConversationMembershipActive,
 			MembershipVersion: 0, // 权威点查先于建行；Kafka 投影到达后以正版本覆盖。
 		}
+
 		// 冲突（行已存在）时只单调推进 read_seq，绝不触碰 status/clear_seq/mute/pin。
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "owner_uuid"}, {Name: "target_uuid"}},
@@ -353,11 +365,13 @@ func (r *repositoryImpl) UpsertGroupReadSeqWithOutbox(ctx context.Context, owner
 				return fmt.Errorf("UpsertGroupReadSeqWithOutbox: outbox insert failed: %w", err)
 			}
 		}
+
 		if err := tx.Where("owner_uuid = ? AND conv_id = ?", ownerUuid, groupUuid).First(&conv).Error; err != nil {
 			return fmt.Errorf("UpsertGroupReadSeqWithOutbox: db query failed: %w", err)
 		}
 		return nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -479,6 +493,7 @@ func (r *repositoryImpl) UpsertGroupConv(ctx context.Context, gc *model.GroupCon
 				},
 			},
 		}).Create(gc).Error
+
 	if err != nil {
 		return fmt.Errorf("UpsertGroupConv: db upsert failed: %w", err)
 	}

@@ -104,6 +104,7 @@ func (s *blacklistServiceImpl) RemoveBlacklist(ctx context.Context, req *pb.Remo
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "取消拉黑失败")
 	}
+
 	s.publishBlacklistRelationChanged(ctx, currentUserUUID, req.UserUuid, friendChangeBlacklistRemoved)
 	return nil
 }

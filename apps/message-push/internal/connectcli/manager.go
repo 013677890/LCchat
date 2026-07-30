@@ -44,8 +44,10 @@ func (m *ClientManager) Get(addr string) (connectpb.ConnectServiceClient, error)
 		InternalCaller: &grpcx.InternalCallerClientConfig{
 			Caller: "message-push",
 		},
+
 		// Retry 刻意留空：默认不重试。
 	})
+
 	if err != nil {
 		return nil, fmt.Errorf("创建 connect gRPC 连接失败: %w", err)
 	}
@@ -98,6 +100,7 @@ func (s *Sender) PushToUser(ctx context.Context, connectAddr, userUUID string, e
 		// 某个 connect 节点卡住时，不应拖慢整个 Kafka 消费循环。
 		callCtx, cancel = context.WithTimeout(ctx, s.userTimeout)
 	}
+
 	defer cancel()
 
 	resp, err := client.PushToUser(callCtx, &connectpb.PushToUserRequest{
@@ -131,6 +134,7 @@ func (s *Sender) PushToDevice(ctx context.Context, connectAddr, userUUID, device
 		DeviceId: deviceID,
 		Message:  envelope,
 	})
+
 	if err != nil {
 		return fmt.Errorf("调用 connect PushToDevice 失败: %w", err)
 	}

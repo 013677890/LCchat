@@ -307,6 +307,7 @@ func (h *UserHandler) UploadAvatar(c *gin.Context) {
 		FileName:    fileName,
 		ContentType: contentType,
 	})
+
 	if err != nil {
 		result.FailServer(c, err, consts.CodeFileUploadFail)
 		return

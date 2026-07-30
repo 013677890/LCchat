@@ -200,6 +200,7 @@ func CheckBlacklist(ctx context.Context, blacklistKey, ip string) (bool, error) 
 	// 使用 SISMEMBER 命令
 	cmd := client.SIsMember(ctx, blacklistKey, ip)
 	exists, err := cmd.Result()
+
 	if err != nil {
 		// 检查是否为 Redis 连接错误
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {

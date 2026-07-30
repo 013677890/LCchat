@@ -125,6 +125,7 @@ func provideGroupCacheReconcilerConfig() (consumer.CacheReconcilerConfig, error)
 		}
 		cfg.Interval = interval
 	}
+
 	if raw := os.Getenv("GROUP_CACHE_RECONCILE_BATCH_SIZE"); raw != "" {
 		batchSize, err := strconv.Atoi(raw)
 		if err != nil || batchSize <= 0 {
@@ -135,6 +136,7 @@ func provideGroupCacheReconcilerConfig() (consumer.CacheReconcilerConfig, error)
 		}
 		cfg.BatchSize = batchSize
 	}
+
 	return cfg, nil
 }
 

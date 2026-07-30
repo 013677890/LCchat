@@ -22,8 +22,10 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 			if recovered := recover(); recovered != nil {
 				// 1. 构建上下文
 				ctx := NewContextWithGin(c)
+
 				// 2. 检查是否是管道错误
 				var brokenPipe bool
+
 				// 3. 检查是否是管道错误
 				if ne, ok := recovered.(*net.OpError); ok {
 					// 4. 检查是否是系统调用错误
@@ -36,6 +38,7 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 						}
 					}
 				}
+
 				// 6. 检查是否是管道错误
 				if brokenPipe {
 					// 7. 记录日志
@@ -45,6 +48,7 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 						logger.String("path", c.Request.URL.Path),
 						logger.String("ip", c.ClientIP()),
 					)
+
 					// 8. 中止请求
 					c.Abort()
 					return
@@ -52,8 +56,10 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 
 				// 9. 记录日志
 				httpRequest, _ := httputil.DumpRequest(c.Request, false)
+
 				// 10. 创建错误
 				panicErr := apperr.NewFromPanic(recovered)
+
 				// 11. 记录日志
 				logger.Error(ctx, "Gateway 捕获到 panic",
 					logger.Any("error", recovered),
@@ -66,12 +72,15 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 					logger.String("top_frame", apperr.TopFrame(panicErr)),
 					logger.StackFrames("stack", apperr.Frames(panicErr)),
 				)
+
 				// 12. 标记错误已记录
 				apperr.MarkLogged(panicErr)
+
 				// 13. 返回错误
 				result.Fail(c, nil, consts.CodeInternalError)
 			}
 		}()
+
 		// 14. 继续执行请求
 		c.Next()
 	}

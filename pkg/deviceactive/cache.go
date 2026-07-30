@@ -132,6 +132,7 @@ func NewSyncer(cfg Config) (*Syncer, error) {
 		batchCh:        make(chan []BatchItem, cfg.QueueSize),
 		stopCh:         make(chan struct{}),
 	}
+
 	for i := range s.shards {
 		s.shards[i] = throttleShard{
 			last: make(map[string]int64),

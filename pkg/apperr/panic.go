@@ -38,6 +38,7 @@ func capturePanicStack() []uintptr {
 		}
 		filtered = append(filtered, pc)
 	}
+
 	if len(filtered) == 0 {
 		return pcs
 	}

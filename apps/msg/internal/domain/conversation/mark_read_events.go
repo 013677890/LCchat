@@ -69,6 +69,7 @@ func buildMarkReadOutboxEvents(ctx context.Context, ownerUuid, convId string, re
 			Payload:   payload,
 		})
 	}
+
 	return events, nil
 }
 

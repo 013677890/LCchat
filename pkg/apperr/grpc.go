@@ -70,6 +70,7 @@ func FromStatus(err error) error {
 	if err == nil {
 		return nil
 	}
+
 	// 错误链中本就携带应用错误对象时直接复用，保留 code/message/stack/logged，
 	// 避免经 status 往返丢失堆栈与"已记录日志"标记。
 	// 注意：自 *apperr.Error 实现 GRPCStatus() 起，status.FromError 会对裸 apperr
@@ -96,6 +97,7 @@ func FromStatus(err error) error {
 			}
 		}
 	}
+
 	if code == 0 {
 		code = bizCodeFromGRPCCode(st.Code())
 	}

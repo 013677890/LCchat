@@ -118,16 +118,20 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 		groupHandler = groupHandlers[0]
 	}
 	r := gin.New()
+
 	// 可信代理配置：必须在使用 c.ClientIP() 前设置，避免客户端伪造 X-Real-IP / X-Forwarded-For。
 	middleware.ConfigureTrustedProxies(r)
 	// 恢复中间件
 	r.Use(middleware.GinRecovery(true))
+
 	// 追踪中间件 (生成 trace_id)
 	r.Use(util.TraceLogger())
+
 	// 客户端 IP 中间件
 	r.Use(middleware.ClientIPMiddleware())
 	// 日志中间件
 	r.Use(middleware.GinLogger())
+
 	// Prometheus 监控中间件
 	r.Use(middleware.PrometheusMiddleware())
 	// 跨域中间件
@@ -136,6 +140,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 	// 放在日志/监控中间件之后，确保超时兜底写回的最终响应能被完整观测到；
 	// 同时放在业务 handler 之前，保证后续所有下游调用都能继承同一个请求级 deadline。
 	r.Use(gatewayTimeoutMiddleware())
+
 	// ==================== 全局 IP 限流中间件 ====================
 	// 参数说明：
 	//   - blacklistKey: gateway:blacklist:ips (黑名单 Redis Set 的 key)
@@ -175,6 +180,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 		// 需要认证的接口
 		auth := api.Group("/auth")
 		auth.Use(middleware.JWTAuthMiddleware()) // JWT 认证中间件（必须在前）
+
 		// ==================== 用户级别限流中间件 ====================
 		// 只对已认证的用户进行限流
 		// 参数说明：
@@ -207,6 +213,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 					userHandler.DeleteAccount)
 				user.POST("/logout", authHandler.Logout)
 			}
+
 			friend := auth.Group("/friend")
 			{
 				friend.POST("/apply", friendHandler.SendFriendApply)
@@ -223,6 +230,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				friend.POST("/check", friendHandler.CheckIsFriend)
 				friend.POST("/relation", friendHandler.GetRelationStatus)
 			}
+
 			blacklist := auth.Group("/blacklist")
 			{
 				blacklist.POST("", blacklistHandler.AddBlacklist)
@@ -232,6 +240,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				// 后续若要收敛越权风险，需要改成仅允许判断“当前登录用户 -> target”的关系。
 				blacklist.POST("/check", blacklistHandler.CheckIsBlacklist)
 			}
+
 			messages := auth.Group("/messages")
 			{
 				messages.POST("/send", msgHandler.SendMessage)
@@ -244,6 +253,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				messages.POST("/get-by-ids", msgHandler.GetMessagesByIds)
 				messages.POST("/recall", msgHandler.RecallMessage)
 			}
+
 			conversations := auth.Group("/conversations")
 			{
 				conversations.GET("", msgHandler.GetConversations)
@@ -251,6 +261,7 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 				conversations.DELETE("/:convId", msgHandler.DeleteConversation)
 				conversations.PATCH("/settings", msgHandler.UpdateConversationSettings)
 			}
+
 			if groupHandler != nil {
 				groups := auth.Group("/groups")
 				{
@@ -286,5 +297,6 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 			}
 		}
 	}
+
 	return r
 }

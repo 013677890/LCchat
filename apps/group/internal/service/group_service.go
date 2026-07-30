@@ -46,6 +46,7 @@ func (s *groupServiceImpl) CreateGroup(ctx context.Context, req *pb.CreateGroupR
 	if req == nil {
 		return nil, apperr.New(consts.CodeParamError)
 	}
+
 	// service 层保留一次兜底校验，避免绕过 proto validate 的内部调用写入脏数据。
 	name := strings.TrimSpace(req.GetName())
 	if name == "" {
@@ -59,8 +60,10 @@ func (s *groupServiceImpl) CreateGroup(ctx context.Context, req *pb.CreateGroupR
 		// 默认头像在 service 层补齐，保证 repository 只处理完整业务实体。
 		avatar = defaultGroupAvatarURL
 	}
+
 	// 群 UUID 只生成一次，后续 group 与初始成员关系必须共享同一个事实 ID。
 	groupUUID := util.GenIDString()
+
 	// 初始成员使用同一时间戳，避免列表排序时因逐条生成时间出现无意义抖动。
 	now := time.Now()
 	memberUUIDs := normalizeGroupMemberUUIDs(req.GetMemberUuids(), currentUserUUID)
@@ -75,6 +78,7 @@ func (s *groupServiceImpl) CreateGroup(ctx context.Context, req *pb.CreateGroupR
 		AddMode:   0,
 		Status:    0,
 	}
+
 	if err := s.groupRepo.CreateGroup(ctx, group, members); err != nil {
 		// 系统错误统一包中文上下文，具体日志留给边界拦截器输出。
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建群失败")
@@ -84,6 +88,7 @@ func (s *groupServiceImpl) CreateGroup(ctx context.Context, req *pb.CreateGroupR
 		realtimepush.GroupChangedMembers,
 		realtimepush.GroupChangedRoles,
 	})
+
 	return &pb.CreateGroupResponse{GroupUuid: group.Uuid}, nil
 }
 
@@ -102,6 +107,7 @@ func (s *groupServiceImpl) DismissGroup(ctx context.Context, req *pb.DismissGrou
 		return apperr.New(consts.CodeParamError)
 	}
 	memberUUIDs := s.loadGroupMemberUUIDsForRealtime(ctx, groupUUID)
+
 	// 群主权限、重复解散幂等和缓存强失效都下沉到 repository 事务内处理。
 	if err := mapGroupWriteError(
 		s.groupRepo.DismissGroup(ctx, groupUUID, currentUserUUID),
@@ -146,6 +152,7 @@ func (s *groupServiceImpl) UpdateGroupInfo(ctx context.Context, req *pb.UpdateGr
 	if groupUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
+
 	// 第二批资料接口改成 optional 字段，这里直接保留“未传 / 显式更新”的边界语义。
 	updates, err := buildUpdateGroupInfoFields(req)
 	if err != nil {
@@ -155,6 +162,7 @@ func (s *groupServiceImpl) UpdateGroupInfo(ctx context.Context, req *pb.UpdateGr
 		// 无字段变更直接成功，避免开启无意义事务和刷新 updated_at。
 		return nil
 	}
+
 	// 管理员/群主权限与群状态在 repository 内再次校验，防止并发状态变化。
 	if err := mapGroupWriteError(
 		s.groupRepo.UpdateGroupInfo(ctx, groupUUID, currentUserUUID, updates),
@@ -233,11 +241,13 @@ func (s *groupServiceImpl) AddMember(ctx context.Context, req *pb.AddMemberReque
 	if groupUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
+
 	// service 只做去空去重，是否已在群由 repository 在锁内按幂等规则处理。
 	memberUUIDs := normalizeGroupMemberUUIDs(req.GetUserUuids())
 	if len(memberUUIDs) == 0 {
 		return nil
 	}
+
 	// 这里只构造最小成员意图，角色、邀请人和入群时间以 repository 事务结果为准。
 	members := buildAddGroupMembers(groupUUID, memberUUIDs)
 	if err := mapGroupWriteError(
@@ -265,6 +275,7 @@ func (s *groupServiceImpl) RemoveMember(ctx context.Context, req *pb.RemoveMembe
 	if groupUUID == "" || targetUUID == "" {
 		return apperr.New(consts.CodeParamError)
 	}
+
 	// 退群、踢人、不能踢群主等角色规则由 repository 在事务锁内统一裁决。
 	if err := mapGroupWriteError(
 		s.groupRepo.RemoveMember(ctx, groupUUID, currentUserUUID, targetUUID),
@@ -293,6 +304,7 @@ func (s *groupServiceImpl) GetMemberList(ctx context.Context, req *pb.GetMemberL
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取群成员列表失败")
 	}
+
 	// 成员关系与用户资料分属不同表，展示信息用批量查询补齐，避免 N+1 查询。
 	profiles, err := s.groupRepo.GetUserProfiles(ctx, collectMemberUUIDs(members))
 	if err != nil {
@@ -307,6 +319,7 @@ func (s *groupServiceImpl) GetMemberList(ctx context.Context, req *pb.GetMemberL
 			items = append(items, item)
 		}
 	}
+
 	return &pb.GetMemberListResponse{Members: items}, nil
 }
 
@@ -353,6 +366,7 @@ func (s *groupServiceImpl) CheckGroupMember(ctx context.Context, req *pb.CheckGr
 	if groupUUID == "" || userUUID == "" {
 		return nil, apperr.New(consts.CodeParamError)
 	}
+
 	// 高频权限链路交给 repository 使用缓存加速，并在读缓存前确认群未解散。
 	isMember, role, err := s.groupRepo.CheckGroupMember(ctx, groupUUID, userUUID)
 	if err != nil {
@@ -364,6 +378,7 @@ func (s *groupServiceImpl) CheckGroupMember(ctx context.Context, req *pb.CheckGr
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查群成员关系失败")
 	}
+
 	if !isMember {
 		role = -1
 	}
@@ -380,6 +395,7 @@ func normalizeGroupMemberUUIDs(raw []string, exclusions ...string) []string {
 	if len(raw) == 0 {
 		return []string{}
 	}
+
 	// 先写入排除集合，可用于创建群时排除群主，避免重复插入 owner 成员关系。
 	seen := make(map[string]struct{}, len(raw)+len(exclusions))
 	for _, exclusion := range exclusions {
@@ -389,12 +405,14 @@ func normalizeGroupMemberUUIDs(raw []string, exclusions ...string) []string {
 		}
 		seen[userUUID] = struct{}{}
 	}
+
 	userUUIDs := make([]string, 0, len(raw))
 	for _, item := range raw {
 		userUUID := strings.TrimSpace(item)
 		if userUUID == "" {
 			continue
 		}
+
 		// 同一请求内重复成员只保留第一份，写路径保持幂等且减少事务内判断成本。
 		if _, exists := seen[userUUID]; exists {
 			continue
@@ -402,6 +420,7 @@ func normalizeGroupMemberUUIDs(raw []string, exclusions ...string) []string {
 		seen[userUUID] = struct{}{}
 		userUUIDs = append(userUUIDs, userUUID)
 	}
+
 	return userUUIDs
 }
 
@@ -422,11 +441,13 @@ func buildUpdateGroupInfoFields(req *pb.UpdateGroupInfoRequest) (repository.Grou
 		}
 		updates.Name = &name
 	}
+
 	if req.Avatar != nil {
 		// avatar 允许显式清空，因此只做 trim，不再沿用“空字符串等于不更新”的旧语义。
 		avatar := strings.TrimSpace(req.GetAvatar())
 		updates.Avatar = &avatar
 	}
+
 	if req.AddMode != nil {
 		addMode := int8(req.GetAddMode())
 		if addMode < 0 || addMode > 1 {
@@ -434,6 +455,7 @@ func buildUpdateGroupInfoFields(req *pb.UpdateGroupInfoRequest) (repository.Grou
 		}
 		updates.AddMode = &addMode
 	}
+
 	return updates, nil
 }
 
@@ -454,6 +476,7 @@ func mapGroupWriteError(err error, fallbackMessage string) error {
 	if err == nil {
 		return nil
 	}
+
 	// 写路径统一在这里做 repository 语义错误到业务码的映射，避免各接口分散判断。
 	if errors.Is(err, repository.ErrGroupDismissed) {
 		return apperr.New(consts.CodeGroupAlreadyDismiss)
@@ -496,6 +519,7 @@ func buildCreateGroupMembers(groupUUID, ownerUUID string, memberUUIDs []string, 
 	if groupUUID == "" || ownerUUID == "" {
 		return members
 	}
+
 	// 群主必须作为第一条有效成员关系写入，保证 member_cnt 与权限判断都有基础事实。
 	members = append(members, &model.GroupMember{
 		GroupUuid: groupUUID,
@@ -504,10 +528,12 @@ func buildCreateGroupMembers(groupUUID, ownerUUID string, memberUUIDs []string, 
 		Status:    0,
 		JoinedAt:  now,
 	})
+
 	for _, userUUID := range memberUUIDs {
 		if userUUID == "" {
 			continue
 		}
+
 		// 普通初始成员记录邀请人，便于后续审计入群来源。
 		members = append(members, &model.GroupMember{
 			GroupUuid: groupUUID,
@@ -518,6 +544,7 @@ func buildCreateGroupMembers(groupUUID, ownerUUID string, memberUUIDs []string, 
 			JoinedAt:  now,
 		})
 	}
+
 	return members
 }
 

@@ -81,6 +81,7 @@ func (r *repositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload group
 				payload.ProjectionVersion,
 			)
 		}
+
 		if err := validateMsgGroupProjectionTransition(groupState, payload); err != nil {
 			return err
 		}
@@ -197,8 +198,10 @@ func activateProjectedGroupMembers(tx *gorm.DB, payload groupevent.GroupCacheEve
 			UpdatedAt:          appliedAt,
 		})
 	}
+
 	if err := tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "owner_uuid"}, {Name: "target_uuid"}},
+
 		// 单群 group_conversation 已持 FOR UPDATE 锁并验证 incoming=current+1，因此
 		// 这里可以一次批量 upsert 当前事件的权威 Membership*，无需再为 K 个成员发 K
 		// 条 UPDATE。AssignmentColumns 只覆盖成员投影字段与通用 updated_at，个人
@@ -263,6 +266,7 @@ func advanceGroupProjectionState(
 	}
 	if payload.Action == groupevent.ActionGroupCreated {
 		createdAt := time.UnixMilli(payload.Group.UpdatedAtUnixMs)
+
 		// 没有消息的新群也需要稳定的列表排序位点。若消息发送已经抢先写入真实
 		// last_msg_at，则保留真实消息时间，禁止较早的建群事件把活跃时间回退。
 		updates["last_msg_at"] = gorm.Expr(
@@ -270,6 +274,7 @@ func advanceGroupProjectionState(
 			createdAt,
 		)
 	}
+
 	result := tx.Model(&model.GroupConversation{}).
 		Where(
 			"group_uuid = ? AND projection_version = ?",

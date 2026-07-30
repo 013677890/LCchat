@@ -335,6 +335,7 @@ func RunSafe(ctx context.Context, task func(ctx context.Context), timeout time.D
 				logTimeout(runCtx, timeout)
 			})
 		}
+
 		timer := time.AfterFunc(timeout, logDeadline)
 		defer timer.Stop()
 		defer cancel()

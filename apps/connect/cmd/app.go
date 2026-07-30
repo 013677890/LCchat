@@ -122,16 +122,19 @@ func (a *ConnectApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 gRPC 服务失败: %w", err))
 		}
 	}
+
 	if a.grpcListener != nil {
 		if err := a.grpcListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			errs = append(errs, fmt.Errorf("关闭 gRPC 监听器失败: %w", err))
 		}
 	}
+
 	if a.httpServer != nil {
 		if err := a.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs = append(errs, fmt.Errorf("关闭 HTTP 服务失败: %w", err))
 		}
 	}
+
 	if a.connManager != nil {
 		a.connManager.Shutdown()
 	}
@@ -144,6 +147,7 @@ func (a *ConnectApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 auth-service gRPC 连接失败: %w", err))
 		}
 	}
+
 	if a.logger != nil {
 		_ = a.logger.Sync()
 	}

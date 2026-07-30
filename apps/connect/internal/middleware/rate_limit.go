@@ -204,6 +204,7 @@ func WSHandshakeRateLimitMiddleware(cfg WSHandshakeRateLimitConfig) gin.HandlerF
 			TraceId:   ctxmeta.TraceIDFromGin(c),
 			Timestamp: now.Unix(),
 		})
+
 		c.Abort()
 	}
 }

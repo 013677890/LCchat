@@ -127,14 +127,17 @@ func (r *authRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email st
 func (r *authRepositoryImpl) UpdateLoginDisplay(ctx context.Context, userUUID, nickname, avatar string) error {
 	// updated_at 始终刷新，保证账号快照能体现最近一次展示字段同步时间。
 	updates := map[string]interface{}{"updated_at": time.Now()}
+
 	// 只有传入了 nickname 时才覆盖 login_nickname，避免把空串误写进冗余列。
 	if nickname != "" {
 		updates["login_nickname"] = nickname
 	}
+
 	// avatar 同理按需更新，允许只同步昵称或只同步头像。
 	if avatar != "" {
 		updates["login_avatar"] = avatar
 	}
+
 	// 这里使用 Updates(map) 是为了让“只更新有值字段”的语义清晰可控。
 	result := r.db.WithContext(ctx).Model(&model.UserAccount{}).
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
@@ -170,6 +173,7 @@ func (r *authRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 func (r *authRepositoryImpl) DeleteWithOutboxEvent(ctx context.Context, userUUID, eventType, payload string) error {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now()
+
 		// 先在事务里软删除账号，确保后续 account_deleted 事件对应的数据库事实已经落盘。
 		result := tx.Model(&model.UserAccount{}).
 			Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
@@ -180,12 +184,14 @@ func (r *authRepositoryImpl) DeleteWithOutboxEvent(ctx context.Context, userUUID
 		if result.RowsAffected == 0 {
 			return ErrRecordNotFound
 		}
+
 		// 再追加 outbox 事件，让 user/relation 等下游服务后续做清理。
 		if err := outbox.InsertEvent(tx, eventType, userUUID, payload); err != nil {
 			return WrapDBError(err)
 		}
 		return nil
 	})
+
 	if err != nil {
 		return err
 	}
@@ -282,11 +288,13 @@ func (r *authRepositoryImpl) BatchGetAccountStatus(ctx context.Context, userUUID
 	}
 
 	rows := make([]*rawAccountStatus, 0, len(userUUIDs))
+
 	// 使用 Unscoped 保留已软删除账号，这样上游才能把“存在但已注销”和“从未存在”区分开。
 	err := r.db.WithContext(ctx).Unscoped().Model(&model.UserAccount{}).
 		Select("user_uuid, status, deleted_at").
 		Where("user_uuid IN ?", userUUIDs).
 		Find(&rows).Error
+
 	if err != nil {
 		return nil, WrapDBError(err)
 	}
@@ -319,6 +327,7 @@ func (r *authRepositoryImpl) BatchGetAccountStatus(ctx context.Context, userUUID
 		}
 		items = append(items, &AccountStatusItem{UserUUID: userUUID, Exists: false, Status: 1})
 	}
+
 	return items, nil
 }
 

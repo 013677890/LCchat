@@ -56,6 +56,7 @@ func Build(cfg config.MySQLConfig) (*gorm.DB, error) {
 			readDialectors = append(readDialectors, gmysql.Open(ensureDSNTimeouts(dsn, cfg)))
 		}
 	}
+
 	if len(readDialectors) == 0 {
 		readDialectors = append(readDialectors, gmysql.Open(writeDSN))
 	}

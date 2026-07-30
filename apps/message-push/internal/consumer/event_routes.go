@@ -55,6 +55,7 @@ func (h *EventHandler) resolveEventTargets(
 			return nil, false, fmt.Errorf("%w: 读取已读回执路由失败: %v", errRetriable, err)
 		}
 	}
+
 	return collector.targets, false, nil
 }
 
@@ -147,6 +148,7 @@ func (h *EventHandler) collectGroupTargets(
 		)
 		return true, nil
 	}
+
 	memberUUIDs, err := h.groups.GetGroupMembers(ctx, event.ReceiverUuid)
 	if err != nil {
 		return false, fmt.Errorf("%w: 获取群成员失败: %v", errRetriable, err)
@@ -158,6 +160,7 @@ func (h *EventHandler) collectGroupTargets(
 		)
 		return false, nil
 	}
+
 	return false, h.collectGroupMemberRoutes(ctx, event.Type, memberUUIDs, collector)
 }
 

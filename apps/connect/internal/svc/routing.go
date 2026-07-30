@@ -111,6 +111,7 @@ func (s *ConnectService) RemoveRoutesByConnectAddr(ctx context.Context, connectG
 
 	for {
 		keys, nextCursor, err := s.redisClient.Scan(ctx, cursor, pattern, 100).Result()
+
 		if err != nil {
 			logger.Warn(ctx, "SCAN 用户路由失败",
 				logger.String("connect_addr", connectGRPCAddr),
@@ -122,6 +123,7 @@ func (s *ConnectService) RemoveRoutesByConnectAddr(ctx context.Context, connectG
 
 		for _, key := range keys {
 			values, err := s.redisClient.HGetAll(ctx, key).Result()
+
 			if err != nil {
 				logger.Warn(ctx, "读取用户路由失败，跳过清理",
 					logger.String("key", key),
@@ -129,12 +131,14 @@ func (s *ConnectService) RemoveRoutesByConnectAddr(ctx context.Context, connectG
 				)
 				continue
 			}
+
 			fields := make([]string, 0)
 			for field, raw := range values {
 				if strings.HasPrefix(raw, connectGRPCAddr+"|") || raw == connectGRPCAddr {
 					fields = append(fields, field)
 				}
 			}
+
 			if len(fields) == 0 {
 				continue
 			}

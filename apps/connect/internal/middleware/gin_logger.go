@@ -39,6 +39,7 @@ func GinLogger() gin.HandlerFunc {
 			logger.Int("status", statusCode),
 			logger.Duration("cost", cost),
 		}
+
 		if code, exists := c.Get("business_code"); exists {
 			if businessCode, ok := code.(int); ok && businessCode > 0 {
 				fields = append(fields, logger.Int("business_code", businessCode))

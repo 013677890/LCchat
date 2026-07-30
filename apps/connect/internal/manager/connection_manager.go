@@ -112,6 +112,7 @@ func (m *ConnectionManager) Unregister(client *Client) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -155,6 +156,7 @@ func (m *ConnectionManager) SendToUser(userUUID string, msg []byte, delivery Del
 			sent++
 		}
 	}
+
 	return sent
 }
 
@@ -239,6 +241,7 @@ func (m *ConnectionManager) Shutdown() {
 				clients = append(clients, client)
 			}
 		}
+
 		b.byUser = make(map[string]map[string]*Client)
 		b.mu.Unlock()
 	}

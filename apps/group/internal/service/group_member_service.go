@@ -73,6 +73,7 @@ func (s *groupServiceImpl) SearchGroupMembers(ctx context.Context, req *pb.Searc
 			items = append(items, item)
 		}
 	}
+
 	return &pb.SearchGroupMembersResponse{Members: items, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
 }
 
@@ -110,6 +111,7 @@ func (s *groupServiceImpl) SearchGroups(ctx context.Context, req *pb.SearchGroup
 			AddMode:     int32(group.AddMode),
 		})
 	}
+
 	return &pb.SearchGroupsResponse{Groups: items, Total: total, Page: int32(page), PageSize: int32(pageSize)}, nil
 }
 

@@ -231,9 +231,11 @@ func (s *Service) resolveGroupAccess(
 				}
 				return conv, nil
 			}
+
 			if !errors.Is(groupErr, ErrConversationNotFound) {
 				return nil, groupErr
 			}
+
 			// group.cache 与 msg.push 存在短暂竞态时可能缺共享群行；此时继续走下面的
 			// 权威点查，不从不完整本地状态猜测权限。
 		default:
@@ -253,6 +255,7 @@ func (s *Service) resolveGroupAccess(
 	if role < 0 {
 		return nil, ErrConversationNotFound
 	}
+
 	// 返回 nil 表示权威服务已放行，但个人会话投影仍在 Kafka 可见性窗口内。
 	return nil, nil
 }
@@ -356,6 +359,7 @@ func (s *Service) GetConversations(ctx context.Context, ownerUuid string, update
 		}
 
 		items = append(items, modelToConvItem(conv))
+
 		// 最后一条记录构成下一次的联合游标
 		nextCursorStr = fmt.Sprintf("%d_%d", conv.UpdatedAt.UnixMilli(), conv.Id)
 	}

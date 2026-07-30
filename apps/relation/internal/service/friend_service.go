@@ -64,10 +64,12 @@ func (s *friendServiceImpl) SendFriendApply(ctx context.Context, req *pb.SendFri
 	if currentUserUUID == "" {
 		return nil, apperr.New(consts.CodeUnauthorized)
 	}
+
 	// target_uuid 为空时无法定位申请目标，直接按参数错误拦截。
 	if req == nil || req.TargetUuid == "" {
 		return nil, apperr.New(consts.CodeParamError)
 	}
+
 	// 给自己发好友申请没有业务意义，单独返回明确错误码。
 	if currentUserUUID == req.TargetUuid {
 		return nil, apperr.New(consts.CodeCannotAddSelf)
@@ -173,6 +175,7 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 				logger.ErrorField("error", err),
 			)
 		}
+
 		return &pb.GetFriendApplyListResponse{
 			Items:      []*pb.FriendApplyItem{},
 			Pagination: buildPagination(page, pageSize, total),
@@ -187,6 +190,7 @@ func (s *friendServiceImpl) GetFriendApplyList(ctx context.Context, req *pb.GetF
 		if apply == nil {
 			continue
 		}
+
 		// 只收集未读申请 id，供后面的异步已读更新使用。
 		if !apply.IsRead {
 			unreadIDs = append(unreadIDs, apply.Id)
@@ -288,6 +292,7 @@ func (s *friendServiceImpl) HandleFriendApply(ctx context.Context, req *pb.Handl
 	if currentUserUUID == "" {
 		return apperr.New(consts.CodeUnauthorized)
 	}
+
 	// apply_id 非法时无法定位目标申请，直接按参数错误返回。
 	if req == nil || req.ApplyId <= 0 {
 		return apperr.New(consts.CodeParamError)
@@ -301,6 +306,7 @@ func (s *friendServiceImpl) HandleFriendApply(ctx context.Context, req *pb.Handl
 	if err != nil || apply == nil {
 		return apperr.New(consts.CodeApplyNotFoundOrHandle)
 	}
+
 	// 只有申请接收方本人才能处理该申请。
 	if apply.TargetUuid != currentUserUUID {
 		return apperr.New(consts.CodeNoPermission)
@@ -328,6 +334,7 @@ func (s *friendServiceImpl) HandleFriendApply(ctx context.Context, req *pb.Handl
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "拒绝好友申请失败")
 	}
+
 	s.publishFriendApplyHandled(ctx, req.ApplyId, apply.ApplicantUuid, currentUserUUID, req.Action)
 	return nil
 }
@@ -392,6 +399,7 @@ func (s *friendServiceImpl) MarkApplyAsRead(ctx context.Context, req *pb.MarkApp
 			logger.ErrorField("error", err),
 		)
 	}
+
 	return nil
 }
 
@@ -482,11 +490,13 @@ func (s *friendServiceImpl) SyncFriendList(ctx context.Context, req *pb.SyncFrie
 		if req.Limit > 0 {
 			limit = int(req.Limit)
 		}
+
 		// version=0 表示全量起点；只有正数版本才参与增量过滤。
 		if req.Version > 0 {
 			version = req.Version
 		}
 	}
+
 	// 对单次同步上限做保护，避免客户端把 limit 拉得过大压垮仓储层查询。
 	if limit > 500 {
 		limit = 500

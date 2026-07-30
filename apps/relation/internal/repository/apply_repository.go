@@ -48,6 +48,7 @@ func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequ
 	cacheKey := rediskey.ApplyPendingKey(apply.TargetUuid)
 	luaScript := goredis.NewScript(luaAddPendingApplyIfExists)
 	expireSeconds := int(getRandomExpireTime(rediskey.ApplyPendingTTL).Seconds())
+
 	// 待处理申请列表只在 key 已存在时补丁写入；若缓存已过期，则交给读路径全量重建。
 	_, err := luaScript.Run(ctx, r.redisClient,
 		[]string{cacheKey},
@@ -55,6 +56,7 @@ func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequ
 		apply.ApplicantUuid,
 		expireSeconds,
 	).Result()
+
 	if err != nil && err != goredis.Nil {
 		if isRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
@@ -134,6 +136,7 @@ func (r *applyRepositoryImpl) getPendingListFromCache(ctx context.Context, targe
 
 	total := totalCmd.Val()
 	applicantUUIDs := membersCmd.Val()
+
 	// total=0 说明 key 不存在或已经被清空，此时让调用方回源数据库并触发全量重建。
 	if total == 0 {
 		return nil, 0, goredis.Nil
@@ -150,6 +153,7 @@ func (r *applyRepositoryImpl) getPendingListFromCache(ctx context.Context, targe
 			filteredUUIDs = append(filteredUUIDs, uuid)
 		}
 	}
+
 	if len(filteredUUIDs) == 0 {
 		return []*model.ApplyRequest{}, total, nil
 	}
@@ -225,12 +229,14 @@ func (r *applyRepositoryImpl) rebuildPendingCacheAsync(ctx context.Context, targ
 			Select("applicant_uuid", "created_at").
 			Where("apply_type = ? AND target_uuid = ? AND status = ? AND deleted_at IS NULL", 0, targetUUID, 0).
 			Find(&applies).Error
+
 		if err != nil {
 			return
 		}
 
 		pipe := r.redisClient.Pipeline()
 		pipe.Del(runCtx, cacheKey)
+
 		// 空列表写入 __EMPTY__ 占位，非空列表则按创建时间倒序需求维护 score。
 		if len(applies) == 0 {
 			pipe.ZAdd(runCtx, cacheKey, goredis.Z{Score: 0, Member: "__EMPTY__"})
@@ -243,6 +249,7 @@ func (r *applyRepositoryImpl) rebuildPendingCacheAsync(ctx context.Context, targ
 					Member: apply.ApplicantUuid,
 				})
 			}
+
 			pipe.ZAdd(runCtx, cacheKey, zs...)
 			pipe.Expire(runCtx, cacheKey, getRandomExpireTime(rediskey.ApplyPendingTTL))
 		}
@@ -327,6 +334,7 @@ func (r *applyRepositoryImpl) CleanupAccountApplies(ctx context.Context, userUUI
 		}
 		affectedTargets = append(affectedTargets, row.TargetUUID)
 	}
+
 	r.invalidateApplyCachesAsync(ctx, affectedTargets)
 	return nil
 }
@@ -354,6 +362,7 @@ func (r *applyRepositoryImpl) invalidateApplyCachesAsync(ctx context.Context, ta
 			pipe.Del(runCtx, rediskey.ApplyPendingKey(targetUUID))
 			pipe.Del(runCtx, rediskey.ApplyUnreadNotifyKey(targetUUID))
 		}
+
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
 			LogRedisError(runCtx, err)
 		}
@@ -431,6 +440,7 @@ func (r *applyRepositoryImpl) AcceptApplyAndCreateRelation(ctx context.Context, 
 			"deleted_at": nil,
 			"updated_at": now,
 		}
+
 		if remark != "" {
 			abUpdates["remark"] = remark
 		}
@@ -449,6 +459,7 @@ func (r *applyRepositoryImpl) AcceptApplyAndCreateRelation(ctx context.Context, 
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
+
 		return tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "user_uuid"}, {Name: "peer_uuid"}},
 			DoUpdates: clause.Assignments(map[string]interface{}{
@@ -458,6 +469,7 @@ func (r *applyRepositoryImpl) AcceptApplyAndCreateRelation(ctx context.Context, 
 			}),
 		}).Create(relationBA).Error
 	})
+
 	if err != nil {
 		return false, WrapDBError(err)
 	}
@@ -514,6 +526,7 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 				pair.metaJSON,
 				expireSeconds,
 			).Result()
+
 			if err != nil && err != goredis.Nil {
 				if isRedisWrongType(err) {
 					_ = r.redisClient.Del(runCtx, pair.userKey).Err()
@@ -542,6 +555,7 @@ func (r *applyRepositoryImpl) removePendingApplyCache(ctx context.Context, targe
 		applicantUUID,
 		expireSeconds,
 	).Result()
+
 	if err != nil && err != goredis.Nil {
 		if isRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
@@ -611,6 +625,7 @@ func (r *applyRepositoryImpl) GetUnreadCount(ctx context.Context, targetUUID str
 
 	notifyKey := rediskey.ApplyUnreadNotifyKey(targetUUID)
 	val, err := r.redisClient.Get(ctx, notifyKey).Result()
+
 	if err != nil {
 		if err == goredis.Nil {
 			return 0, nil
@@ -626,6 +641,7 @@ func (r *applyRepositoryImpl) GetUnreadCount(ctx context.Context, targetUUID str
 		)
 		return 0, nil
 	}
+
 	if count < 0 {
 		count = 0
 	}
@@ -667,6 +683,7 @@ func (r *applyRepositoryImpl) ClearUnreadCount(ctx context.Context, targetUUID s
 func (r *applyRepositoryImpl) ExistsPendingRequest(ctx context.Context, applicantUUID, targetUUID string) (bool, error) {
 	if r.redisClient != nil {
 		cacheKey := rediskey.ApplyPendingKey(targetUUID)
+
 		// 先用缓存判断目标用户当前的待处理集合里是否已经有该申请人，减少重复发起时的数据库压力。
 		pipe := r.redisClient.Pipeline()
 		existsCmd := pipe.Exists(ctx, cacheKey)
@@ -714,6 +731,7 @@ func (r *applyRepositoryImpl) ExistsPendingRequest(ctx context.Context, applican
 			return true, nil
 		}
 	}
+
 	return false, nil
 }
 

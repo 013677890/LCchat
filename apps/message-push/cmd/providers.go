@@ -145,12 +145,14 @@ func provideMessagePushMaxFanoutConcurrency() (messagePushMaxFanoutConcurrency, 
 			err,
 		)
 	}
+
 	if concurrency <= 0 {
 		return 0, fmt.Errorf(
 			"MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY 必须大于零（当前值=%q）",
 			raw,
 		)
 	}
+
 	return messagePushMaxFanoutConcurrency(concurrency), nil
 }
 

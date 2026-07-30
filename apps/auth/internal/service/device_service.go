@@ -123,6 +123,7 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *authpb.KickDevi
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：查询设备会话失败")
 	}
+
 	if session == nil {
 		return apperr.New(consts.CodeDeviceNotFound)
 	}
@@ -138,6 +139,7 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *authpb.KickDevi
 			return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：更新设备状态失败")
 		}
 	}
+
 	return nil
 }
 
@@ -271,6 +273,7 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *authp
 			}
 			deviceIDs = append(deviceIDs, session.DeviceId)
 		}
+
 		if len(deviceIDs) > 0 {
 			userDeviceIDs[userUUID] = deviceIDs
 		}
@@ -284,6 +287,7 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *authp
 		)
 		activeByUser = map[string]map[string]int64{}
 	}
+
 	lastSeenByUser, err := s.deviceRepo.BatchGetLastSeenTimestamps(ctx, unique)
 	if err != nil {
 		logger.Warn(ctx, "批量获取在线状态：读取最近活跃时间失败，按 0 返回",
@@ -319,6 +323,7 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *authp
 				isOnline = true
 			}
 		}
+
 		users = append(users, buildOnlineStatusItemProto(userUUID, isOnline, lastSeenSec))
 	}
 

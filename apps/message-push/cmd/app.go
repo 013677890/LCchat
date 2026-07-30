@@ -65,6 +65,7 @@ func (a *MessagePushApp) Run(ctx context.Context) error {
 	go func() {
 		httpErrCh <- a.httpServer.Start()
 	}()
+
 	logger.Info(ctx, "message-push 指标 HTTP 服务已启动",
 		logger.String("addr", a.httpServer.Addr()),
 	)
@@ -108,22 +109,26 @@ func (a *MessagePushApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 HTTP server 失败: %w", err))
 		}
 	}
+
 	if a.connectCli != nil {
 		// 先关 connect 客户端连接池，避免退出过程中仍有下游连接悬挂。
 		if err := a.connectCli.Close(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}
+
 	if a.groupGRPCConn != nil {
 		if err := a.groupGRPCConn.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 group-service gRPC 连接失败: %w", err))
 		}
 	}
+
 	if a.redis != nil {
 		if err := a.redis.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Redis 客户端失败: %w", err))
 		}
 	}
+
 	if a.logger != nil {
 		_ = a.logger.Sync()
 	}

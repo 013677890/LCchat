@@ -173,6 +173,7 @@ func decodeGroupInfoCacheValue(raw string) (entry *groupInfoCacheEntry, projecti
 		decoded.UpdatedAtUnixMs <= 0 {
 		return nil, 0, false, fmt.Errorf("群资料缓存缺少必填字段")
 	}
+
 	return &decoded, projectionVersion, false, nil
 }
 

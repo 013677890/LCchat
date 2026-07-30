@@ -161,6 +161,7 @@ func ValidateBatchSyncMessagesRequest(req *BatchSyncMessagesRequest) bool {
 			item.Limit > batchSyncMaxLimit {
 			return false
 		}
+
 		if _, duplicated := seenConversationIDs[item.ConvID]; duplicated {
 			return false
 		}
@@ -175,6 +176,7 @@ func ValidateBatchSyncMessagesRequest(req *BatchSyncMessagesRequest) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -223,6 +225,7 @@ func ConvertBatchSyncMessagesResponseFromProto(pb *msgpb.BatchSyncMessagesRespon
 			ErrorCode: item.ErrorCode,
 		})
 	}
+
 	return &BatchSyncMessagesResponse{Results: results}
 }
 

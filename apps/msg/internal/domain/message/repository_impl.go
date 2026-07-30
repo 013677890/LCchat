@@ -54,6 +54,7 @@ func (r *repositoryImpl) AllocSeq(ctx context.Context, convId string) (int64, er
 		return 0, fmt.Errorf("AllocSeq: redis client is nil")
 	}
 	key := rediskey.MsgSeqKey(convId)
+
 	// 热路径不查 DB：绝大多数情况下 Redis 计数器存在，直接在 Lua 内完成 INCR。
 	// 如果返回 -1，说明 key 缺失，必须先用 DB 最大已落库 seq 作为恢复基准。
 	seq, err := r.redis.Eval(ctx, allocExistingSeqScript, []string{key}).Int64()
@@ -185,6 +186,7 @@ func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, dev
 	// SETNX "PROCESSING:{token}" with 10s TTL
 	// 10 秒 TTL 是防止处理中途崩溃导致锁永远不释放的保险措施
 	ok, err := r.redis.SetNX(ctx, key, processingValue, time.Duration(idempotentLockTTLSec)*time.Second).Result()
+
 	if err != nil {
 		return nil, fmt.Errorf("TryAcquireIdempotent: redis SETNX failed: %w", err)
 	}
@@ -196,6 +198,7 @@ func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, dev
 
 	// SETNX 失败 → key 已存在，读取当前值判断状态
 	val, err := r.redis.Get(ctx, key).Result()
+
 	if err != nil {
 		return nil, fmt.Errorf("TryAcquireIdempotent: redis GET failed: %w", err)
 	}
@@ -221,6 +224,7 @@ func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, dev
 		ConvId:   entry.ConvId,
 		SendTime: time.UnixMilli(entry.SendTime),
 	}
+
 	return &IdempotentAcquireResult{CachedMsg: msg}, nil
 }
 

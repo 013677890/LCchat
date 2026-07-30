@@ -167,6 +167,7 @@ func parseRetryFullMethod(fullMethod string) (parsedRetryMethod, error) {
 	if !strings.HasPrefix(fullMethod, "/") {
 		return parsedRetryMethod{}, fmt.Errorf("grpc retry full method 必须以 / 开头: %q", fullMethod)
 	}
+
 	// 去掉前导 / 后必须恰好拆成 service 与 method 两段；段内禁止空白，避免静默规范化掩盖配置错误。
 	body := fullMethod[1:]
 	parts := strings.Split(body, "/")
@@ -294,6 +295,7 @@ func buildClientServiceConfig(cfg *ClientRetryConfig, loadBalancingPolicy string
 				RetryableStatusCodes: retryableCodes,
 			},
 		}
+
 		if cfg.Timeout > 0 {
 			mc.Timeout = formatServiceConfigDuration(cfg.Timeout)
 		}

@@ -184,6 +184,7 @@ func ValidateEmail(email string) bool {
 			}
 			atIndex = i
 		}
+
 		if ch == '.' && atIndex != -1 {
 			dotIndex = i
 		}

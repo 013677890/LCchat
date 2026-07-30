@@ -44,6 +44,7 @@ func TimeoutUnaryInterceptor(cfg TimeoutConfig) grpc.UnaryServerInterceptor {
 			)
 			return resp, apperr.New(consts.CodeTimeoutError)
 		}
+
 		if ctx.Err() != context.DeadlineExceeded {
 			return resp, nil
 		}

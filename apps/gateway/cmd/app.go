@@ -167,31 +167,37 @@ func (a *GatewayApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 msg-service gRPC 连接失败: %w", err))
 		}
 	}
+
 	if a.groupServiceConn.value != nil {
 		if err := a.groupServiceConn.value.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 group-service gRPC 连接失败: %w", err))
 		}
 	}
+
 	if a.authServiceConn.value != nil {
 		if err := a.authServiceConn.value.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 auth-service gRPC 连接失败: %w", err))
 		}
 	}
+
 	if a.relationServiceConn.value != nil {
 		if err := a.relationServiceConn.value.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 relation-service gRPC 连接失败: %w", err))
 		}
 	}
+
 	if a.userServiceConn.value != nil {
 		if err := a.userServiceConn.value.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 user-service gRPC 连接失败: %w", err))
 		}
 	}
+
 	if a.redisClient != nil {
 		if err := a.redisClient.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Redis 客户端失败: %w", err))
 		}
 	}
+
 	if a.logger != nil {
 		_ = a.logger.Sync()
 	}
@@ -236,6 +242,7 @@ func (a *GatewayApp) installGatewayGlobals(ctx context.Context) {
 					DeviceId: items[i].DeviceID,
 				})
 			}
+
 			rpcCtx, cancel := context.WithTimeout(context.Background(), a.deviceActiveConfig.RPCTimeout)
 			_, err := deviceRPCClient.UpdateDeviceActive(rpcCtx, &authpb.UpdateDeviceActiveRequest{Items: activeItems})
 			cancel()
@@ -247,6 +254,7 @@ func (a *GatewayApp) installGatewayGlobals(ctx context.Context) {
 				)
 			}
 		}
+
 		return firstErr
 	}); err != nil {
 		logger.Error(ctx, "设备活跃同步器初始化失败", logger.ErrorField("error", err))

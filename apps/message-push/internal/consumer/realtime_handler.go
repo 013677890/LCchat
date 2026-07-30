@@ -71,6 +71,7 @@ func (h *RealtimeHandler) Handle(ctx context.Context, value []byte) error {
 		TraceId:     event.TraceID,
 		AckRequired: event.AckRequired,
 	}
+
 	successCount, failedCount := h.pushRealtimeRoutes(ctx, event.Type, routes, envelope)
 
 	logger.Info(ctx, "message-push realtime.push 处理完成",
@@ -150,6 +151,7 @@ func (h *RealtimeHandler) listRealtimeUsersRoutes(ctx context.Context, eventType
 		observeRouteLookup(eventType, len(userRoutes))
 		routes = append(routes, userRoutes...)
 	}
+
 	return dedupeDeviceRoutes(routes), nil
 }
 
@@ -220,6 +222,7 @@ func (h *RealtimeHandler) pushRealtimeRoutes(ctx context.Context, eventType stri
 		metrics.PushToDeviceTotal.WithLabelValues(eventType, "success").Inc()
 		metrics.ObservePushToDeviceDuration(pushStart, "success")
 	}
+
 	metrics.DeliveredDevices.Observe(float64(successCount))
 	return successCount, failedCount
 }

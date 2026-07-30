@@ -121,36 +121,43 @@ func (a *AuthApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 metrics server 失败: %w", err))
 		}
 	}
+
 	if a.grpcServer != nil {
 		if err := grpcx.GracefulStop(ctx, a.grpcServer, a.grpcShutdownTimeout); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			errs = append(errs, fmt.Errorf("关闭 grpc server 失败: %w", err))
 		}
 	}
+
 	if a.grpcListener != nil {
 		if err := a.grpcListener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			errs = append(errs, fmt.Errorf("关闭 grpc listener 失败: %w", err))
 		}
 	}
+
 	if a.redisConsumer != nil {
 		if err := a.redisConsumer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Redis 重试消费者失败: %w", err))
 		}
 	}
+
 	if a.profileDisplayChangedConsumer != nil {
 		if err := a.profileDisplayChangedConsumer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Auth profile_display_changed 消费者失败: %w", err))
 		}
 	}
+
 	if a.kafkaProducer != nil {
 		if err := a.kafkaProducer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Kafka Producer 失败: %w", err))
 		}
 	}
+
 	if a.redisClient != nil {
 		if err := a.redisClient.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Redis 客户端失败: %w", err))
 		}
 	}
+
 	if a.db != nil {
 		sqlDB, err := a.db.DB()
 		if err != nil {
@@ -159,6 +166,7 @@ func (a *AuthApp) Shutdown(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("关闭 MySQL 连接失败: %w", err))
 		}
 	}
+
 	if a.logger != nil {
 		_ = a.logger.Sync()
 	}
@@ -185,6 +193,7 @@ func (a *AuthApp) installProcessGlobals(ctx context.Context) error {
 		SenderName:   authGetEnv("EMAIL_SENDER_NAME", "LCChat"),
 		AuthPassword: os.Getenv("EMAIL_AUTH_CODE"),
 	})
+
 	deviceCfg := config.DefaultDeviceActiveConfig()
 	pkgdeviceactive.SetOnlineWindow(deviceCfg.OnlineWindow)
 	if a.kafkaProducer != nil {

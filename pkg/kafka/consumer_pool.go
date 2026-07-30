@@ -190,6 +190,7 @@ func (p *ManualConsumerPool) Start(ctx context.Context, handler MessageHandler) 
 				reason = "completed"
 			} else if !errors.Is(err, context.Canceled) {
 				reason = "fatal_error"
+
 				// 致命错误：立刻取消兄弟 worker，避免以降级并发继续跑。
 				cancel()
 			}
@@ -226,9 +227,11 @@ func (p *ManualConsumerPool) Start(ctx context.Context, handler MessageHandler) 
 			)
 		}
 	}
+
 	if firstFatal != nil {
 		return firstFatal
 	}
+
 	// 父 context 取消或因致命错误触发的内部 cancel：若无致命错误则透传取消语义。
 	if canceled {
 		if err := ctx.Err(); err != nil {
@@ -236,6 +239,7 @@ func (p *ManualConsumerPool) Start(ctx context.Context, handler MessageHandler) 
 		}
 		return context.Canceled
 	}
+
 	return nil
 }
 

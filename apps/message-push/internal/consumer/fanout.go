@@ -64,6 +64,7 @@ func (h *EventHandler) pushEventTargets(
 	// 先完成纯内存分组，之后每个 nodeFanout 都只会被一个 goroutine 读取，无需节点内加锁。
 	nodes := groupTargetsByNode(targets)
 	accumulator := &fanoutAccumulator{}
+
 	// 容量取 min(节点数, 配置值)，避免异常超大配置导致无意义的大 channel 分配。
 	semaphore := make(chan struct{}, h.fanoutConcurrency(len(nodes)))
 	var waitGroup sync.WaitGroup
@@ -77,6 +78,7 @@ launchLoop:
 			go func(currentNode *nodeFanout) {
 				defer waitGroup.Done()
 				defer func() { <-semaphore }()
+
 				accumulator.add(h.pushNode(ctx, eventType, currentNode, envelope))
 			}(node)
 		case <-ctx.Done():
@@ -84,6 +86,7 @@ launchLoop:
 			break launchLoop
 		}
 	}
+
 	// 即使 ctx 已取消也必须等待已启动 worker 收敛，避免 Handle 返回后仍修改统计或继续投递。
 	waitGroup.Wait()
 	summary := accumulator.snapshot()
