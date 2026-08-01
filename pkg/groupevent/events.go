@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 )
 
 // EventTypeGroupCache 是群缓存投影统一使用的 outbox 事件类型。
@@ -68,6 +69,68 @@ type GroupMemberSnapshot struct {
 	Remark          string `json:"remark"`
 	MuteUntilUnixMs int64  `json:"mute_until_unix_ms"`
 	JoinedAtUnixMs  int64  `json:"joined_at_unix_ms"`
+}
+
+// MarshalJSON 保证可选的禁言截止时间在事件线上使用稳定的类型。
+//
+// Debezium 展开 JSON 时，会为 JSON 数组中的元素推断同一份 Connect Schema。
+// 如果直接输出数字，零值可能被推断为 INT32，而实际的毫秒时间戳会被推断为 LONG；
+// 两种值同时出现在 members 数组中时，可能导致 CDC 任务终止。领域模型仍使用 int64，
+// 仅在内部事件的线上 JSON 中使用十进制字符串。
+func (s GroupMemberSnapshot) MarshalJSON() ([]byte, error) {
+	type wireGroupMemberSnapshot struct {
+		UserUUID        string `json:"user_uuid"`
+		Role            int32  `json:"role"`
+		Remark          string `json:"remark"`
+		MuteUntilUnixMs string `json:"mute_until_unix_ms"`
+		JoinedAtUnixMs  int64  `json:"joined_at_unix_ms"`
+	}
+
+	return json.Marshal(wireGroupMemberSnapshot{
+		UserUUID:        s.UserUUID,
+		Role:            s.Role,
+		Remark:          s.Remark,
+		MuteUntilUnixMs: strconv.FormatInt(s.MuteUntilUnixMs, 10),
+		JoinedAtUnixMs:  s.JoinedAtUnixMs,
+	})
+}
+
+// UnmarshalJSON 只接受 MarshalJSON 输出的稳定字符串格式，历史数字格式会被拒绝。
+func (s *GroupMemberSnapshot) UnmarshalJSON(data []byte) error {
+	type wireGroupMemberSnapshot struct {
+		UserUUID        string `json:"user_uuid"`
+		Role            int32  `json:"role"`
+		Remark          string `json:"remark"`
+		MuteUntilUnixMs string `json:"mute_until_unix_ms"`
+		JoinedAtUnixMs  int64  `json:"joined_at_unix_ms"`
+	}
+
+	var wire wireGroupMemberSnapshot
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("group member snapshot contains multiple JSON values")
+		}
+		return fmt.Errorf("group member snapshot contains trailing data: %w", err)
+	}
+
+	muteUntilUnixMs, err := strconv.ParseInt(wire.MuteUntilUnixMs, 10, 64)
+	if err != nil {
+		return fmt.Errorf("mute_until_unix_ms must be a decimal string: %w", err)
+	}
+
+	*s = GroupMemberSnapshot{
+		UserUUID:        wire.UserUUID,
+		Role:            wire.Role,
+		Remark:          wire.Remark,
+		MuteUntilUnixMs: muteUntilUnixMs,
+		JoinedAtUnixMs:  wire.JoinedAtUnixMs,
+	}
+	return nil
 }
 
 // GroupJoinRequestSnapshot 描述单条待审批入群申请快照。

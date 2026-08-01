@@ -10,7 +10,7 @@
 2. LCChat 应用服务部署到 k3s 的 `lcchat-dev` 命名空间；
 3. MySQL、Redis、Kafka、Kafka Connect、Debezium、MinIO 继续复用 Windows Docker Compose；
 4. 通过 Kubernetes `Service + Endpoints` 让 Pod 访问外部基础设施；
-5. 通过 gateway 端口转发运行黑盒接口测试。
+5. 通过 gateway 端口转发运行 Go 端到端功能测试。
 
 ## 2. 当前环境边界
 
@@ -30,7 +30,7 @@
 
 ```mermaid
 flowchart LR
-    client["本机测试脚本"] --> pf["kubectl port-forward 127.0.0.1:8088"]
+    client["本机 Go E2E"] --> pf["kubectl port-forward 127.0.0.1:8088"]
     pf --> gateway["gateway Service"]
     gateway --> auth
     gateway --> user
@@ -162,51 +162,25 @@ Kuboard 已通过 ServiceAccount Token 导入原生 k3s 集群。
 
 注意：不要把 kubeconfig 私钥或 Token 写入仓库。临时 kubeconfig 文件使用后应删除。
 
-## 9. 当前接口联调进度
+## 9. 接口联调验证
 
-黑盒脚本：
+接口联调统一使用 [`tests/e2e`](../../tests/e2e) 中的 Go 测试。先把 gateway
+端口转发到 `127.0.0.1:8088`，再覆盖测试入口：
 
 ```powershell
-python -m py_compile .\scripts\gateway_blackbox_test.py
-python .\scripts\gateway_blackbox_test.py
+$env:LCCHAT_E2E = '1'
+$env:LCCHAT_BASE_URL = 'http://127.0.0.1:8088'
+go test -tags=e2e `
+  -run 'TestE2E/(认证与账号边界|好友与黑名单边界|消息与会话边界|群组权限与申请边界)$' `
+  -count=1 -v ./tests/e2e
 ```
 
-当前已确认通过的阶段：
+上述命令主动排除了会重启 Compose 服务的生命周期分组。完整 E2E 还需要可访问的
+Connect、Redis 和 MySQL；对应地址通过
+`LCCHAT_CONNECT_HTTP_BASE_URL`、`LCCHAT_CONNECT_WS_BASE_URL`、
+`LCCHAT_REDIS_ADDR` 和 `LCCHAT_MYSQL_DSN` 覆盖。生命周期用例会执行
+`docker compose restart connect` 和停止、恢复 Compose Redis，因此连接到 k3s
+业务服务时应先用 `-run` 选择非生命周期分组，不要直接运行完整套件。
 
-- gateway `/health`；
-- `/metrics`；
-- 验证码 Redis 手动种入与校验；
-- 注册 A / B 用户；
-- 密码登录、多设备登录；
-- refresh-token；
-- 个人资料读取；
-- 他人资料读取；
-- 搜索用户；
-- 获取二维码；
-- 解析二维码；
-- 批量资料；
-- 设备列表；
-- 踢设备；
-- 在线状态与批量在线状态。
-
-当前已知未完成点：
-
-- `send-verify-code` 在本地未配置 SMTP 授权码时会返回 500，脚本按 warning 处理；
-- 黑盒测试当前推进到 `update-profile`，返回 500，下一次应继续结合 trace 日志和 user-service 资料更新链路排查。
-
-最近一次失败样例：
-
-```text
-update-profile http status=500
-trace_id=1d084f08-ef16-4f52-8e13-db388b1f9247
-```
-
-## 10. 下一步建议
-
-下一轮建议按以下顺序继续：
-
-1. 用 `crictl logs` 读取 user / gateway 容器日志，绕过当前 `kubectl logs` 的 kubelet EOF 问题；
-2. 根据 `trace_id` 定位 `UpdateProfile` 的真实底层错误；
-3. 优先检查 `user_profile` 更新 SQL、`profile_display_changed` outbox 写入、Redis 缓存失效；
-4. 修复后重新构建并导入 `lcchat:dev-bin-4` 或新标签；
-5. 重新运行 `scripts/gateway_blackbox_test.py`，继续推进剩余接口。
+测试分组、环境变量和当前 Docker 基线见
+[端到端功能测试](端到端功能测试.md)。

@@ -32,10 +32,13 @@ go run ./apps/<service>/cmd    # 本地单独跑某个服务（需环境变量�
 go test ./...                          # 全量测试
 go test ./apps/msg/...                 # 单服务测试
 go test -run TestXxx ./apps/msg/internal/usecase/ -v   # 单个测试
-python scripts/gateway_blackbox_test.py   # 黑盒接口测试（需服务已启动）
+go test -tags=e2e ./tests/e2e          # 编译 E2E；默认跳过真实环境执行
+LCCHAT_E2E=1 go test -tags=e2e -count=1 -v ./tests/e2e   # Docker Compose 端到端测试
 ```
 
-测试不依赖真实基础设施：Redis 用 miniredis，MySQL 用 sqlite 内存库（见各 `*_test.go`）。
+普通测试不依赖真实基础设施：Redis 用 miniredis，MySQL 用 sqlite 内存库（见各 `*_test.go`）。
+`tests/e2e` 使用 `e2e` build tag 隔离，需要真实 Docker Compose 环境，详见
+`doc/ops/端到端功能测试.md`。
 
 ## 生成代码规则（重要）
 

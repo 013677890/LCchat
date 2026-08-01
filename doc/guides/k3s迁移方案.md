@@ -187,7 +187,7 @@ curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:8088/health
 2. `curl.exe -s http://127.0.0.1:8083/connectors/lcchat-outbox-connector/status` 显示 connector 和 task 均为 `RUNNING`；
 3. `kubectl -n lcchat-dev get pods` 中所有业务 Pod 为 `Running`；
 4. `gateway` 健康检查返回 `200`；
-5. `scripts/gateway_blackbox_test.py` 至少跑通注册、登录、资料读取、二维码和设备状态阶段。
+5. 按[端到端功能测试](../ops/端到端功能测试.md)设置 port-forward 地址，至少跑通认证、资料、二维码和设备状态相关的 Go E2E 用例。
 
 ## 8. 当前方案限制
 

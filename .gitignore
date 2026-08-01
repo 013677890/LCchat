@@ -44,4 +44,3 @@ web/
 deploy/env/chatserver.env
 deploy/env/*.local
 !deploy/env/chatserver.env.example
-scripts/__pycache__/gateway_blackbox_test.cpython-312.pyc

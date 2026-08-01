@@ -22,6 +22,10 @@ group 服务使用 MySQL Outbox、Debezium、Kafka 和 Redis projector 维护群
 | `action` | 必须是当前代码声明的 action。 |
 | `group_uuid` | 必填，同时作为 Outbox `entity_id` 和 Kafka key。 |
 
+成员快照中的 `mute_until_unix_ms` 固定编码为十进制字符串，零值为 `"0"`。这样
+Debezium/Kafka Connect 不会因为同一成员数组中同时出现零值和毫秒时间戳而推断出
+冲突的整数 Schema。严格解码器不接受旧数字格式，也不做字符串/数字双读兼容。
+
 解码器只接受顶层 JSON Object，并启用未知字段拒绝。它不再支持 JSON 字符串、`payload`、`after`、`data` 等旧包装，也不会把缺失版本解释为 `0`。Debezium EventRouter 因此固定配置：
 
 ```text

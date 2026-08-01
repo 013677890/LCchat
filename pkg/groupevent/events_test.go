@@ -34,6 +34,40 @@ func TestDecodeGroupCacheAcceptsOnlyCurrentDirectPayload(t *testing.T) {
 	assert.Equal(t, "event-8", payload.EventID)
 }
 
+func TestGroupMemberSnapshotUsesStableMuteTimestampWireType(t *testing.T) {
+	message, err := json.Marshal(GroupCacheEventPayload{
+		SchemaVersion:     GroupCacheSchemaVersion,
+		ProjectionVersion: 1,
+		EventID:           "event-member-muted",
+		Action:            ActionMemberMuted,
+		GroupUUID:         "group-1",
+		Members: []GroupMemberSnapshot{
+			{UserUUID: "owner-1", Role: 2, MuteUntilUnixMs: 0, JoinedAtUnixMs: 1710000000123},
+			{UserUUID: "member-1", Role: 0, MuteUntilUnixMs: 1785576512001, JoinedAtUnixMs: 1710000000123},
+		},
+	})
+	require.NoError(t, err)
+
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(message, &wire))
+	members, ok := wire["members"].([]any)
+	require.True(t, ok)
+	assert.IsType(t, "", members[0].(map[string]any)["mute_until_unix_ms"])
+	assert.IsType(t, "", members[1].(map[string]any)["mute_until_unix_ms"])
+
+	decoded, err := DecodeGroupCache(message)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), decoded.Members[0].MuteUntilUnixMs)
+	assert.Equal(t, int64(1785576512001), decoded.Members[1].MuteUntilUnixMs)
+}
+
+func TestGroupMemberSnapshotRejectsNumericMuteTimestamp(t *testing.T) {
+	message := []byte(`{"schema_version":2,"projection_version":1,"event_id":"event-member-muted","action":"member_muted","group_uuid":"group-1","members":[{"user_uuid":"member-1","role":0,"remark":"","mute_until_unix_ms":1785576512001,"joined_at_unix_ms":1710000000123}]}`)
+
+	_, err := DecodeGroupCache(message)
+	assert.Error(t, err)
+}
+
 func TestDecodeGroupCacheRejectsLegacyWrappersAndMissingVersion(t *testing.T) {
 	direct := validStrictGroupCacheMessage(t)
 	quoted, err := json.Marshal(string(direct))

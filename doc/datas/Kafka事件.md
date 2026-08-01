@@ -130,6 +130,11 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 
 基础契约只接受 `schema_version=2` 且 `projection_version>0`。版本由 group 写事务递增 `groups.cache_version` 后生成；JSON 字符串包装、`payload/after/data` 包装、未知字段、缺省版本或未知 schema 均按永久错误首轮写入 `dead_events`，不做兼容解析。
 
+`members[].mute_until_unix_ms` 在线上 JSON 中固定使用十进制字符串，例如
+`"1785576512001"`，零值为 `"0"`。这是为了避免 Debezium/Kafka Connect 对同一
+`members` 数组中的零值和毫秒时间戳分别推断 `INT32`、`INT64` 后产生 Schema 冲突。
+消费者只接受字符串格式，旧数字格式直接按契约错误拒绝，不提供兼容分支。
+
 两个 consumer group 都会收到每一条事件，不能配置成相同 group ID：
 
 - group projector 把最终群快照和成员/申请变化用版本 Lua 投影到 Redis；

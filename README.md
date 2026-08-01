@@ -249,9 +249,15 @@ go test ./...                          # 全量（不依赖真实 MySQL/Redis：
 go test ./apps/msg/...                 # 单服务
 go test -run TestXxx ./apps/msg/internal/usecase/ -v
 
-# 黑盒接口测试（需服务已启动）
-python scripts/gateway_blackbox_test.py
+# 编译 Docker E2E；未设置 LCCHAT_E2E=1 时只编译并跳过执行
+go test -tags=e2e ./tests/e2e
+
+# 完整 Docker Compose 端到端测试，会创建真实数据并重启 Connect、Redis
+LCCHAT_E2E=1 go test -tags=e2e -count=1 -v ./tests/e2e
 ```
+
+覆盖范围、环境变量、按模块运行方式和当前测试基线见
+[`doc/ops/端到端功能测试.md`](doc/ops/端到端功能测试.md)。
 
 ---
 
@@ -263,11 +269,11 @@ python scripts/gateway_blackbox_test.py
 
 | 变量 | 默认 |
 | --- | --- |
-| `AUTH_SERVICE_ADDR` | `auth:9090` |
-| `USER_SERVICE_ADDR` | `user:9094` |
-| `RELATION_SERVICE_ADDR` | `relation:9093` |
-| `GROUP_SERVICE_ADDR` | `group:9095` |
-| `MSG_SERVICE_ADDR` | `msg:9092` |
+| `AUTH_SERVICE_ADDR` | `passthrough:///auth:9090` |
+| `USER_SERVICE_ADDR` | `passthrough:///user:9094` |
+| `RELATION_SERVICE_ADDR` | `passthrough:///relation:9093` |
+| `GROUP_SERVICE_ADDR` | `passthrough:///group:9095` |
+| `MSG_SERVICE_ADDR` | `passthrough:///msg:9092` |
 | `GATEWAY_ADDR` | `:8080` |
 | `CONNECT_ADDR` / `CONNECT_GRPC_ADDR` | `:8081` / `:9091` |
 | `MESSAGE_PUSH_HTTP_ADDR` | `:8084` |
