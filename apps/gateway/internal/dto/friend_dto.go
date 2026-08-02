@@ -184,8 +184,8 @@ type DeleteFriendResponse struct{}
 
 // SetFriendRemarkRequest 设置好友备注请求 DTO
 type SetFriendRemarkRequest struct {
-	UserUUID string `json:"userUuid" binding:"required"`      // 用户UUID
-	Remark   string `json:"remark" binding:"required,max=64"` // 备注名
+	UserUUID string `json:"userUuid" binding:"required"`       // 用户UUID
+	Remark   string `json:"remark" binding:"omitempty,max=64"` // 备注名（空串表示清空备注）
 }
 
 // SetFriendRemarkResponse 设置好友备注响应 DTO
@@ -193,8 +193,8 @@ type SetFriendRemarkResponse struct{}
 
 // SetFriendTagRequest 设置好友标签请求 DTO
 type SetFriendTagRequest struct {
-	UserUUID string `json:"userUuid" binding:"required"`        // 用户UUID
-	GroupTag string `json:"groupTag" binding:"required,max=32"` // 标签
+	UserUUID string `json:"userUuid" binding:"required"`         // 用户UUID
+	GroupTag string `json:"groupTag" binding:"omitempty,max=32"` // 标签（空串表示清空标签）
 }
 
 // SetFriendTagResponse 设置好友标签响应 DTO

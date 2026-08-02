@@ -543,6 +543,40 @@ func TestFriendHandlerSimpleMethods(t *testing.T) {
 			wantCode:   consts.CodeSuccess,
 		},
 		{
+			name:   "set_remark_clear_with_empty",
+			method: http.MethodPost,
+			path:   "/api/v1/auth/friend/remark",
+			body:   `{"userUuid":"u2","remark":""}`,
+			invoke: func(h *FriendHandler, c *gin.Context) { h.SetFriendRemark(c) },
+			setupSvc: func(s *fakeFriendHTTPService) {
+				s.remarkFn = func(_ context.Context, req *dto.SetFriendRemarkRequest) (*dto.SetFriendRemarkResponse, error) {
+					// 空串必须穿过 DTO 绑定到达服务层，才能表达"清空备注"。
+					require.Equal(t, "u2", req.UserUUID)
+					require.Equal(t, "", req.Remark)
+					return &dto.SetFriendRemarkResponse{}, nil
+				}
+			},
+			wantStatus: http.StatusOK,
+			wantCode:   consts.CodeSuccess,
+		},
+		{
+			name:   "set_tag_clear_with_empty",
+			method: http.MethodPost,
+			path:   "/api/v1/auth/friend/tag",
+			body:   `{"userUuid":"u2","groupTag":""}`,
+			invoke: func(h *FriendHandler, c *gin.Context) { h.SetFriendTag(c) },
+			setupSvc: func(s *fakeFriendHTTPService) {
+				s.tagFn = func(_ context.Context, req *dto.SetFriendTagRequest) (*dto.SetFriendTagResponse, error) {
+					// 空串必须穿过 DTO 绑定到达服务层，才能表达"清空标签"。
+					require.Equal(t, "u2", req.UserUUID)
+					require.Equal(t, "", req.GroupTag)
+					return &dto.SetFriendTagResponse{}, nil
+				}
+			},
+			wantStatus: http.StatusOK,
+			wantCode:   consts.CodeSuccess,
+		},
+		{
 			name:   "check_is_friend_success",
 			method: http.MethodPost,
 			path:   "/api/v1/auth/friend/check",

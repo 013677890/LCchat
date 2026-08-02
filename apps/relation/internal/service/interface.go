@@ -53,6 +53,15 @@ type IBlacklistService interface {
 	CheckIsBlacklist(ctx context.Context, req *pb.CheckIsBlacklistRequest) (*pb.CheckIsBlacklistResponse, error)
 }
 
+// ==================== 跨服务依赖接口 ====================
+// AccountChecker 面向 relation 域的账号边界查询能力。
+// 由 internal/authcli 基于 auth InternalAuthService.BatchCheckAccountStatus 实现；
+// relation 自身不存储账号事实，好友申请前的目标存在性校验依赖该接口。
+type AccountChecker interface {
+	// IsAccountVisible 判断目标账号是否存在且未注销。
+	IsAccountVisible(ctx context.Context, userUUID string) (bool, error)
+}
+
 // ==================== 别名类型定义 ====================
 // FriendService 别名 IFriendService
 type FriendService = IFriendService

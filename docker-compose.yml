@@ -282,6 +282,7 @@ services:
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
       KAFKA_ACCOUNT_DELETED_TOPIC: account.deleted
+      AUTH_GRPC_ADDR: "passthrough:///auth:9090"
       RELATION_GRPC_ADDR: ":9093"
       RELATION_METRICS_ADDR: ":9193"
     depends_on:

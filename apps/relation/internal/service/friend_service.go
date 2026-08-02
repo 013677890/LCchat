@@ -19,14 +19,16 @@ type friendServiceImpl struct {
 	friendRepo        repository.IFriendRepository
 	applyRepo         repository.IApplyRepository
 	blacklistRepo     repository.IBlacklistRepository
+	accountChecker    AccountChecker
 	realtimePublisher realtimepush.Publisher
 }
 
 // NewFriendService 创建好友服务实例。
 //
-// service 层只持有完成好友业务编排所需的三个仓储及实时通知发布器，不直接访问数据库或 Redis。
-// 这样可以让依赖边界与实际职责一致，同时保持既有仓储调用顺序和错误映射不变：
-//  1. 参数与权限校验；
+// service 层持有完成好友业务编排所需的三个仓储、账号边界校验器及实时通知发布器，
+// 不直接访问数据库或 Redis。这样可以让依赖边界与实际职责一致，
+// 同时保持既有仓储调用顺序和错误映射不变：
+//  1. 参数与权限校验（含跨服务的目标账号存在性校验）；
 //  2. 仓储调用编排；
 //  3. 业务错误到统一错误码的映射；
 //  4. relation proto 响应对象的组装。
@@ -34,12 +36,14 @@ func NewFriendService(
 	friendRepo repository.IFriendRepository,
 	applyRepo repository.IApplyRepository,
 	blacklistRepo repository.IBlacklistRepository,
+	accountChecker AccountChecker,
 	realtimePublisher realtimepush.Publisher,
 ) IFriendService {
 	return &friendServiceImpl{
 		friendRepo:        friendRepo,
 		applyRepo:         applyRepo,
 		blacklistRepo:     blacklistRepo,
+		accountChecker:    accountChecker,
 		realtimePublisher: realtimePublisher,
 	}
 }
@@ -49,12 +53,14 @@ func NewFriendService(
 // 该方法按当前单体阶段既有语义完成校验：
 //  1. 必须从上下文中拿到当前登录用户；
 //  2. 不允许给自己发好友申请；
-//  3. 已经是好友、已有待处理申请、任一方向存在拉黑关系时都应拒绝；
-//  4. 通过校验后才真正落库创建申请记录。
+//  3. 目标账号必须真实存在且未注销（跨服务查询 auth）；
+//  4. 已经是好友、已有待处理申请、任一方向存在拉黑关系时都应拒绝；
+//  5. 通过校验后才真正落库创建申请记录。
 //
 // 错误码映射：
 //   - codes.Unauthenticated: 未登录
 //   - codes.InvalidArgument: 参数错误或给自己发申请
+//   - codes.NotFound: 目标用户不存在或已注销
 //   - codes.AlreadyExists: 已是好友或已有待处理申请
 //   - codes.PermissionDenied: 任一方向存在拉黑关系
 //   - codes.Internal: 系统内部错误
@@ -75,7 +81,21 @@ func (s *friendServiceImpl) SendFriendApply(ctx context.Context, req *pb.SendFri
 		return nil, apperr.New(consts.CodeCannotAddSelf)
 	}
 
-	// 先判断当前是否已经是好友；命中后无需再做后续申请和黑名单校验。
+	// relation 不拥有账号事实，目标账号是否真实存在必须查询 auth 域；
+	// 校验器未装配按内部错误处理（fail-close），禁止降级放行落库脏申请。
+	if s.accountChecker == nil {
+		return nil, apperr.NewWithMessage(consts.CodeInternalError, "账号校验器未初始化")
+	}
+
+	visible, err := s.accountChecker.IsAccountVisible(ctx, req.TargetUuid)
+	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		return nil, apperr.New(consts.CodeUserNotFound)
+	}
+
+	// 再判断当前是否已经是好友；命中后无需再做后续申请和黑名单校验。
 	isFriend, err := s.friendRepo.IsFriend(ctx, currentUserUUID, req.TargetUuid)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查是否好友失败")

@@ -34,6 +34,7 @@ type RelationApp struct {
 	asyncReleaseTimeout    relationAsyncReleaseTimeout
 	accountDeletedConsumer *consumer.AccountDeletedConsumer
 	realtimeProducer       *realtimepush.Producer
+	authConn               *grpc.ClientConn
 	db                     *gorm.DB
 	redisClient            *goredis.Client
 }
@@ -49,6 +50,7 @@ func NewRelationApp(
 	asyncReleaseTimeout relationAsyncReleaseTimeout,
 	accountDeletedConsumer *consumer.AccountDeletedConsumer,
 	realtimeProducer *realtimepush.Producer,
+	authConn relationAuthGRPCConn,
 	db *gorm.DB,
 	redisClient *goredis.Client,
 ) (*RelationApp, error) {
@@ -68,6 +70,7 @@ func NewRelationApp(
 		asyncReleaseTimeout:    asyncReleaseTimeout,
 		accountDeletedConsumer: accountDeletedConsumer,
 		realtimeProducer:       realtimeProducer,
+		authConn:               authConn.ClientConn,
 		db:                     db,
 		redisClient:            redisClient,
 	}, nil
@@ -144,6 +147,12 @@ func (a *RelationApp) Shutdown(ctx context.Context) error {
 	if a.realtimeProducer != nil {
 		if err := a.realtimeProducer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Relation realtime.push 生产者失败: %w", err))
+		}
+	}
+
+	if a.authConn != nil {
+		if err := a.authConn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 auth-service gRPC 连接失败: %w", err))
 		}
 	}
 

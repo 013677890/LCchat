@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/relation/internal/authcli"
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/repository"
@@ -30,6 +32,8 @@ import (
 // Wire 类型别名，避免同类型参数误绑定
 type relationGRPCAddress string
 type relationMetricsAddress string
+type relationAuthGRPCAddress string
+type relationAuthGRPCConn struct{ *grpc.ClientConn }
 type relationAsyncReleaseTimeout time.Duration
 type relationGRPCShutdownTimeout time.Duration
 
@@ -88,6 +92,41 @@ func provideRelationMetricsAddress() relationMetricsAddress {
 		addr = ":9193"
 	}
 	return relationMetricsAddress(addr)
+}
+
+func provideRelationAuthGRPCAddress() relationAuthGRPCAddress {
+	addr := os.Getenv("AUTH_GRPC_ADDR")
+	if addr == "" {
+		addr = ":9090"
+	}
+	return relationAuthGRPCAddress(addr)
+}
+
+// provideRelationAuthGRPCConn 创建 relation → auth 的内部查询连接。
+// relation 只调用 BatchCheckAccountStatus 做好友申请前的账号存在性检查：
+// 该方法为只读幂等查询，允许配置式重试；其余 auth 方法一律不重试。
+// x-internal-caller 仅对该 full method 注入，caller 名与 auth 服务端白名单保持一致。
+func provideRelationAuthGRPCConn(_ *zap.Logger, addr relationAuthGRPCAddress) (relationAuthGRPCConn, error) {
+	conn, err := grpcx.NewClient(grpcx.ClientOptions{
+		Address: string(addr),
+		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
+		Retry: grpcx.DefaultClientRetryConfig(
+			"/auth.InternalAuthService/BatchCheckAccountStatus",
+		),
+		InternalCaller: &grpcx.InternalCallerClientConfig{
+			Caller:  "relation-service",
+			Methods: []string{"/auth.InternalAuthService/BatchCheckAccountStatus"},
+		},
+	})
+	if err != nil {
+		return relationAuthGRPCConn{}, fmt.Errorf("relation 创建 auth-service gRPC 连接失败（addr=%s）: %w", string(addr), err)
+	}
+	return relationAuthGRPCConn{ClientConn: conn}, nil
+}
+
+// provideRelationAccountChecker 基于 auth 连接构造账号边界校验器。
+func provideRelationAccountChecker(conn relationAuthGRPCConn) service.AccountChecker {
+	return authcli.NewClient(conn.ClientConn)
 }
 
 func provideRelationGRPCShutdownTimeout() relationGRPCShutdownTimeout {
@@ -154,6 +193,9 @@ var relationInfraProviderSet = wire.NewSet(
 	provideRelationRedisClient,
 	provideRelationGRPCAddress,
 	provideRelationMetricsAddress,
+	provideRelationAuthGRPCAddress,
+	provideRelationAuthGRPCConn,
+	provideRelationAccountChecker,
 	provideRelationGRPCShutdownTimeout,
 	provideRelationMetricsServer,
 	provideRelationRegistration,

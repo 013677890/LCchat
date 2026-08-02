@@ -34,9 +34,15 @@ func initializeRelationApp() (*RelationApp, error) {
 	iFriendRepository := repository.NewFriendRepository(db, client)
 	iApplyRepository := repository.NewApplyRepository(db, client)
 	iBlacklistRepository := repository.NewBlacklistRepository(db, client)
+	mainRelationAuthGRPCAddress := provideRelationAuthGRPCAddress()
+	mainRelationAuthGRPCConn, err := provideRelationAuthGRPCConn(logger, mainRelationAuthGRPCAddress)
+	if err != nil {
+		return nil, err
+	}
+	accountChecker := provideRelationAccountChecker(mainRelationAuthGRPCConn)
 	kafkaConfig := provideRelationKafkaConfig()
 	producer := provideRelationRealtimePushProducer(kafkaConfig)
-	iFriendService := service.NewFriendService(iFriendRepository, iApplyRepository, iBlacklistRepository, producer)
+	iFriendService := service.NewFriendService(iFriendRepository, iApplyRepository, iBlacklistRepository, accountChecker, producer)
 	friendHandler := handler.NewFriendHandler(iFriendService)
 	iBlacklistService := service.NewBlacklistService(iBlacklistRepository, producer)
 	blacklistHandler := handler.NewBlacklistHandler(iBlacklistService)
@@ -59,7 +65,7 @@ func initializeRelationApp() (*RelationApp, error) {
 	}
 	mainRelationAsyncReleaseTimeout := provideRelationAsyncReleaseTimeout(asyncConfig)
 	accountDeletedConsumer := provideRelationAccountDeletedConsumer(kafkaConfig, iFriendRepository, iApplyRepository, db)
-	relationApp, err := NewRelationApp(logger, server, builtServer, listener, mainRelationGRPCShutdownTimeout, pool, mainRelationAsyncReleaseTimeout, accountDeletedConsumer, producer, db, client)
+	relationApp, err := NewRelationApp(logger, server, builtServer, listener, mainRelationGRPCShutdownTimeout, pool, mainRelationAsyncReleaseTimeout, accountDeletedConsumer, producer, mainRelationAuthGRPCConn, db, client)
 	if err != nil {
 		return nil, err
 	}
