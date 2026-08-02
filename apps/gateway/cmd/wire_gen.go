@@ -45,12 +45,6 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	mainGatewayGroupServiceAddr := provideGatewayGroupServiceAddr()
-	mainGatewayGroupBreaker := provideGatewayGroupBreaker(context)
-	mainGatewayGroupConn, err := provideGatewayGroupConn(context, mainGatewayGroupServiceAddr, mainGatewayGroupBreaker)
-	if err != nil {
-		return nil, err
-	}
 	userServiceClient := provideGatewayUserClient(mainGatewayAuthConn, mainGatewayUserConn, mainGatewayRelationConn)
 	authService := service.NewAuthService(userServiceClient)
 	authHandler := v1.NewAuthHandler(authService)
@@ -71,6 +65,12 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	msgServiceClient := provideGatewayMsgClient(mainGatewayMsgConn)
 	msgService := service.NewMsgService(msgServiceClient)
 	msgHandler := v1.NewMsgHandler(msgService)
+	mainGatewayGroupServiceAddr := provideGatewayGroupServiceAddr()
+	mainGatewayGroupBreaker := provideGatewayGroupBreaker(context)
+	mainGatewayGroupConn, err := provideGatewayGroupConn(context, mainGatewayGroupServiceAddr, mainGatewayGroupBreaker)
+	if err != nil {
+		return nil, err
+	}
 	groupServiceClient := provideGatewayGroupClient(mainGatewayGroupConn)
 	groupService := service.NewGroupService(groupServiceClient)
 	groupHandler := v1.NewGroupHandler(groupService)
@@ -92,8 +92,7 @@ func initializeGatewayApp() (*GatewayApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	deviceActiveConfig := provideGatewayDeviceActiveConfig()
-	gatewayApp, err := NewGatewayApp(logger, server, pool, mainGatewayAsyncReleaseTimeout, client, mainGatewayAuthConn, mainGatewayUserConn, mainGatewayRelationConn, mainGatewayMsgConn, mainGatewayGroupConn, minIOClient, deviceActiveConfig)
+	gatewayApp, err := NewGatewayApp(logger, server, pool, mainGatewayAsyncReleaseTimeout, client, mainGatewayAuthConn, mainGatewayUserConn, mainGatewayRelationConn, mainGatewayMsgConn, mainGatewayGroupConn, minIOClient)
 	if err != nil {
 		return nil, err
 	}

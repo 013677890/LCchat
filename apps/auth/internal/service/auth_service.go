@@ -28,15 +28,14 @@ const passwordLoginSlowThreshold = time.Second
 
 // passwordLoginCostSnapshot 记录密码登录各关键步骤的耗时快照，用于定位真实瓶颈。
 type passwordLoginCostSnapshot struct {
-	totalCost              time.Duration
-	queryUserCost          time.Duration
-	comparePasswordCost    time.Duration
-	getDeviceIDCost        time.Duration
-	generateTokenCost      time.Duration
-	storeAccessTokenCost   time.Duration
-	storeRefreshTokenCost  time.Duration
-	upsertSessionCost      time.Duration
-	setActiveTimestampCost time.Duration
+	totalCost             time.Duration
+	queryUserCost         time.Duration
+	comparePasswordCost   time.Duration
+	getDeviceIDCost       time.Duration
+	generateTokenCost     time.Duration
+	storeAccessTokenCost  time.Duration
+	storeRefreshTokenCost time.Duration
+	upsertSessionCost     time.Duration
 }
 
 // NewAuthService 创建认证服务实例。
@@ -69,7 +68,6 @@ func logPasswordLoginFlow(ctx context.Context, stage string, err error, snapshot
 			logger.Duration("store_access_token_cost", snapshot.storeAccessTokenCost),
 			logger.Duration("store_refresh_token_cost", snapshot.storeRefreshTokenCost),
 			logger.Duration("upsert_session_cost", snapshot.upsertSessionCost),
-			logger.Duration("set_active_timestamp_cost", snapshot.setActiveTimestampCost),
 			logger.ErrorField("error", err),
 		)
 		return
@@ -85,7 +83,6 @@ func logPasswordLoginFlow(ctx context.Context, stage string, err error, snapshot
 		logger.Duration("store_access_token_cost", snapshot.storeAccessTokenCost),
 		logger.Duration("store_refresh_token_cost", snapshot.storeRefreshTokenCost),
 		logger.Duration("upsert_session_cost", snapshot.upsertSessionCost),
-		logger.Duration("set_active_timestamp_cost", snapshot.setActiveTimestampCost),
 	)
 }
 
@@ -163,7 +160,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 //  2. 按账号查询 user_account 并校验账号状态；
 //  3. 校验密码、提取 device_id 与客户端 IP；
 //  4. 生成 AccessToken / RefreshToken 并写入 Redis；
-//  5. 尽力更新设备会话与活跃时间，最后返回登录响应。
+//  5. 尽力更新设备会话，最后返回登录响应。
 //
 // 错误码映射：
 //   - codes.NotFound: 用户不存在
@@ -279,18 +276,6 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	}
 	snapshot.upsertSessionCost = time.Since(upsertSessionStartedAt)
 
-	// 活跃时间是在线态优化信息，失败时降级即可，由下一次心跳/读写再覆盖。
-	setActiveTimestampStartedAt := time.Now()
-	if err := s.deviceRepo.SetActiveTimestamp(ctx, user.UserUuid, deviceID, time.Now().Unix()); err != nil {
-		snapshot.setActiveTimestampCost = time.Since(setActiveTimestampStartedAt)
-		logger.Warn(ctx, "写入设备活跃时间失败",
-			logger.String("user_uuid", user.UserUuid),
-			logger.String("device_id", deviceID),
-			logger.ErrorField("error", err),
-		)
-	}
-
-	snapshot.setActiveTimestampCost = time.Since(setActiveTimestampStartedAt)
 	snapshot.totalCost = time.Since(loginStartedAt)
 	logPasswordLoginFlow(ctx, "completed", nil, snapshot)
 
@@ -384,16 +369,9 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 		Status:     model.DeviceStatusOnline,
 	}
 
-	// 会话和活跃时间仍按 best-effort 处理，失败不影响已经成功签发的登录态。
+	// 会话仍按 best-effort 处理，失败不影响已经成功签发的登录态。
 	if err := s.deviceRepo.UpsertSession(ctx, deviceSession); err != nil {
 		logger.Warn(ctx, "设备会话落库失败，按降级处理继续登录", logger.ErrorField("error", err))
-	}
-	if err := s.deviceRepo.SetActiveTimestamp(ctx, user.UserUuid, deviceID, time.Now().Unix()); err != nil {
-		logger.Warn(ctx, "写入设备活跃时间失败",
-			logger.String("user_uuid", user.UserUuid),
-			logger.String("device_id", deviceID),
-			logger.ErrorField("error", err),
-		)
 	}
 
 	return buildLoginByCodeResponse(accessToken, refreshToken, int64(util.AccessExpire.Seconds()), user), nil
@@ -532,8 +510,7 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *authpb.RefreshT
 //  1. 校验请求中的 device_id；
 //  2. 从上下文中获取当前登录用户；
 //  3. 删除该设备的 AccessToken / RefreshToken；
-//  4. 将设备会话更新为已登出状态；
-//  5. 尽力记录本次登出的最后活跃时间。
+//  4. 将设备会话更新为已登出状态（该迁移时刻即设备的 last_seen）。
 //
 // 错误码映射：
 //   - codes.InvalidArgument: device_id 缺失
@@ -563,15 +540,6 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *authpb.LogoutRequest)
 		logger.Warn(ctx, "登出时设备会话不存在，按幂等成功处理",
 			logger.String("user_uuid", userUUID),
 			logger.String("device_id", req.DeviceId),
-		)
-	}
-
-	// 最后尽力补一笔活跃时间，便于设备列表展示最近一次登出前活动时刻。
-	if err := s.deviceRepo.SetActiveTimestamp(ctx, userUUID, req.DeviceId, time.Now().Unix()); err != nil {
-		logger.Warn(ctx, "写入登出活跃时间失败",
-			logger.String("user_uuid", userUUID),
-			logger.String("device_id", req.DeviceId),
-			logger.ErrorField("error", err),
 		)
 	}
 

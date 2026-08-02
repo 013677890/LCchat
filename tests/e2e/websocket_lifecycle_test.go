@@ -69,8 +69,10 @@ func testWebSocketLifecycle(t *testing.T, f *Fixture, ctx context.Context) {
 
 	routeKey := "user:routing:" + a.UUID
 	t.Run("心跳刷新 Redis 路由 TTL", func(t *testing.T) {
-		before, err := f.redis.TTL(ctx, routeKey).Result()
-		if err != nil {
+		// 先把 TTL 压到远低于正常值的水位再发心跳；
+		// presence 契约要求心跳无条件刷新路由，TTL 必须被抬回接近满值，
+		// 该断言能真正证伪"心跳没有触发刷新"。
+		if err := f.redis.Expire(ctx, routeKey, 30*time.Second).Err(); err != nil {
 			t.Fatal(err)
 		}
 		if err := newConnection.Heartbeat(eventContext(context.Background(), f.cfg.EventTimeout)); err != nil {
@@ -80,8 +82,8 @@ func testWebSocketLifecycle(t *testing.T, f *Fixture, ctx context.Context) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if before <= 0 || after <= 0 || after < before-2*time.Second {
-			t.Errorf("心跳没有刷新路由 TTL：before=%s after=%s", before, after)
+		if after <= 60*time.Second {
+			t.Errorf("心跳没有刷新路由 TTL：after=%s", after)
 		}
 	})
 	t.Run("路由过期后心跳恢复", func(t *testing.T) {

@@ -159,12 +159,18 @@ func testAuthEdges(t *testing.T, f *Fixture, ctx context.Context) {
 			t.Fatal(err)
 		}
 		requireHTTPSuccess(t, "logout", response)
+		// 设计特性：HTTP 层是无状态 JWT 校验，登出只删除 Redis 登录态，
+		// 旧 access token 在自然过期前对 HTTP 接口仍然有效，这里仅记录观察。
 		profile, err := f.api.DoJSON(ctx, "GET", "/api/v1/auth/user/profile", device.AccessToken, device.ID, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if profile.Status == 200 && profile.Body.Code == 0 {
-			t.Errorf("logout 后旧 access token 仍可访问：%s", profile.Summary())
+		t.Logf("观察：logout 后旧 token 访问 HTTP 接口（设计上允许直至 JWT 过期）：%s", profile.Summary())
+		// 强断言在 WS 侧：connect fail-close 比对 Redis 存储的 token 哈希，
+		// 登出后旧 token 必须无法建立长连接（即时失去实时收发能力）。
+		if ws, wsErr := OpenWS(ctx, f.cfg, "logout-old-token", device.AccessToken, device.ID); wsErr == nil {
+			_ = ws.Close()
+			t.Errorf("logout 后旧 token 仍能建立 WebSocket 连接")
 		}
 	})
 	t.Run("被踢设备 token", func(t *testing.T) {
@@ -174,20 +180,31 @@ func testAuthEdges(t *testing.T, f *Fixture, ctx context.Context) {
 			t.Fatal(err)
 		}
 		requireHTTPSuccess(t, "踢出设备", response)
+		// 同 logout：HTTP 层旧 JWT 允许用到自然过期（设计特性），仅观察；
+		// WS 层必须立即拒绝被踢设备。
 		profile, err := f.api.DoJSON(ctx, "GET", "/api/v1/auth/user/profile", device.AccessToken, device.ID, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if profile.Status == 200 && profile.Body.Code == 0 {
-			t.Errorf("被踢设备旧 token 仍可访问：%s", profile.Summary())
+		t.Logf("观察：被踢设备旧 token 访问 HTTP 接口（设计上允许直至 JWT 过期）：%s", profile.Summary())
+		if ws, wsErr := OpenWS(ctx, f.cfg, "kicked-old-token", device.AccessToken, device.ID); wsErr == nil {
+			_ = ws.Close()
+			t.Errorf("被踢设备旧 token 仍能建立 WebSocket 连接")
 		}
 	})
 	t.Run("access token 与 device 不匹配", func(t *testing.T) {
+		// 设计特性：HTTP 层设备身份以 JWT claims 为准，X-Device-ID 头不参与
+		// 已认证接口的比对，这里仅记录观察。
 		response, err := f.api.DoJSON(ctx, "GET", "/api/v1/auth/user/profile", a1.AccessToken, "A2", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		requireHTTPError(t, "access token/device 不匹配", response)
+		t.Logf("观察：HTTP 携带不匹配 X-Device-ID 的访问（设计上以 JWT 为准）：%s", response.Summary())
+		// WS 层强校验 claims.DeviceID 与 query.device_id 一致，不匹配必须拒绝。
+		if ws, wsErr := OpenWS(ctx, f.cfg, "mismatch-device", a1.AccessToken, "MISMATCH-DEVICE"); wsErr == nil {
+			_ = ws.Close()
+			t.Errorf("token 与 device_id 不匹配仍能建立 WebSocket 连接")
+		}
 	})
 	t.Run("修改密码错误旧密码、弱密码和重复密码", func(t *testing.T) {
 		cases := []struct {

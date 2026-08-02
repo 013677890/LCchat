@@ -36,8 +36,6 @@ type IDeviceService interface {
 	GetOnlineStatus(ctx context.Context, req *authpb.GetOnlineStatusRequest) (*authpb.GetOnlineStatusResponse, error)
 	// BatchGetOnlineStatus 批量获取在线状态。
 	BatchGetOnlineStatus(ctx context.Context, req *authpb.BatchGetOnlineStatusRequest) (*authpb.BatchGetOnlineStatusResponse, error)
-	// UpdateDeviceActive 批量写入设备活跃时间。
-	UpdateDeviceActive(ctx context.Context, req *authpb.UpdateDeviceActiveRequest) error
 	// UpdateDeviceStatus 更新设备在线状态。
 	UpdateDeviceStatus(ctx context.Context, req *authpb.UpdateDeviceStatusRequest) error
 }

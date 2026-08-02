@@ -9,7 +9,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/connectcli"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/groupcli"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/metrics"
-	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 )

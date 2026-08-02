@@ -46,8 +46,7 @@ func initializeConnectApp() (*ConnectApp, error) {
 		return nil, err
 	}
 	mainConnectGRPCShutdownTimeout := provideConnectGRPCShutdownTimeout()
-	deviceActiveConfig := provideConnectDeviceActiveConfig()
-	connectApp, err := NewConnectApp(logger, server, builtServer, listener, mainConnectGRPCShutdownTimeout, connectionManager, connectService, clientConn, deviceActiveConfig)
+	connectApp, err := NewConnectApp(logger, server, builtServer, listener, mainConnectGRPCShutdownTimeout, connectionManager, connectService, clientConn)
 	if err != nil {
 		return nil, err
 	}

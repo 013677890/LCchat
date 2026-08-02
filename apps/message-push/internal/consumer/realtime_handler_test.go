@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepb"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/stretchr/testify/assert"

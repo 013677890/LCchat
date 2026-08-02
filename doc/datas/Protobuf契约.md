@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `proto/auth/auth_service.proto` | `AuthService` | 注册、登录、验证码、刷新 Token、登出、重置密码。 |
 | `proto/auth/account_service.proto` | `AccountService` | 修改密码、换绑邮箱/手机号、注销账号。 |
-| `proto/auth/device_service.proto` | `DeviceService` | 设备列表、踢设备、在线状态、设备活跃同步。 |
+| `proto/auth/device_service.proto` | `DeviceService` | 设备列表、踢设备、在线状态、设备状态更新。 |
 | `proto/auth/internal_auth_service.proto` | `InternalAuthService` | auth 内部账号能力。 |
 | `proto/user/user_service.proto` | `UserService` | 用户资料、搜索、头像、二维码、批量资料。 |
 | `proto/user/internal_profile_service.proto` | `InternalProfileService` | 内部资料聚合和初始化。 |
@@ -65,7 +65,7 @@ Gateway 对外暴露 HTTP JSON，不直接暴露 Protobuf 字段名。
 
 `AccountService` 负责账号安全操作：`ChangePassword`、`ChangeEmail`、`ChangeTelephone`、`DeleteAccount`。
 
-`DeviceService` 负责设备能力：`GetDeviceList`、`KickDevice`、`GetOnlineStatus`、`BatchGetOnlineStatus`、`UpdateDeviceActive`、`UpdateDeviceStatus`。
+`DeviceService` 负责设备能力：`GetDeviceList`、`KickDevice`、`GetOnlineStatus`、`BatchGetOnlineStatus`、`UpdateDeviceStatus`。
 
 ## 4. user 契约
 

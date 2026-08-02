@@ -5,12 +5,10 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
-	"strconv"
 	"time"
 
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
-	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -24,10 +22,11 @@ type deviceRepositoryImpl struct {
 
 // NewDeviceRepository 创建设备会话仓储实例。
 //
-// 该仓储同时维护三类设备数据：
+// 该仓储维护两类设备数据：
 //  1. MySQL 中的 device_sessions 权威记录；
-//  2. Redis 中的设备信息 Hash，用于设备列表与会话快照读取；
-//  3. Redis ZSet 中的活跃时间索引，用于在线状态判断。
+//  2. Redis 中的设备信息 Hash，用于设备列表与会话快照读取。
+//
+// 在线状态的事实源是 connect 维护的 presence 路由投影，不再由本仓储承载。
 func NewDeviceRepository(db *gorm.DB, redisClient *redis.Client) IDeviceRepository {
 	return &deviceRepositoryImpl{db: db, redisClient: redisClient}
 }
@@ -42,7 +41,22 @@ type deviceCacheItem struct {
 	AppVersion string `json:"appVersion"`
 	UserAgent  string `json:"userAgent,omitempty"`
 	Status     int8   `json:"status"`
-	LoginAt    string `json:"loginAt"`
+	// LoginAt 最后一次状态迁移时刻（登录/上线/下线），RFC3339。
+	// 与 DB 的 updated_at 同语义，是离线设备 last_seen 的缓存来源。
+	LoginAt string `json:"loginAt"`
+}
+
+// parseCacheTransitionAt 解析缓存中的最后状态迁移时刻；格式异常时返回零值，
+// 调用方按"无可用时间"处理。
+func parseCacheTransitionAt(raw string) time.Time {
+	if raw == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }
 
 // accessTokenKey 构造某个用户单设备 AccessToken 的 Redis Key。
@@ -58,11 +72,6 @@ func (r *deviceRepositoryImpl) refreshTokenKey(userUUID, deviceID string) string
 // deviceInfoKey 构造用户设备信息 Hash 的 Redis Key。
 func (r *deviceRepositoryImpl) deviceInfoKey(userUUID string) string {
 	return rediskey.DeviceInfoKey(userUUID)
-}
-
-// deviceActiveKey 构造用户设备活跃时间 ZSet 的 Redis Key。
-func (r *deviceRepositoryImpl) deviceActiveKey(userUUID string) string {
-	return rediskey.DeviceActiveKey(userUUID)
 }
 
 // md5Hash 计算 Token 摘要，避免把原始 AccessToken 明文直接写入 Redis。
@@ -188,283 +197,6 @@ func (r *deviceRepositoryImpl) TouchDeviceInfoTTL(ctx context.Context, userUUID 
 	return nil
 }
 
-// GetActiveTimestamps 获取设备活跃时间戳。
-func (r *deviceRepositoryImpl) GetActiveTimestamps(ctx context.Context, userUUID string, deviceIDs []string) (map[string]int64, error) {
-	result := make(map[string]int64, len(deviceIDs))
-
-	// 没有设备可查或 Redis 不可用时，直接返回空结果，交给上层按离线处理。
-	if len(deviceIDs) == 0 || r.redisClient == nil {
-		return result, nil
-	}
-
-	// cutoff 之外的数据即使仍在 ZSet 中也视为离线，不再回给上层。
-	cutoff := pkgdeviceactive.CutoffUnix(time.Now())
-	key := r.deviceActiveKey(userUUID)
-	pipe := r.redisClient.Pipeline()
-	scoreCmds := make(map[string]*redis.FloatCmd, len(deviceIDs))
-	for _, deviceID := range deviceIDs {
-		// 每个 device_id 对应一个 ZScore 命令，最后统一 pipeline 执行减少 RTT。
-		scoreCmds[deviceID] = pipe.ZScore(ctx, key, deviceID)
-	}
-	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		return nil, WrapRedisError(err)
-	}
-
-	for deviceID, cmd := range scoreCmds {
-		score, err := cmd.Result()
-
-		// 单个设备没有活跃记录属于正常 miss，直接跳过即可。
-		if err == redis.Nil {
-			continue
-		}
-		if err != nil {
-			return nil, WrapRedisError(err)
-		}
-		sec := int64(score)
-
-		// 活跃时间早于在线窗口的记录不再算在线设备。
-		if sec < cutoff {
-			continue
-		}
-		result[deviceID] = sec
-	}
-
-	return result, nil
-}
-
-// BatchGetActiveTimestamps 批量获取多用户设备活跃时间戳。
-//
-// 该接口面向“多用户、多设备”的在线态聚合查询，整体策略与单用户版本保持一致：
-//  1. 先过滤空 user_uuid / device_id，并在每个用户组内完成设备去重；
-//  2. 对所有 ZScore 命令统一走 pipeline，减少跨用户批量查询时的 RTT；
-//  3. 只返回仍位于在线窗口内的时间戳，窗口外数据一律视为离线。
-func (r *deviceRepositoryImpl) BatchGetActiveTimestamps(ctx context.Context, userDeviceIDs map[string][]string) (map[string]map[string]int64, error) {
-	result := make(map[string]map[string]int64, len(userDeviceIDs))
-
-	// 没有输入或 Redis 不可用时，直接返回空结果，由上层按离线态降级。
-	if len(userDeviceIDs) == 0 || r.redisClient == nil {
-		return result, nil
-	}
-
-	// cutoff 之前的活跃记录统一视为离线，避免把陈旧心跳继续暴露给上层。
-	cutoff := pkgdeviceactive.CutoffUnix(time.Now())
-	pipe := r.redisClient.Pipeline()
-
-	// scoreCmds 保存 user_uuid -> device_id -> ZScore 命令句柄，便于统一回填结果。
-	scoreCmds := make(map[string]map[string]*redis.FloatCmd, len(userDeviceIDs))
-	for userUUID, deviceIDs := range userDeviceIDs {
-		// 空 user_uuid 或空设备列表都没有查询意义，直接跳过。
-		if userUUID == "" || len(deviceIDs) == 0 {
-			continue
-		}
-		key := r.deviceActiveKey(userUUID)
-
-		// userCmds 负责当前用户组内的 device_id 去重。
-		userCmds := make(map[string]*redis.FloatCmd, len(deviceIDs))
-		for _, deviceID := range deviceIDs {
-			// 空 device_id 无法命中任何 member，直接过滤。
-			if deviceID == "" {
-				continue
-			}
-
-			// 同一用户下重复设备只保留一条命令，避免无意义重复读。
-			if _, ok := userCmds[deviceID]; ok {
-				continue
-			}
-
-			// 每个 device_id 对应一条 ZScore，最终由 pipeline 一次性执行。
-			userCmds[deviceID] = pipe.ZScore(ctx, key, deviceID)
-		}
-
-		// 当前用户至少保留一条有效设备命令时才纳入后续结果处理。
-		if len(userCmds) > 0 {
-			scoreCmds[userUUID] = userCmds
-		}
-	}
-
-	// 全量过滤后已无任何有效查询，就无需触发 Redis 请求。
-	if len(scoreCmds) == 0 {
-		return result, nil
-	}
-
-	// 一次性执行所有 ZScore，减少多用户多设备场景下的网络往返。
-	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		return nil, WrapRedisError(err)
-	}
-
-	for userUUID, userCmds := range scoreCmds {
-		// 预分配当前用户结果 map，减少命中设备较多时的扩容开销。
-		userResult := make(map[string]int64, len(userCmds))
-		for deviceID, cmd := range userCmds {
-			score, err := cmd.Result()
-
-			// 单设备没有活跃记录属于正常 miss，不视为错误。
-			if err == redis.Nil {
-				continue
-			}
-
-			// 任一真实 Redis 错误都中止返回，避免混入不完整在线态。
-			if err != nil {
-				return nil, WrapRedisError(err)
-			}
-			sec := int64(score)
-
-			// 早于在线窗口的记录不再算在线设备。
-			if sec < cutoff {
-				continue
-			}
-			userResult[deviceID] = sec
-		}
-
-		// 仅当当前用户至少有一台在线设备时才写回结果集。
-		if len(userResult) > 0 {
-			result[userUUID] = userResult
-		}
-	}
-
-	return result, nil
-}
-
-// BatchGetLastSeenTimestamps 批量获取用户最近活跃时间戳。
-//
-// 每个用户只取活跃 ZSet 的最高分记录，表示“最近一次设备活跃时间”。
-func (r *deviceRepositoryImpl) BatchGetLastSeenTimestamps(ctx context.Context, userUUIDs []string) (map[string]int64, error) {
-	result := make(map[string]int64, len(userUUIDs))
-
-	// 没有用户或 Redis 不可用时，直接返回空结果，由上层按“未知最近活跃时间”处理。
-	if len(userUUIDs) == 0 || r.redisClient == nil {
-		return result, nil
-	}
-
-	pipe := r.redisClient.Pipeline()
-
-	// lastSeenCmds 保存每个 user_uuid 对应的“取最新一条活跃记录”命令句柄。
-	lastSeenCmds := make(map[string]*redis.ZSliceCmd, len(userUUIDs))
-	for _, userUUID := range userUUIDs {
-		// 空 user_uuid 无法定位 ZSet，直接跳过。
-		if userUUID == "" {
-			continue
-		}
-
-		// 同一用户只取一次最近活跃记录，避免重复发命令。
-		if _, ok := lastSeenCmds[userUUID]; ok {
-			continue
-		}
-
-		// 取 ZSet 最高分记录即可拿到该用户最近一次设备活跃时间。
-		lastSeenCmds[userUUID] = pipe.ZRevRangeWithScores(ctx, r.deviceActiveKey(userUUID), 0, 0)
-	}
-
-	// 全量过滤后无有效用户时，直接返回空结果。
-	if len(lastSeenCmds) == 0 {
-		return result, nil
-	}
-
-	// 统一执行最近活跃时间查询，减少批量场景下的 RTT。
-	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		return nil, WrapRedisError(err)
-	}
-
-	for userUUID, cmd := range lastSeenCmds {
-		entries, err := cmd.Result()
-
-		// 没有任何活跃记录时，保持该用户缺省为空即可。
-		if err == redis.Nil || len(entries) == 0 {
-			continue
-		}
-
-		// Redis 真错误直接返回，避免把部分用户结果当成完整结果使用。
-		if err != nil {
-			return nil, WrapRedisError(err)
-		}
-		sec := int64(entries[0].Score)
-
-		// 只回填正数时间戳，过滤异常分值或脏数据。
-		if sec > 0 {
-			result[userUUID] = sec
-		}
-	}
-
-	return result, nil
-}
-
-// SetActiveTimestamp 设置单设备活跃时间。
-func (r *deviceRepositoryImpl) SetActiveTimestamp(ctx context.Context, userUUID, deviceID string, ts int64) error {
-	// 单设备写入只是批量接口的便捷包装，确保两条路径复用同一套去重和补偿逻辑。
-	if r.redisClient == nil {
-		return nil
-	}
-	return r.BatchSetActiveTimestamps(ctx, []DeviceActiveItem{{UserUUID: userUUID, DeviceID: deviceID}}, ts)
-}
-
-// BatchSetActiveTimestamps 批量设置设备活跃时间。
-func (r *deviceRepositoryImpl) BatchSetActiveTimestamps(ctx context.Context, items []DeviceActiveItem, ts int64) error {
-	// Redis 不可用或没有任何输入时，直接返回；在线态允许上层按离线或旧值降级处理。
-	if r.redisClient == nil || len(items) == 0 {
-		return nil
-	}
-
-	// 先按 user_uuid 分组，并在组内对 device_id 去重，避免同一批次重复写相同 member。
-	grouped := make(map[string]map[string]struct{})
-	for _, item := range items {
-		// user_uuid 或 device_id 缺失的脏数据不参与任何 Redis 写入。
-		if item.UserUUID == "" || item.DeviceID == "" {
-			continue
-		}
-		deviceSet := grouped[item.UserUUID]
-
-		// 第一次遇到某个 user_uuid 时先初始化其设备去重集合。
-		if deviceSet == nil {
-			deviceSet = make(map[string]struct{})
-			grouped[item.UserUUID] = deviceSet
-		}
-
-		// map-set 结构天然完成去重，重复 device_id 只会保留一份。
-		deviceSet[item.DeviceID] = struct{}{}
-	}
-
-	// 过滤后若已没有任何有效设备，就无需再发 Redis 请求。
-	if len(grouped) == 0 {
-		return nil
-	}
-
-	// cutoff 之前的 score 会被统一裁剪掉，保证 ZSet 里只保留在线窗口内的数据。
-	cutoff := pkgdeviceactive.CutoffUnix(time.Now())
-	pipe := r.redisClient.Pipeline()
-
-	for userUUID, deviceSet := range grouped {
-		// 每个用户独立维护一个活跃时间 ZSet。
-		key := r.deviceActiveKey(userUUID)
-
-		zItems := make([]redis.Z, 0, len(deviceSet))
-		for deviceID := range deviceSet {
-			// score 统一使用传入 ts；member 使用 device_id，便于后续按设备读取最近活跃时间。
-			zItems = append(zItems, redis.Z{Score: float64(ts), Member: deviceID})
-		}
-
-		// 理论上 deviceSet 已非空；这里再做一次保护，防止异常输入污染后续命令。
-		if len(zItems) == 0 {
-			continue
-		}
-
-		// 先批量写入/覆盖当前批次设备活跃时间。
-		pipe.ZAdd(ctx, key, zItems...)
-
-		// 再裁掉在线窗口之外的旧分数，防止 ZSet 无上限增长。
-		pipe.ZRemRangeByScore(ctx, key, "-inf", strconv.FormatInt(cutoff, 10))
-
-		// 最后续期整个 ZSet，保证热点用户的在线态索引持续可读。
-		pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
-	}
-
-	if _, err := pipe.Exec(ctx); err != nil {
-		// 旧时间戳异步重放会覆盖更新的 score，在线态只能由下一次心跳修复。
-		return WrapRedisError(err)
-	}
-
-	return nil
-}
-
 // BatchGetOnlineStatus 批量获取用户设备会话。
 //
 // 查询顺序保持“Redis 设备 Hash -> MySQL 回源 -> 尽力回填缓存”的分层策略：
@@ -541,6 +273,7 @@ func (r *deviceRepositoryImpl) BatchGetOnlineStatus(ctx context.Context, userUUI
 						AppVersion: item.AppVersion,
 						UserAgent:  item.UserAgent,
 						Status:     item.Status,
+						UpdatedAt:  parseCacheTransitionAt(item.LoginAt),
 					})
 				}
 
@@ -741,14 +474,10 @@ func (r *deviceRepositoryImpl) DeleteByUserUUID(ctx context.Context, userUUID st
 	}
 
 	if r.redisClient != nil {
-		// 最后删除设备信息 Hash 和活跃时间 ZSet，防止旧在线态继续被读到。
+		// 最后删除设备信息 Hash，防止旧会话快照继续被读到。
 		deviceInfoKey := r.deviceInfoKey(userUUID)
-		deviceActiveKey := r.deviceActiveKey(userUUID)
-		pipe := r.redisClient.Pipeline()
-		pipe.Del(ctx, deviceInfoKey)
-		pipe.Del(ctx, deviceActiveKey)
-		if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-			task := redisretry.BuildDelTask(deviceInfoKey, deviceActiveKey).
+		if err := r.redisClient.Del(ctx, deviceInfoKey).Err(); err != nil && err != redis.Nil {
+			task := redisretry.BuildDelTask(deviceInfoKey).
 				WithSource("DeviceRepository.DeleteByUserUUID")
 			redisretry.LogAndRetryRedisError(ctx, task, err)
 		}
@@ -805,8 +534,10 @@ func (r *deviceRepositoryImpl) UpdateOnlineStatus(ctx context.Context, userUUID,
 		return nil
 	}
 
-	// 只覆盖 status 字段，其余设备展示信息沿用原缓存值。
+	// 覆盖 status 并刷新最后状态迁移时刻，其余设备展示信息沿用原缓存值；
+	// 该时刻是离线设备 last_seen 的缓存来源，需与 DB 的 updated_at 保持同步。
 	item.Status = status
+	item.LoginAt = time.Now().UTC().Format(time.RFC3339)
 	value, err := json.Marshal(item)
 	if err != nil {
 		// 重新序列化失败说明缓存载荷异常，同样按降级处理即可。

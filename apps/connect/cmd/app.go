@@ -12,8 +12,6 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
 	connectserver "github.com/013677890/LCchat-Backend/apps/connect/internal/server"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/svc"
-	"github.com/013677890/LCchat-Backend/config"
-	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -32,7 +30,6 @@ type ConnectApp struct {
 	connManager         *manager.ConnectionManager
 	connectService      *svc.ConnectService
 	authGRPCConn        *grpc.ClientConn
-	deviceActiveConfig  config.DeviceActiveConfig
 }
 
 // NewConnectApp 只做资源聚合与合法性校验，不在构造阶段启动阻塞逻辑。
@@ -45,7 +42,6 @@ func NewConnectApp(
 	connManager *manager.ConnectionManager,
 	connectService *svc.ConnectService,
 	authGRPCConn *grpc.ClientConn,
-	deviceActiveConfig config.DeviceActiveConfig,
 ) (*ConnectApp, error) {
 	if log == nil {
 		return nil, errors.New("logger 未初始化")
@@ -75,19 +71,17 @@ func NewConnectApp(
 		connManager:         connManager,
 		connectService:      connectService,
 		authGRPCConn:        authGRPCConn,
-		deviceActiveConfig:  deviceActiveConfig,
 	}, nil
 }
 
 // Run 负责启动 connect 服务的长生命周期组件。
 func (a *ConnectApp) Run(ctx context.Context) error {
-	initConnectGlobals(a.logger, a.connectService.RedisClient(), a.deviceActiveConfig)
+	initConnectGlobals(a.logger, a.connectService.RedisClient())
 	if os.Getenv("CONNECT_SELF_GRPC_ADDR") == "" {
 		return errors.New("CONNECT_SELF_GRPC_ADDR 未配置")
 	}
-	if err := a.connectService.InitActiveSyncer(a.deviceActiveConfig); err != nil {
-		return fmt.Errorf("初始化设备活跃同步器失败: %w", err)
-	}
+	// 路由 Key 写入 TTL 属于 presence 契约参数，在对外提供服务前注入。
+	a.connectService.SetRouteTTL(connectRouteTTLFromEnv())
 
 	errCh := make(chan error, 2)
 
@@ -155,10 +149,9 @@ func (a *ConnectApp) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func initConnectGlobals(log *zap.Logger, redis *goredis.Client, cfg config.DeviceActiveConfig) {
+func initConnectGlobals(log *zap.Logger, redis *goredis.Client) {
 	logger.ReplaceGlobal(log)
 	if redis != nil {
 		pkgredis.ReplaceGlobal(redis)
 	}
-	deviceactive.SetOnlineWindow(cfg.OnlineWindow)
 }

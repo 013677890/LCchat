@@ -18,7 +18,7 @@ connect 在连接建立和心跳时写入 Redis：
 | --- | --- | --- |
 | `user:routing:{user_uuid}` | Hash，field=`device_id`，value=`connectGrpcAddr|lastActiveMs` | 表示用户设备当前所在 connect 节点。 |
 
-默认路由 TTL 为 180 秒。message-push 读取路由时会按最近活跃时间过滤过期设备，即使 Redis 延迟清理也不会向长时间离线旧节点投递。
+默认路由 TTL 为 360 秒（`CONNECT_ROUTE_TTL_SECONDS`）。message-push 读取路由时会按最近活跃时间过滤过期设备，即使 Redis 延迟清理也不会向长时间离线旧节点投递。
 
 ## 下行事件类型
 
@@ -70,9 +70,9 @@ connect 在连接建立和心跳时写入 Redis：
 | 阶段 | 行为 |
 | --- | --- |
 | 握手 | 校验 token、`device_id`、JWT claims，并从 Redis 校验 AccessToken 哈希。 |
-| OnConnect | 刷新设备活跃时间，写入在线路由，异步通知 auth 设备在线。 |
-| OnHeartbeat | 节流刷新活跃时间和在线路由 TTL。 |
-| OnDisconnect | 清理本地节流缓存，删除在线路由，异步通知 auth 设备离线。 |
+| OnConnect | 无条件写入在线路由，异步通知 auth 设备在线。 |
+| OnHeartbeat | 无条件刷新在线路由 `lastActiveMs` 与 TTL（presence 契约，不做任何本地节流）。 |
+| OnDisconnect | CAS 删除在线路由，异步通知 auth 设备离线。 |
 | 节点退出 | 按 `CONNECT_SELF_GRPC_ADDR` 扫描并清理当前节点残留路由。 |
 
 ## ACK 位点

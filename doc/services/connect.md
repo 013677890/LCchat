@@ -10,7 +10,7 @@ connect 服务是 WebSocket 长连接和最后一公里投递管道，负责连�
 - 写入、刷新和删除 Redis 在线路由 `user:routing:{user_uuid}`。
 - 接收 message-push 或内部服务的 gRPC 推送请求，并投递到本节点在线连接。
 - 处理客户端心跳和 `MSG_ACK`，写入设备级 ACK 位点。
-- 异步同步设备在线/离线/活跃状态到 auth/device 服务。
+- 维护 presence 路由（在线状态唯一事实源）；异步同步设备在线/离线状态到 auth/device 服务。
 
 ## 启动与核心目录
 
@@ -53,7 +53,7 @@ GET /ws?token=<access_token>&device_id=<device_id>
 
 | 方向 | type | payload | 说明 |
 | --- | --- | --- | --- |
-| 上行 | `heartbeat` | 空 | 刷新路由活跃时间，响应 `heartbeat_ack`。 |
+| 上行 | `heartbeat` | 空 | 无条件刷新路由活跃时间与 TTL，响应 `heartbeat_ack`。 |
 | 上行 | `MSG_ACK` / `msg_ack` | `MessageAck` | 客户端确认已处理到某会话 seq。 |
 | 上行 | `message` | 当前未接入业务持久化 | 仅返回占位 `message_ack`。 |
 | 下行 | `MSG_PUSH` | `msg.MsgItem` | 新消息。 |
@@ -80,7 +80,7 @@ TTL   = 180s（默认）
 | 时机 | 动作 |
 | --- | --- |
 | OnConnect | 写入路由，异步上报设备在线。 |
-| OnHeartbeat | 刷新路由活跃时间和 TTL。 |
+| OnHeartbeat | 无条件刷新路由活跃时间和 TTL（presence 契约，不做本地节流）。 |
 | OnDisconnect | 删除设备路由，异步上报设备离线。 |
 | 节点启动/清理 | 可按 connect 地址移除本节点遗留路由。 |
 

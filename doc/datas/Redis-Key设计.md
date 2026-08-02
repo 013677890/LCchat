@@ -19,7 +19,6 @@
 | `VerifyCode24HTTL` | 24 小时 | 单邮箱 24 小时发送次数限制。 |
 | `VerifyCodeIPTTL` | 1 小时 | 单 IP 验证码发送限流。 |
 | `DeviceInfoTTL` | 60 天 | 设备信息缓存。 |
-| `DeviceActiveTTL` | 7 天 | 设备活跃时间缓存。 |
 | `UserProfileTTL` | 1 小时 | 用户资料缓存。 |
 | `UserProfileEmptyTTL` | 5 分钟 | 用户资料空值缓存。 |
 | `FriendRelationTTL` | 24 小时 | 好友关系缓存。 |
@@ -48,8 +47,7 @@
 | `user:verify_code:1h:{ip}` | String/计数 | 1 小时 | auth | IP 维度验证码限流。 |
 | `auth:at:{user_uuid}:{device_id}` | String | Token 生命周期 | auth/connect | AccessToken MD5。WebSocket 握手强校验该值。 |
 | `auth:rt:{user_uuid}:{device_id}` | String | Token 生命周期 | auth | RefreshToken MD5。 |
-| `user:devices:{user_uuid}` | Hash/String | 60 天 | auth | 设备信息缓存。 |
-| `user:devices:active:{user_uuid}` | Hash/String | 7 天 | auth/connect | 设备活跃时间缓存。 |
+| `user:devices:{user_uuid}` | Hash/String | 60 天 | auth | 设备信息缓存；field 内 `loginAt` 为最后一次状态迁移时刻（登录/上线/下线），是离线设备 last_seen 的缓存来源。 |
 
 ## 4. user 资料 Key
 
@@ -93,21 +91,27 @@ group Key 由 `group.cache` Outbox projector 或带 `groups.cache_version` 的 D
 
 ## 8. connect 路由与 ACK Key
 
-### 8.1 在线路由
+### 8.1 在线路由（presence 契约）
 
 ```text
 key   = user:routing:{user_uuid}
 field = {device_id}
 value = {connectGrpcAddr}|{lastActiveMs}
-TTL   = 约 180 秒
+TTL   = CONNECT_ROUTE_TTL_SECONDS（默认 360 秒）
 ```
 
 | 字段 | 说明 |
 | --- | --- |
 | `connectGrpcAddr` | 当前设备所在 connect 节点 gRPC 地址。 |
-| `lastActiveMs` | 最近活跃时间，Unix 毫秒。 |
+| `lastActiveMs` | 最近活跃时间，Unix 毫秒；新鲜度约等于客户端心跳周期。 |
 
-connect 在连接建立时写入、心跳时刷新、断开时删除。message-push 根据该路由定位在线设备。
+该 Key 是"设备是否可达"的唯一事实源（presence 契约）：
+
+- **唯一写方 connect**：连接建立无条件写入、**每个应用层心跳无条件刷新**、断开 CAS 删除、节点退出全量清理。
+- **消费方**（统一经 `pkg/presence` 读取，按各自窗口过滤 `lastActiveMs`）：
+  - message-push：推送寻址，窗口 `MESSAGE_PUSH_ROUTE_TTL_SECONDS`（默认 360s，宁可多尝试投递）；
+  - auth：在线状态聚合，窗口 `PRESENCE_ONLINE_WINDOW_SECONDS`（默认 120s，连续丢约 4 个心跳判离线）。
+- 参数约束：在线窗口 ≤ 推送窗口 ≤ 路由 TTL。
 
 ### 8.2 设备 ACK
 

@@ -147,7 +147,7 @@ socket.send(envelope);
 
 ### 4.1 heartbeat
 
-客户端用于保持连接和刷新在线路由活跃时间。
+客户端用于保持连接和刷新在线路由活跃时间（presence 契约：服务端对每个心跳无条件刷新路由，建议间隔约 30 秒，超过在线判定窗口 120 秒会被判离线）。
 
 | 字段 | 值 |
 | --- | --- |
@@ -339,7 +339,7 @@ message MessageAck {
 
 ### 6.2 心跳刷新
 
-心跳会刷新在线路由活跃时间和 TTL。在线路由 value 格式为：
+每个心跳都会无条件刷新在线路由活跃时间和 TTL（默认 360 秒）。在线路由 value 格式为：
 
 ```text
 connectGrpcAddr|lastActiveMs

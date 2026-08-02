@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/consumer"
@@ -18,6 +20,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
+	"github.com/013677890/LCchat-Backend/pkg/presence"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/google/wire"
@@ -63,6 +66,32 @@ func provideAuthRedisClient(log *zap.Logger, cfg config.RedisConfig) (*goredis.C
 		return nil, nil
 	}
 	return client, nil
+}
+
+// provideAuthPresenceRepository 构造 presence 路由读取仓储（在线状态事实源）。
+// Redis 降级为 nil 时仓储会返回空路由，在线状态整体按离线降级。
+func provideAuthPresenceRepository(redisClient *goredis.Client) presence.Repository {
+	return presence.NewRedisRepository(redisClient, presenceOnlineWindowFromEnv())
+}
+
+// presenceOnlineWindowFromEnv 读取在线判定窗口（PRESENCE_ONLINE_WINDOW_SECONDS，单位秒）。
+// 心跳无条件刷新路由后，presence 新鲜度≈客户端心跳周期（约 30s），
+// 默认窗口 120s 表示连续丢约 4 个心跳判离线；解析失败时告警并回退默认值。
+func presenceOnlineWindowFromEnv() time.Duration {
+	v := strings.TrimSpace(os.Getenv("PRESENCE_ONLINE_WINDOW_SECONDS"))
+	if v == "" {
+		return presence.DefaultOnlineWindow
+	}
+
+	seconds, err := strconv.Atoi(v)
+	if err != nil || seconds <= 0 {
+		logger.Warn(context.Background(), "PRESENCE_ONLINE_WINDOW_SECONDS 非法，使用默认值",
+			logger.String("raw", v),
+			logger.String("fallback", presence.DefaultOnlineWindow.String()),
+		)
+		return presence.DefaultOnlineWindow
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // 缓存失效补偿建立在 Redis 可用前提之上，因此降级模式下不再启动 Kafka producer。
@@ -189,6 +218,7 @@ var authInfraProviderSet = wire.NewSet(
 var authRepositoryProviderSet = wire.NewSet(
 	repository.NewAuthRepository,
 	repository.NewDeviceRepository,
+	provideAuthPresenceRepository,
 )
 
 var authServiceProviderSet = wire.NewSet(

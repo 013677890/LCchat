@@ -15,8 +15,6 @@ const (
 	VerifyCodeIPTTL = 1 * time.Hour
 	// DeviceInfoTTL 设备信息缓存 TTL
 	DeviceInfoTTL = 60 * 24 * time.Hour
-	// DeviceActiveTTL 设备活跃时间缓存 TTL
-	DeviceActiveTTL = 7 * 24 * time.Hour
 	// UserProfileTTL 用户资料缓存 TTL
 	UserProfileTTL = 1 * time.Hour
 	// UserProfileEmptyTTL 用户资料空值缓存 TTL
@@ -101,11 +99,6 @@ func RefreshTokenKey(userUUID, deviceID string) string {
 // DeviceInfoKey 生成设备信息缓存 Key: user:devices:{user_uuid}
 func DeviceInfoKey(userUUID string) string {
 	return fmt.Sprintf("user:devices:%s", userUUID)
-}
-
-// DeviceActiveKey 生成设备活跃时间 Key: user:devices:active:{user_uuid}
-func DeviceActiveKey(userUUID string) string {
-	return fmt.Sprintf("user:devices:active:%s", userUUID)
 }
 
 // UserRoutingKey 生成用户设备路由 Key: user:routing:{user_uuid}

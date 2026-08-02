@@ -10,7 +10,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/connectcli"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/groupcli"
-	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	mpserver "github.com/013677890/LCchat-Backend/apps/message-push/internal/server"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
@@ -80,11 +80,11 @@ func provideMessagePushGroupID() string {
 // provideMessagePushRouteTTL 提供在线路由读取时的过期窗口。
 // 环境变量单位为秒。
 //
-// 该值必须 >= 2×connect 的心跳节流间隔（DEVICE_ACTIVE_UPDATE_INTERVAL_SECONDS，默认 180s），
-// 否则在线设备的路由会因 activeMs 刚好越过 cutoff 而被误过滤，造成瞬时路由黑洞（Defect 10）。
-// 默认 360s 对应默认节流间隔 180s；若调小节流间隔需同步设置 MESSAGE_PUSH_ROUTE_TTL_SECONDS。
+// 心跳会无条件刷新路由 activeMs（新鲜度约等于客户端心跳周期），该窗口只需覆盖
+// 数个心跳周期即可；推送侧宁可多尝试（目标不在时 connect 会拒绝），因此默认取
+// presence.DefaultPushWindow（360s），比 auth 在线判定窗口更宽。
 func provideMessagePushRouteTTL() messagePushRouteTTL {
-	const defaultTTL = 360 * time.Second
+	const defaultTTL = route.DefaultPushWindow
 
 	v := os.Getenv("MESSAGE_PUSH_ROUTE_TTL_SECONDS")
 	if v == "" {

@@ -7,13 +7,10 @@ import (
 	"net/http"
 	"time"
 
-	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
-	"github.com/013677890/LCchat-Backend/config"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
-	"github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	pkgminio "github.com/013677890/LCchat-Backend/pkg/minio"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -41,8 +38,6 @@ type GatewayApp struct {
 	msgServiceConn      gatewayMsgConn
 	groupServiceConn    gatewayGroupConn
 	minioClient         *pkgminio.MinIOClient
-	deviceActiveConfig  config.DeviceActiveConfig
-	deviceSyncActive    bool
 }
 
 // NewGatewayApp 只做资源聚合与基本合法性校验。
@@ -65,7 +60,6 @@ func NewGatewayApp(
 	msgServiceConn gatewayMsgConn,
 	groupServiceConn gatewayGroupConn,
 	minioClient *pkgminio.MinIOClient,
-	deviceActiveConfig config.DeviceActiveConfig,
 ) (*GatewayApp, error) {
 	if log == nil {
 		return nil, errors.New("gateway logger 未初始化")
@@ -104,15 +98,13 @@ func NewGatewayApp(
 		msgServiceConn:      msgServiceConn,
 		groupServiceConn:    groupServiceConn,
 		minioClient:         minioClient,
-		deviceActiveConfig:  deviceActiveConfig,
-		deviceSyncActive:    true,
 	}, nil
 }
 
 // Run 启动 gateway 的对外 HTTP 入口。
 //
 // 关键边界：
-// - 全局 logger / Redis / 异步池 / MinIO、在线窗口、限流器与设备活跃同步器在 Listen 之前完成挂载；
+// - 全局 logger / Redis / 异步池 / MinIO 与限流器在 Listen 之前完成挂载；
 // - 真正阻塞主 goroutine 的只有 ListenAndServe；
 // - main 通过并发调用 Run + 监听系统信号实现统一编排。
 func (a *GatewayApp) Run(ctx context.Context) error {
@@ -132,10 +124,9 @@ func (a *GatewayApp) Run(ctx context.Context) error {
 //
 // 顺序说明：
 // 1. 先关 HTTP Server，阻止新请求继续进入；
-// 2. 再停设备活跃同步器，避免关闭底层连接后后台任务还在刷数据；
-// 3. 再等待异步池任务收敛，避免底层连接关闭后任务仍访问依赖；
-// 4. 再释放 gRPC 连接、Redis 等基础资源；
-// 5. 最后同步 logger，保证退出前尽量落盘完整日志。
+// 2. 再等待异步池任务收敛，避免底层连接关闭后任务仍访问依赖；
+// 3. 再释放 gRPC 连接、Redis 等基础资源；
+// 4. 最后同步 logger，保证退出前尽量落盘完整日志。
 func (a *GatewayApp) Shutdown(ctx context.Context) error {
 	var errs []error
 
@@ -143,11 +134,6 @@ func (a *GatewayApp) Shutdown(ctx context.Context) error {
 		if err := a.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs = append(errs, fmt.Errorf("关闭 Gateway HTTP 服务失败: %w", err))
 		}
-	}
-
-	if a.deviceSyncActive {
-		middleware.ShutdownDeviceActiveSyncer()
-		a.deviceSyncActive = false
 	}
 
 	if a.asyncPool != nil {
@@ -217,7 +203,6 @@ func (a *GatewayApp) installGatewayGlobals(ctx context.Context) {
 	if a.minioClient != nil {
 		pkgminio.ReplaceGlobal(a.minioClient)
 	}
-	deviceactive.SetOnlineWindow(a.deviceActiveConfig.OnlineWindow)
 
 	middleware.InitRedisRateLimiter(10.0, 20, a.redisClient)
 	logger.Info(ctx, "Redis IP 限流器初始化完成",
@@ -225,47 +210,4 @@ func (a *GatewayApp) installGatewayGlobals(ctx context.Context) {
 		logger.Int("burst", 20),
 		logger.String("blacklist_key", rediskey.GatewayIPBlacklistKey()),
 	)
-
-	deviceRPCClient := authpb.NewDeviceServiceClient(a.authServiceConn.value)
-	if err := middleware.InitDeviceActiveSyncer(a.deviceActiveConfig, func(_ context.Context, items []deviceactive.BatchItem) error {
-		const batchSize = 1000
-		var firstErr error
-		for start := 0; start < len(items); start += batchSize {
-			end := start + batchSize
-			if end > len(items) {
-				end = len(items)
-			}
-			activeItems := make([]*authpb.UpdateDeviceActiveItem, 0, end-start)
-			for i := start; i < end; i++ {
-				activeItems = append(activeItems, &authpb.UpdateDeviceActiveItem{
-					UserUuid: items[i].UserUUID,
-					DeviceId: items[i].DeviceID,
-				})
-			}
-
-			rpcCtx, cancel := context.WithTimeout(context.Background(), a.deviceActiveConfig.RPCTimeout)
-			_, err := deviceRPCClient.UpdateDeviceActive(rpcCtx, &authpb.UpdateDeviceActiveRequest{Items: activeItems})
-			cancel()
-			if err != nil && firstErr == nil {
-				firstErr = err
-				logger.Error(ctx, "批量更新设备活跃时间失败",
-					logger.ErrorField("error", err),
-					logger.Int("item_count", len(activeItems)),
-				)
-			}
-		}
-
-		return firstErr
-	}); err != nil {
-		logger.Error(ctx, "设备活跃同步器初始化失败", logger.ErrorField("error", err))
-	} else {
-		logger.Info(ctx, "设备活跃同步器初始化完成",
-			logger.Int("shard_count", a.deviceActiveConfig.ShardCount),
-			logger.Duration("update_interval", a.deviceActiveConfig.UpdateInterval),
-			logger.Duration("flush_interval", a.deviceActiveConfig.FlushInterval),
-			logger.Duration("online_window", a.deviceActiveConfig.OnlineWindow),
-			logger.Int("worker_count", a.deviceActiveConfig.WorkerCount),
-			logger.Int("queue_size", a.deviceActiveConfig.QueueSize),
-		)
-	}
 }

@@ -8,7 +8,7 @@ import (
 
 	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/metrics"
-	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 )
 

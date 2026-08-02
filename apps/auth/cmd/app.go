@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/consumer"
-	"github.com/013677890/LCchat-Backend/config"
-	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
@@ -194,8 +192,6 @@ func (a *AuthApp) installProcessGlobals(ctx context.Context) error {
 		AuthPassword: os.Getenv("EMAIL_AUTH_CODE"),
 	})
 
-	deviceCfg := config.DefaultDeviceActiveConfig()
-	pkgdeviceactive.SetOnlineWindow(deviceCfg.OnlineWindow)
 	if a.kafkaProducer != nil {
 		redisretry.SetGlobalProducer(a.kafkaProducer)
 	}

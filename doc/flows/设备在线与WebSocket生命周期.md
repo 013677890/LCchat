@@ -51,9 +51,8 @@ GET /ws?token=<access_token>&device_id=<device_id>
 5. connect 将连接注册到本节点连接管理器。
 6. 若同一 `user_uuid + device_id` 已有旧连接，则关闭旧连接，仅保留最新连接。
 7. connect 调用 `OnConnect`：
-   - 写入在线路由 `user:routing:{user_uuid}`；
-   - 异步上报 auth 设备状态为在线；
-   - 初始化活跃同步器相关状态。
+   - 无条件写入在线路由 `user:routing:{user_uuid}`；
+   - 异步上报 auth 设备状态为在线。
 
 ## 5. 在线路由格式
 
@@ -63,7 +62,7 @@ Redis 结构：
 key   = user:routing:{user_uuid}
 field = {device_id}
 value = {connectGrpcAddr}|{lastActiveMs}
-TTL   = 180s
+TTL   = CONNECT_ROUTE_TTL_SECONDS（默认 360s）
 ```
 
 解释：
@@ -71,9 +70,11 @@ TTL   = 180s
 | 字段 | 说明 |
 | --- | --- |
 | `connectGrpcAddr` | 该设备所在 connect 节点 gRPC 地址。 |
-| `lastActiveMs` | 最近活跃时间，Unix 毫秒。 |
+| `lastActiveMs` | 最近活跃时间，Unix 毫秒；新鲜度约等于心跳周期。 |
 
-该路由由 message-push 读取，用来判断“某台设备现在连在哪个 connect 节点”。
+该路由是 presence 契约的事实源：message-push 用它做推送寻址（窗口
+`MESSAGE_PUSH_ROUTE_TTL_SECONDS`，默认 360s），auth 用它做在线判定（窗口
+`PRESENCE_ONLINE_WINDOW_SECONDS`，默认 120s），两者统一经 `pkg/presence` 读取。
 
 ## 6. 心跳生命周期
 
@@ -83,13 +84,14 @@ TTL   = 180s
 
 1. 客户端发送 `heartbeat`。
 2. connect 处理 `OnHeartbeat`。
-3. connect 刷新路由活跃时间和 TTL。
+3. connect **无条件**刷新路由 `lastActiveMs` 和 TTL（不做任何本地节流，
+   保证路由 Key 被外部删除后能被下一个心跳立即恢复）。
 4. connect 返回 `heartbeat_ack`。
 
 建议：
 
-- 心跳间隔 20-60 秒；
-- 不要超过路由 TTL（180 秒）；
+- 心跳间隔约 30 秒（20-60 秒均可）；
+- 不要超过在线判定窗口（120 秒），否则会被判离线；
 - 若连续两个心跳周期未收到响应，触发重连。
 
 ## 7. 断开连接链路
@@ -111,17 +113,7 @@ TTL   = 180s
 
 注意：如果进程异常退出，Redis 路由也会依赖 TTL 自然过期，因此短时间内可能存在“脏路由窗口”。
 
-## 8. 设备活跃同步
-
-connect 不仅维护在线/离线，还会批量同步设备活跃时间：
-
-1. 心跳或连接活动触发活跃上报。
-2. connect 内部 `activeSyncer` 做分片、批量、异步 flush。
-3. 通过 auth `DeviceService.UpdateDeviceActive` 回写设备活跃状态。
-
-该链路失败不会断开 WebSocket，但会影响“最后活跃时间”展示精度。
-
-## 9. 在线状态查询链路
+## 8. 在线状态查询链路
 
 HTTP 接口：
 
@@ -140,10 +132,12 @@ HTTP 接口：
 
 查询语义：
 
-- 在线状态偏实时，但仍可能受路由 TTL、异步活跃同步和断线时序影响；
+- **在线 = 该用户在 presence 窗口（默认 120s）内存在存活的 WS 连接**；纯 HTTP 活跃不算在线；
+- `lastSeenAt`：在线设备取路由心跳时间；离线设备取会话最后状态迁移时刻（登录/断连/登出）；
+- 已登出 / 被踢终态的设备即使路由残留也不计入在线；
 - 前端展示应接受短暂抖动，不要把“离线”理解为强事务事实。
 
-## 10. 踢设备链路
+## 9. 踢设备链路
 
 入口：`DELETE /api/v1/auth/user/devices/:deviceId`
 
@@ -160,16 +154,17 @@ HTTP 接口：
 - 目标设备当前连接会被立即踢掉；
 - 即使没踢掉，后续重连也会因为 Token 哈希已删除而失败。
 
-## 11. 常见异常与自愈
+## 10. 常见异常与自愈
 
 | 场景 | 结果 | 自愈方式 |
 | --- | --- | --- |
 | Redis 短暂异常 | 新握手失败（Fail-Close） | 前端稍后重连。 |
 | connect 进程异常退出 | 路由短暂残留 | 等待 TTL 过期或节点启动清理。 |
-| auth 设备状态上报失败 | WS 仍可工作 | 下次心跳或状态同步修正。 |
+| 路由 Key 被外部删除/淘汰 | 该用户短暂显示离线、推送寻址落空 | 下一个心跳无条件重建路由。 |
+| auth 设备状态上报失败 | WS 仍可工作 | 下次重连或状态同步修正。 |
 | 同设备多连接并发 | 旧连接被替换 | 前端只保留单连接实例。 |
 
-## 12. 前端实现建议
+## 11. 前端实现建议
 
 1. Web 端把 `device_id` 持久化到 localStorage，不要每次刷新重新生成。
 2. 连接状态至少维护：`connecting`、`connected`、`reconnecting`、`auth_failed`。

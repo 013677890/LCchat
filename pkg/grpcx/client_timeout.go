@@ -73,7 +73,6 @@ var defaultClientMethodTimeouts = map[string]time.Duration{
 	"/auth.DeviceService/KickDevice":                    500 * time.Millisecond,
 	"/auth.DeviceService/GetOnlineStatus":               300 * time.Millisecond,
 	"/auth.DeviceService/BatchGetOnlineStatus":          800 * time.Millisecond,
-	"/auth.DeviceService/UpdateDeviceActive":            800 * time.Millisecond,
 	"/auth.DeviceService/UpdateDeviceStatus":            500 * time.Millisecond,
 	"/user.UserService/GetProfile":                      300 * time.Millisecond,
 	"/user.UserService/GetOtherProfile":                 300 * time.Millisecond,

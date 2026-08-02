@@ -60,10 +60,6 @@ func provideGatewayAsyncConfig() config.AsyncConfig { return config.DefaultAsync
 // provideGatewayMinIOConfig 提供对象存储默认配置。
 func provideGatewayMinIOConfig() config.MinIOConfig { return config.DefaultMinIOConfig() }
 
-// provideGatewayDeviceActiveConfig 提供设备活跃同步配置（仅配置，不触发全局副作用）。
-func provideGatewayDeviceActiveConfig() config.DeviceActiveConfig {
-	return config.DefaultDeviceActiveConfig()
-}
 
 // provideGatewayLogger 构建 logger（不注册全局，全局注册在 GatewayApp.Run）。
 func provideGatewayLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
@@ -342,7 +338,6 @@ var gatewayInfraProviderSet = wire.NewSet(
 	provideGatewayRedisConfig,
 	provideGatewayAsyncConfig,
 	provideGatewayMinIOConfig,
-	provideGatewayDeviceActiveConfig,
 	provideGatewayLogger,
 	provideGatewayRedisClient,
 	provideGatewayAsyncPool,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
@@ -16,6 +18,7 @@ import (
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/presence"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"github.com/google/wire"
 	goredis "github.com/redis/go-redis/v9"
@@ -35,8 +38,24 @@ func provideConnectLoggerConfig() config.LoggerConfig { return config.DefaultLog
 
 func provideConnectRedisConfig() config.RedisConfig { return config.DefaultRedisConfig() }
 
-func provideConnectDeviceActiveConfig() config.DeviceActiveConfig {
-	return config.DefaultDeviceActiveConfig()
+// connectRouteTTLFromEnv 读取路由 Key 写入 TTL（CONNECT_ROUTE_TTL_SECONDS，单位秒）。
+// presence 契约：心跳无条件刷新路由，TTL 只需覆盖数个心跳周期；
+// 解析失败时告警并回退到 presence.DefaultRouteTTL，避免静默吞掉配置错误。
+func connectRouteTTLFromEnv() time.Duration {
+	v := strings.TrimSpace(os.Getenv("CONNECT_ROUTE_TTL_SECONDS"))
+	if v == "" {
+		return presence.DefaultRouteTTL
+	}
+
+	seconds, err := strconv.Atoi(v)
+	if err != nil || seconds <= 0 {
+		logger.Warn(context.Background(), "CONNECT_ROUTE_TTL_SECONDS 非法，使用默认值",
+			logger.String("raw", v),
+			logger.String("fallback", presence.DefaultRouteTTL.String()),
+		)
+		return presence.DefaultRouteTTL
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func provideConnectLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
@@ -85,14 +104,12 @@ func connectInternalMethodWhitelist() map[string][]string {
 
 // auth-service gRPC 连接失败时允许降级运行，因此这里返回 nil 连接和 nil 错误。
 func provideAuthGRPCConn(log *zap.Logger, addr connectAuthGRPCAddress) (*grpc.ClientConn, error) {
-	// connect 只调用设备状态同步写接口；二者均为幂等/最后写入覆盖：
-	// UpdateDeviceStatus 设备不存在按成功处理，UpdateDeviceActive 以最新时间戳覆盖。
-	// 配置式重试仅绑定这两个 full method，不放开 DeviceService 的查询类接口。
+	// connect 只调用设备状态同步写接口 UpdateDeviceStatus：
+	// 幂等（设备不存在按成功处理、最后写入覆盖），因此允许配置式重试。
 	conn, err := grpcx.NewClient(grpcx.ClientOptions{
 		Address: string(addr),
 		Timeout: &grpcx.ClientTimeoutConfig{MethodTimeouts: grpcx.DefaultClientMethodTimeouts()},
 		Retry: grpcx.DefaultClientRetryConfig(
-			"/auth.DeviceService/UpdateDeviceActive",
 			"/auth.DeviceService/UpdateDeviceStatus",
 		),
 	})
@@ -161,7 +178,6 @@ func provideConnectGRPCListener(addr connectGRPCAddress) (net.Listener, error) {
 var connectProviderSet = wire.NewSet(
 	provideConnectLoggerConfig,
 	provideConnectRedisConfig,
-	provideConnectDeviceActiveConfig,
 	provideConnectLogger,
 	provideConnectRedisClient,
 	provideConnectAuthGRPCAddress,

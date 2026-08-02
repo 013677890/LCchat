@@ -7,12 +7,6 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 )
 
-// DeviceActiveItem 表示一条设备活跃时间批量更新记录。
-type DeviceActiveItem struct {
-	UserUUID string
-	DeviceID string
-}
-
 // AccountStatusItem 表示账号存在性与状态查询结果。
 type AccountStatusItem struct {
 	UserUUID string
@@ -67,16 +61,6 @@ type IDeviceRepository interface {
 	// TouchDeviceInfoTTL 续期设备信息缓存 TTL。
 	TouchDeviceInfoTTL(ctx context.Context, userUUID string) error
 
-	// GetActiveTimestamps 获取设备活跃时间戳。
-	GetActiveTimestamps(ctx context.Context, userUUID string, deviceIDs []string) (map[string]int64, error)
-	// BatchGetActiveTimestamps 批量获取多用户设备活跃时间戳。
-	BatchGetActiveTimestamps(ctx context.Context, userDeviceIDs map[string][]string) (map[string]map[string]int64, error)
-	// BatchGetLastSeenTimestamps 批量获取用户最近活跃时间戳。
-	BatchGetLastSeenTimestamps(ctx context.Context, userUUIDs []string) (map[string]int64, error)
-	// SetActiveTimestamp 设置设备活跃时间。
-	SetActiveTimestamp(ctx context.Context, userUUID, deviceID string, ts int64) error
-	// BatchSetActiveTimestamps 批量设置设备活跃时间。
-	BatchSetActiveTimestamps(ctx context.Context, items []DeviceActiveItem, ts int64) error
 	// BatchGetOnlineStatus 批量获取用户设备会话。
 	BatchGetOnlineStatus(ctx context.Context, userUUIDs []string) (map[string][]*model.DeviceSession, error)
 

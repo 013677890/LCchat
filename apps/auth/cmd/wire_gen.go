@@ -35,7 +35,8 @@ func initializeAuthApp() (*AuthApp, error) {
 	iDeviceRepository := repository.NewDeviceRepository(db, client)
 	iAuthService := service.NewAuthService(iAuthRepository, iDeviceRepository)
 	authHandler := handler.NewAuthHandler(iAuthService)
-	iDeviceService := service.NewDeviceService(iDeviceRepository)
+	presenceRepository := provideAuthPresenceRepository(client)
+	iDeviceService := service.NewDeviceService(iDeviceRepository, presenceRepository)
 	deviceHandler := handler.NewDeviceHandler(iDeviceService)
 	iAccountService := service.NewAccountService(iAuthRepository, iDeviceRepository)
 	accountHandler := handler.NewAccountHandler(iAccountService)
@@ -54,10 +55,10 @@ func initializeAuthApp() (*AuthApp, error) {
 	}
 	mainAuthGRPCShutdownTimeout := provideAuthGRPCShutdownTimeout()
 	kafkaConfig := provideAuthKafkaConfig()
-	producer := provideAuthKafkaProducer(client, kafkaConfig)
-	v := provideAuthRedisRetryConsumer(client, kafkaConfig, logger, db)
+	redisRetryConsumer := provideAuthRedisRetryConsumer(client, kafkaConfig, logger, db)
 	profileDisplayChangedConsumer := provideAuthProfileDisplayChangedConsumer(kafkaConfig, iInternalAuthService, db)
-	authApp, err := NewAuthApp(logger, server, builtServer, listener, mainAuthGRPCShutdownTimeout, v, profileDisplayChangedConsumer, producer, db, client)
+	producer := provideAuthKafkaProducer(client, kafkaConfig)
+	authApp, err := NewAuthApp(logger, server, builtServer, listener, mainAuthGRPCShutdownTimeout, redisRetryConsumer, profileDisplayChangedConsumer, producer, db, client)
 	if err != nil {
 		return nil, err
 	}

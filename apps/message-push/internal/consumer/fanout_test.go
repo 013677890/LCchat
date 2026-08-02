@@ -9,7 +9,7 @@ import (
 	"time"
 
 	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
-	"github.com/013677890/LCchat-Backend/apps/message-push/internal/route"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

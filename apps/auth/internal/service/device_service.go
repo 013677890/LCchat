@@ -4,38 +4,127 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/repository"
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
-	pkgdeviceactive "github.com/013677890/LCchat-Backend/pkg/deviceactive"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/presence"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
 // deviceServiceImpl 实现设备会话与在线状态查询逻辑。
+//
+// 在线状态的事实源是 connect 维护的 presence 路由投影（`user:routing:{user}`）：
+// 设备在窗口内有存活 WS 连接才算在线；device_sessions 只提供平台等展示元数据，
+// 以及离线设备的 last_seen（最后一次登录/断连/登出等状态迁移时刻）。
 type deviceServiceImpl struct {
-	deviceRepo repository.IDeviceRepository
+	deviceRepo   repository.IDeviceRepository
+	presenceRepo presence.Repository
 }
 
 // NewDeviceService 创建设备服务实例。
 //
 // 该服务聚焦“设备会话 / 在线状态”两个高频读写场景：
 //  1. 读取当前用户的设备列表与在线态；
-//  2. 执行踢设备、状态刷新、活跃时间回写；
-//  3. 统一把仓储层的设备状态结果组装成 auth proto。
-func NewDeviceService(deviceRepo repository.IDeviceRepository) DeviceService {
-	return &deviceServiceImpl{deviceRepo: deviceRepo}
+//  2. 执行踢设备、设备状态刷新；
+//  3. 统一把 presence 路由与设备会话的聚合结果组装成 auth proto。
+func NewDeviceService(deviceRepo repository.IDeviceRepository, presenceRepo presence.Repository) DeviceService {
+	return &deviceServiceImpl{deviceRepo: deviceRepo, presenceRepo: presenceRepo}
+}
+
+// listUserRoutesDegraded 读取单用户 presence 路由；读取失败按离线降级并告警。
+// 在线状态属于展示能力，presence 读失败不应让整个查询失败。
+func (s *deviceServiceImpl) listUserRoutesDegraded(ctx context.Context, userUUID string) []presence.DeviceRoute {
+	if s.presenceRepo == nil {
+		return nil
+	}
+
+	routes, err := s.presenceRepo.ListUserRoutes(ctx, userUUID)
+	if err != nil {
+		logger.Warn(ctx, "读取 presence 路由失败，按离线降级",
+			logger.String("user_uuid", userUUID),
+			logger.ErrorField("error", err),
+		)
+		return nil
+	}
+	return routes
+}
+
+// listUsersRoutesDegraded 批量读取 presence 路由；读取失败按全员离线降级并告警。
+func (s *deviceServiceImpl) listUsersRoutesDegraded(ctx context.Context, userUUIDs []string) map[string][]presence.DeviceRoute {
+	if s.presenceRepo == nil {
+		return map[string][]presence.DeviceRoute{}
+	}
+
+	routesByUser, err := s.presenceRepo.ListUsersRoutes(ctx, userUUIDs)
+	if err != nil {
+		logger.Warn(ctx, "批量读取 presence 路由失败，按离线降级",
+			logger.Int("user_count", len(userUUIDs)),
+			logger.ErrorField("error", err),
+		)
+		return map[string][]presence.DeviceRoute{}
+	}
+	return routesByUser
+}
+
+// computeUserPresence 依据 presence 路由与设备会话推导单用户在线视图。
+// 语义：
+//  1. 在线 = 存在窗口内路由，且对应会话未处于已登出/被踢终态；
+//  2. platforms 取在线设备对应会话的平台集合（会话缺失时平台未知，不影响在线判定）；
+//  3. last_seen = max(在线设备路由 lastActiveMs, 全部会话的最后状态迁移时刻)。
+func computeUserPresence(routes []presence.DeviceRoute, sessions []*model.DeviceSession) (bool, []string, int64) {
+	sessionByDevice := make(map[string]*model.DeviceSession, len(sessions))
+	var lastSeenSec int64
+	for _, session := range sessions {
+		if session == nil || session.DeviceId == "" {
+			continue
+		}
+		sessionByDevice[session.DeviceId] = session
+
+		if !session.UpdatedAt.IsZero() {
+			if sec := session.UpdatedAt.Unix(); sec > lastSeenSec {
+				lastSeenSec = sec
+			}
+		}
+	}
+
+	isOnline := false
+	platformSet := make(map[string]struct{})
+	for _, route := range routes {
+		session := sessionByDevice[route.DeviceID]
+
+		// 防御性排除已登出/被踢终态：踢线尚未强制断开 WS 前路由可能仍新鲜，
+		// 该设备不应继续对外展示为在线。
+		if session != nil && (session.Status == model.DeviceStatusLoggedOut || session.Status == model.DeviceStatusKicked) {
+			continue
+		}
+		isOnline = true
+
+		if session != nil && session.Platform != "" {
+			platformSet[session.Platform] = struct{}{}
+		}
+		if sec := route.LastActiveMs / 1000; sec > lastSeenSec {
+			lastSeenSec = sec
+		}
+	}
+
+	platforms := make([]string, 0, len(platformSet))
+	for platform := range platformSet {
+		platforms = append(platforms, platform)
+	}
+	sort.Strings(platforms)
+
+	return isOnline, platforms, lastSeenSec
 }
 
 // GetDeviceList 获取当前登录用户的设备列表。
 // 业务流程：
 //  1. 从上下文中提取当前用户 UUID 与当前设备 ID；
 //  2. 批量查询该用户的设备会话快照；
-//  3. 按 device_id 查询各设备最近活跃时间；
+//  3. 读取 presence 路由，得到各在线设备的心跳级活跃时间；
 //  4. 组装 DeviceItem 并按最近活跃时间倒序排序；
 //  5. 返回设备列表给上游网关。
 //
@@ -55,26 +144,26 @@ func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *authpb.GetDe
 	}
 	sessions := sessionsByUser[userUUID]
 
-	deviceIDs := make([]string, 0, len(sessions))
-	for _, session := range sessions {
-		if session == nil {
-			continue
+	// last_seen：presence 路由中的设备取心跳级 lastActiveMs；
+	// 其余设备回退到会话的最后状态迁移时刻。
+	routeActiveSec := make(map[string]int64)
+	for _, route := range s.listUserRoutesDegraded(ctx, userUUID) {
+		if route.LastActiveMs > 0 {
+			routeActiveSec[route.DeviceID] = route.LastActiveMs / 1000
 		}
-		deviceIDs = append(deviceIDs, session.DeviceId)
-	}
-
-	activeTimes, err := s.deviceRepo.GetActiveTimestamps(ctx, userUUID, deviceIDs)
-	if err != nil {
-		logger.Warn(ctx, "获取设备活跃时间失败，按空活跃时间返回",
-			logger.String("user_uuid", userUUID),
-			logger.ErrorField("error", err),
-		)
-		activeTimes = map[string]int64{}
 	}
 
 	devices := make([]*authpb.DeviceItem, 0, len(sessions))
 	for _, session := range sessions {
-		if device := buildDeviceItemProto(session, deviceID, activeTimes[session.DeviceId]); device != nil {
+		if session == nil {
+			continue
+		}
+
+		lastSeenSec := routeActiveSec[session.DeviceId]
+		if lastSeenSec == 0 && !session.UpdatedAt.IsZero() {
+			lastSeenSec = session.UpdatedAt.Unix()
+		}
+		if device := buildDeviceItemProto(session, deviceID, lastSeenSec); device != nil {
 			devices = append(devices, device)
 		}
 	}
@@ -146,9 +235,9 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *authpb.KickDevi
 // GetOnlineStatus 获取单用户在线状态。
 // 业务流程：
 //  1. 校验请求中的 user_uuid；
-//  2. 查询该用户当前所有设备会话；
-//  3. 读取用户最近活跃时间与各设备活跃时间；
-//  4. 按在线窗口计算是否在线，并汇总在线平台；
+//  2. 查询该用户当前所有设备会话（平台元数据与终态排除依据）；
+//  3. 读取 presence 路由（窗口内有存活 WS 连接的设备集）；
+//  4. 聚合出在线状态、在线平台与 last_seen；
 //  5. 返回单用户在线状态视图。
 //
 // 错误码映射：
@@ -163,63 +252,9 @@ func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *authpb.Get
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取在线状态失败：查询设备会话失败")
 	}
-	sessions := sessionsByUser[req.UserUuid]
 
-	lastSeenMap, err := s.deviceRepo.BatchGetLastSeenTimestamps(ctx, []string{req.UserUuid})
-	if err != nil {
-		logger.Warn(ctx, "获取在线状态失败：读取最近活跃时间失败，按 0 返回",
-			logger.String("user_uuid", req.UserUuid),
-			logger.ErrorField("error", err),
-		)
-		lastSeenMap = map[string]int64{}
-	}
-	lastSeenSec := lastSeenMap[req.UserUuid]
-	if len(sessions) == 0 {
-		return &authpb.GetOnlineStatusResponse{Status: buildOnlineStatusProto(req.UserUuid, false, lastSeenSec, []string{})}, nil
-	}
-
-	deviceIDs := make([]string, 0, len(sessions))
-	for _, session := range sessions {
-		if session == nil || session.DeviceId == "" {
-			continue
-		}
-		deviceIDs = append(deviceIDs, session.DeviceId)
-	}
-
-	activeTimes, err := s.deviceRepo.GetActiveTimestamps(ctx, req.UserUuid, deviceIDs)
-	if err != nil {
-		logger.Warn(ctx, "获取在线状态失败：读取设备活跃时间失败，按离线处理",
-			logger.String("user_uuid", req.UserUuid),
-			logger.ErrorField("error", err),
-		)
-		activeTimes = map[string]int64{}
-	}
-
-	nowSec := time.Now().Unix()
-	windowSec := int64(pkgdeviceactive.OnlineWindow().Seconds())
-	platformSet := make(map[string]struct{})
-	isOnline := false
-	for _, session := range sessions {
-		if session == nil || session.DeviceId == "" {
-			continue
-		}
-		seenSec, ok := activeTimes[session.DeviceId]
-		if !ok || seenSec <= 0 {
-			continue
-		}
-		if session.Status == model.DeviceStatusOnline && nowSec-seenSec <= windowSec {
-			isOnline = true
-			if session.Platform != "" {
-				platformSet[session.Platform] = struct{}{}
-			}
-		}
-	}
-
-	platforms := make([]string, 0, len(platformSet))
-	for p := range platformSet {
-		platforms = append(platforms, p)
-	}
-	sort.Strings(platforms)
+	routes := s.listUserRoutesDegraded(ctx, req.UserUuid)
+	isOnline, platforms, lastSeenSec := computeUserPresence(routes, sessionsByUser[req.UserUuid])
 
 	return &authpb.GetOnlineStatusResponse{Status: buildOnlineStatusProto(req.UserUuid, isOnline, lastSeenSec, platforms)}, nil
 }
@@ -227,10 +262,9 @@ func (s *deviceServiceImpl) GetOnlineStatus(ctx context.Context, req *authpb.Get
 // BatchGetOnlineStatus 批量获取在线状态。
 // 业务流程：
 //  1. 校验 user_uuids 非空且数量不超过上限；
-//  2. 对请求 UUID 去重，批量查询设备会话；
-//  3. 批量读取设备活跃时间与最近活跃时间；
-//  4. 逐个用户按在线窗口计算在线状态；
-//  5. 按原始请求顺序返回在线状态列表。
+//  2. 对请求 UUID 去重，批量查询设备会话与 presence 路由；
+//  3. 逐个用户聚合在线状态；
+//  4. 按原始请求顺序返回在线状态列表。
 //
 // 错误码映射：
 //   - codes.InvalidArgument: 参数错误
@@ -258,112 +292,22 @@ func (s *deviceServiceImpl) BatchGetOnlineStatus(ctx context.Context, req *authp
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "批量获取在线状态失败")
 	}
 
-	nowSec := time.Now().Unix()
-	windowSec := int64(pkgdeviceactive.OnlineWindow().Seconds())
-	userDeviceIDs := make(map[string][]string, len(unique))
-	for _, userUUID := range unique {
-		sessions := sessionsByUser[userUUID]
-		if len(sessions) == 0 {
-			continue
-		}
-		deviceIDs := make([]string, 0, len(sessions))
-		for _, session := range sessions {
-			if session == nil || session.DeviceId == "" {
-				continue
-			}
-			deviceIDs = append(deviceIDs, session.DeviceId)
-		}
-
-		if len(deviceIDs) > 0 {
-			userDeviceIDs[userUUID] = deviceIDs
-		}
-	}
-
-	activeByUser, err := s.deviceRepo.BatchGetActiveTimestamps(ctx, userDeviceIDs)
-	if err != nil {
-		logger.Warn(ctx, "批量获取在线状态：批量读取设备活跃时间失败，按离线处理",
-			logger.Int("user_count", len(userDeviceIDs)),
-			logger.ErrorField("error", err),
-		)
-		activeByUser = map[string]map[string]int64{}
-	}
-
-	lastSeenByUser, err := s.deviceRepo.BatchGetLastSeenTimestamps(ctx, unique)
-	if err != nil {
-		logger.Warn(ctx, "批量获取在线状态：读取最近活跃时间失败，按 0 返回",
-			logger.Int("user_count", len(unique)),
-			logger.ErrorField("error", err),
-		)
-		lastSeenByUser = map[string]int64{}
-	}
+	routesByUser := s.listUsersRoutesDegraded(ctx, unique)
 
 	users := make([]*authpb.OnlineStatusItem, 0, len(req.UserUuids))
 	for _, userUUID := range req.UserUuids {
-		sessions := sessionsByUser[userUUID]
-		lastSeenSec := lastSeenByUser[userUUID]
-		if len(sessions) == 0 {
-			users = append(users, buildOnlineStatusItemProto(userUUID, false, lastSeenSec))
-			continue
-		}
-
-		activeTimes := activeByUser[userUUID]
-		if activeTimes == nil {
-			activeTimes = map[string]int64{}
-		}
-		isOnline := false
-		for _, session := range sessions {
-			if session == nil || session.DeviceId == "" {
-				continue
-			}
-			seenSec, ok := activeTimes[session.DeviceId]
-			if !ok || seenSec <= 0 {
-				continue
-			}
-			if session.Status == model.DeviceStatusOnline && nowSec-seenSec <= windowSec {
-				isOnline = true
-			}
-		}
-
+		isOnline, _, lastSeenSec := computeUserPresence(routesByUser[userUUID], sessionsByUser[userUUID])
 		users = append(users, buildOnlineStatusItemProto(userUUID, isOnline, lastSeenSec))
 	}
 
 	return &authpb.BatchGetOnlineStatusResponse{Users: users}, nil
 }
 
-// UpdateDeviceActive 批量更新设备活跃时间。
-// 业务流程：
-//  1. 校验请求体与活跃项列表非空；
-//  2. 将 proto 活跃项转换为仓储层批量写入结构；
-//  3. 使用统一的当前秒级时间戳回写设备活跃时间；
-//  4. 由仓储层负责 Redis ZSet 的批量更新与过期清理。
-//
-// 错误码映射：
-//   - codes.InvalidArgument: 参数错误
-//   - codes.Internal: 系统内部错误
-func (s *deviceServiceImpl) UpdateDeviceActive(ctx context.Context, req *authpb.UpdateDeviceActiveRequest) error {
-	if req == nil || len(req.Items) == 0 {
-		return apperr.New(consts.CodeParamError)
-	}
-
-	nowSec := time.Now().Unix()
-	repoItems := make([]repository.DeviceActiveItem, 0, len(req.Items))
-	for _, item := range req.Items {
-		if item == nil || item.UserUuid == "" || item.DeviceId == "" {
-			return apperr.New(consts.CodeParamError)
-		}
-		repoItems = append(repoItems, repository.DeviceActiveItem{UserUUID: item.UserUuid, DeviceID: item.DeviceId})
-	}
-	if err := s.deviceRepo.BatchSetActiveTimestamps(ctx, repoItems, nowSec); err != nil {
-		return apperr.Wrap(err, consts.CodeInternalError, "批量更新设备活跃时间失败")
-	}
-	return nil
-}
-
 // UpdateDeviceStatus 更新设备在线状态。
 // 业务流程：
 //  1. 校验 user_uuid、device_id 与目标状态；
 //  2. 仅允许 online / offline 两种在线态更新；
-//  3. 调用仓储层更新设备会话状态；
+//  3. 调用仓储层更新设备会话状态（该迁移时刻是离线设备 last_seen 的数据来源）；
 //  4. 若设备不存在则按幂等成功处理。
 //
 // 错误码映射：

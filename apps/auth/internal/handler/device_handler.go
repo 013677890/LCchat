@@ -39,11 +39,6 @@ func (h *DeviceHandler) BatchGetOnlineStatus(ctx context.Context, req *authpb.Ba
 	return h.deviceService.BatchGetOnlineStatus(ctx, req)
 }
 
-// UpdateDeviceActive 批量更新设备活跃时间。
-func (h *DeviceHandler) UpdateDeviceActive(ctx context.Context, req *authpb.UpdateDeviceActiveRequest) (*authpb.UpdateDeviceActiveResponse, error) {
-	return &authpb.UpdateDeviceActiveResponse{}, h.deviceService.UpdateDeviceActive(ctx, req)
-}
-
 // UpdateDeviceStatus 更新设备在线状态。
 func (h *DeviceHandler) UpdateDeviceStatus(ctx context.Context, req *authpb.UpdateDeviceStatusRequest) (*authpb.UpdateDeviceStatusResponse, error) {
 	return &authpb.UpdateDeviceStatusResponse{}, h.deviceService.UpdateDeviceStatus(ctx, req)

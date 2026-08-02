@@ -1,4 +1,13 @@
-package route
+// Package presence 定义在线路由（presence）投影的共享读取契约。
+//
+// 数据事实源是 Redis Hash `user:routing:{user_uuid}`：
+//   - 唯一写方：connect（连接建立 / 心跳无条件刷新 / 断连 CAS 删除）；
+//   - field = device_id，value = `connectGrpcAddr|lastActiveMs`，key 级 TTL；
+//   - 消费方：message-push（推送寻址，窗口宽）、auth（在线状态聚合，窗口严）。
+//
+// 各消费方按自身语义传入不同的过滤窗口，但解析与过滤逻辑必须收敛在本包，
+// 避免"窗口常量散落多处"导致读写两侧约束漂移。
+package presence
 
 import (
 	"context"
@@ -9,6 +18,22 @@ import (
 
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/redis/go-redis/v9"
+)
+
+const (
+	// DefaultRouteTTL connect 写入路由 key 的默认 TTL。
+	// 需覆盖数个心跳周期（客户端约定 ~30s 一次），容忍网络抖动；
+	// 对应 env：CONNECT_ROUTE_TTL_SECONDS。
+	DefaultRouteTTL = 360 * time.Second
+
+	// DefaultOnlineWindow auth 在线判定的默认读取窗口。
+	// 连续丢约 4 个心跳（~120s）即判离线；对应 env：PRESENCE_ONLINE_WINDOW_SECONDS。
+	DefaultOnlineWindow = 120 * time.Second
+
+	// DefaultPushWindow message-push 推送寻址的默认读取窗口。
+	// 推送宁可多尝试（目标不在时 connect 会拒绝），因此比在线判定窗口更宽；
+	// 对应 env：MESSAGE_PUSH_ROUTE_TTL_SECONDS。
+	DefaultPushWindow = 360 * time.Second
 )
 
 // DeviceRoute 表示一个在线设备当前所在的 connect 节点。
@@ -32,6 +57,7 @@ type RedisRepository struct {
 }
 
 // NewRedisRepository 创建 Redis 路由仓储。
+// ttl 是调用方语义下的活跃过滤窗口：lastActiveMs 早于 now-ttl 的路由在读取阶段被丢弃。
 func NewRedisRepository(client *redis.Client, ttl time.Duration) *RedisRepository {
 	return &RedisRepository{client: client, ttl: ttl}
 }
@@ -109,7 +135,7 @@ func (r *RedisRepository) parseUserRoutes(userUUID string, values map[string]str
 		}
 
 		// 路由值里带最近活跃时间时，读取阶段直接过滤过期设备。
-		// 这样即使 Redis 清理存在短暂延迟，也不会把消息投递到长时间离线的旧节点。
+		// 这样即使 Redis 清理存在短暂延迟，也不会把长时间无活跃的设备当作在线。
 		if cutoffMs > 0 && activeMs > 0 && activeMs < cutoffMs {
 			continue
 		}

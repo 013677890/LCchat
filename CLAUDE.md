@@ -70,7 +70,7 @@ LCCHAT_E2E=1 go test -tags=e2e -count=1 -v ./tests/e2e   # Docker Compose 端到
 
 群成员会话：group 写事务 → outbox(`group.cache`, schema v2, 单群严格递增版本) → Debezium → Kafka → msg 独立 `GroupMembershipProjector` → 同事务更新成员 `conversation.membership_*` / 共享 `group_conversation`、推进版本并写消费幂等。GROUP 行只允许 Active/Left，`membership_status=0` 不作为旧数据兼容态；当前空库直接使用新基线，无双读、回填或旧结构 fallback。
 
-下行：Debezium → Kafka `msg.push` → message-push 消费（P2P 查接收方路由；群聊调 group 拿成员再扩散；多端同步查发送方其他设备）→ 读取 Redis 路由 `user:routing:{user_uuid}`（Hash, field=device_id, value=`connectAddr|lastActiveMs`, TTL 180s）并按 connect 节点分组 → 节点间有界并发（`MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY`，未配置时默认 32，显式配置非法则启动失败），节点内按用户串行处理：完整用户目标必须调用一次 `PushToUser`，需要排除当前设备的目标逐设备调用 `PushToDevice`；两种 RPC 都是 `EventHandler` 的强制发送契约，不提供旧单设备 sender 的降级路径 → connect 写 WebSocket。
+下行：Debezium → Kafka `msg.push` → message-push 消费（P2P 查接收方路由；群聊调 group 拿成员再扩散；多端同步查发送方其他设备）→ 读取 Redis 路由 `user:routing:{user_uuid}`（presence 契约：Hash, field=device_id, value=`connectAddr|lastActiveMs`, TTL 默认 360s，connect 唯一写方、心跳无条件刷新；auth 在线状态与 message-push 均经 `pkg/presence` 消费，窗口分别为 120s/360s）并按 connect 节点分组 → 节点间有界并发（`MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY`，未配置时默认 32，显式配置非法则启动失败），节点内按用户串行处理：完整用户目标必须调用一次 `PushToUser`，需要排除当前设备的目标逐设备调用 `PushToDevice`；两种 RPC 都是 `EventHandler` 的强制发送契约，不提供旧单设备 sender 的降级路径 → connect 写 WebSocket。
 
 非阻断原则：**`message` 与 `msg.push` Outbox 同事务提交成功即发送成功**；后续会话派生更新失败只 `logger.Warn`，事务提交后的 CDC/Kafka/实时推送失败也不回滚消息。客户端对单会话用 `PullMessages`、登录恢复/重连对多个已有位点的会话用 `BatchSyncMessages` 自愈。connect 是纯管道：不消费 Kafka、不做业务判断。
 

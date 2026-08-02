@@ -19,12 +19,9 @@ const (
 	statusWorkerCount = 64
 	// statusQueueSize 设备状态 RPC 任务队列容量。
 	// 队列满时新任务会被丢弃（仅 log Warn），不会阻塞调用方。
+	// 注意：断连状态更新是离线设备 last_seen 的唯一来源，丢弃仅导致
+	// last_seen 退化为登录时刻，属于可接受的降级。
 	statusQueueSize = 8192
-
-	// defaultRouteTTL 路由表默认 TTL（下限）。
-	// 实际写入 TTL 由 ConnectService.effectiveRouteTTL() 按 2×UpdateInterval 派生，
-	// 这里作为未初始化节流器时的兜底默认值。
-	defaultRouteTTL = 180 * time.Second
 )
 
 // deviceStatusTask 表示一条设备状态更新 RPC 任务。
@@ -41,14 +38,9 @@ func connectRouteAddr() string {
 
 // OnConnect 在连接建立后触发。
 // 行为：
-// 1. 立即触发活跃时间同步（不受节流限制）；
+// 1. 无条件写入用户设备路由（presence 契约中"连接建立"的事实投影）；
 // 2. 异步调用 auth-service RPC 将 DeviceSession.status 置为在线。
 func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
-	if s.activeSyncer != nil {
-		// 连接建立时强制刷新：先删除节流记录再 touch，确保本次会入缓冲 map。
-		s.activeSyncer.Delete(session.UserUUID, session.DeviceID)
-		_ = s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now())
-	}
 	if addr := connectRouteAddr(); addr != "" {
 		s.UpsertUserRoute(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), s.effectiveRouteTTL())
 	}
@@ -56,29 +48,21 @@ func (s *ConnectService) OnConnect(ctx context.Context, session *Session) {
 }
 
 // OnHeartbeat 在收到客户端心跳后触发。
-// 受本地节流保护：窗口内的重复心跳不会重复触发同步。
+// 路由刷新必须无条件执行：presence 的新鲜度就是心跳新鲜度，任何本地节流都会在
+// 路由 Key 被外部删除（Redis 重启/淘汰/清理竞态）后制造最长一个节流窗口的路由黑洞，
+// 期间在线设备对 message-push 与在线状态查询完全不可见。
 func (s *ConnectService) OnHeartbeat(ctx context.Context, session *Session) {
-	if s.activeSyncer == nil {
-		if addr := connectRouteAddr(); addr != "" {
-			s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), s.effectiveRouteTTL())
-		}
-		return
-	}
-	if s.activeSyncer.Touch(session.UserUUID, session.DeviceID, time.Now()) {
-		if addr := connectRouteAddr(); addr != "" {
-			s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), s.effectiveRouteTTL())
-		}
+	if addr := connectRouteAddr(); addr != "" {
+		s.RefreshUserRouteActive(ctx, session.UserUUID, session.DeviceID, addr, time.Now(), s.effectiveRouteTTL())
 	}
 }
 
 // OnDisconnect 在连接断开后触发。
 // 行为：
-// 1. 清理本地节流缓存，避免内存泄漏；
-// 2. 异步调用 auth-service RPC 将 DeviceSession.status 置为离线。
+// 1. CAS 删除本设备路由，避免误删设备重连到其它节点后写入的新路由；
+// 2. 异步调用 auth-service RPC 将 DeviceSession.status 置为离线
+//    （该状态迁移时刻是离线设备 last_seen 的数据来源）。
 func (s *ConnectService) OnDisconnect(ctx context.Context, session *Session) {
-	if s.activeSyncer != nil {
-		s.activeSyncer.Delete(session.UserUUID, session.DeviceID)
-	}
 	s.RemoveUserRoute(ctx, session.UserUUID, session.DeviceID, connectRouteAddr())
 	s.updateDeviceStatusAsync(ctx, session, model.DeviceStatusOffline)
 }

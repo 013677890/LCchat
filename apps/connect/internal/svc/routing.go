@@ -73,7 +73,7 @@ func (s *ConnectService) RemoveUserRoute(ctx context.Context, userUUID, deviceID
 	key := rediskey.UserRoutingKey(userUUID)
 
 	if selfAddr = strings.TrimSpace(selfAddr); selfAddr != "" {
-		ttlSeconds := int(rediskey.DeviceActiveTTL / time.Second)
+		ttlSeconds := int(s.effectiveRouteTTL() / time.Second)
 		if err := removeUserRouteCAS.Run(ctx, s.redisClient,
 			[]string{key}, deviceID, selfAddr, ttlSeconds).Err(); err != nil {
 			logger.Warn(ctx, "CAS 删除用户设备路由失败（不阻塞）",
@@ -88,7 +88,7 @@ func (s *ConnectService) RemoveUserRoute(ctx context.Context, userUUID, deviceID
 
 	pipe := s.redisClient.Pipeline()
 	pipe.HDel(ctx, key, deviceID)
-	pipe.Expire(ctx, key, rediskey.DeviceActiveTTL)
+	pipe.Expire(ctx, key, s.effectiveRouteTTL())
 	if _, err := pipe.Exec(ctx); err != nil {
 		logger.Warn(ctx, "删除用户设备路由失败（不阻塞）",
 			logger.String("user_uuid", userUUID),
