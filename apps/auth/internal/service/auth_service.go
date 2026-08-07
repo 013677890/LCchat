@@ -14,6 +14,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -101,7 +102,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 	// 先校验注册验证码，避免无效请求占用数据库写资源。
 	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, 1)
 	if err != nil {
-		if errors.Is(err, repository.ErrRedisNil) {
+		if errors.Is(err, repoerr.ErrRedisNil) {
 			return nil, apperr.New(consts.CodeVerifyCodeError)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
@@ -145,7 +146,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 	// 把 user_account 与 user_created 事件放进同一事务，确保资料初始化链路有可靠事实来源。
 	createdUser, err := s.authRepo.CreateWithOutboxEvent(ctx, user, accountevent.EventTypeUserCreated, payload)
 	if err != nil {
-		if errors.Is(err, repository.ErrDuplicateKey) {
+		if errors.Is(err, repoerr.ErrDuplicateKey) {
 			return nil, apperr.New(consts.CodeUserAlreadyExist)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "创建用户失败")
@@ -181,7 +182,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	user, err := s.authRepo.GetByEmail(ctx, req.Account)
 	snapshot.queryUserCost = time.Since(queryUserStartedAt)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeUserNotFound)
 		}
 		snapshot.totalCost = time.Since(loginStartedAt)
@@ -304,7 +305,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 	// 先查账号快照，避免对不存在账号继续做验证码校验和 token 写入。
 	user, err := s.authRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeUserNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户失败")
@@ -323,7 +324,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 	// type=2 表示登录验证码；这里显式区分过期和错误两种业务反馈。
 	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, 2)
 	if err != nil {
-		if errors.Is(err, repository.ErrRedisNil) {
+		if errors.Is(err, repoerr.ErrRedisNil) {
 			return nil, apperr.New(consts.CodeVerifyCodeExpire)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
@@ -436,7 +437,7 @@ func (s *authServiceImpl) VerifyCode(ctx context.Context, req *authpb.VerifyCode
 	// 校验接口本身不消费验证码，只返回当前验证码是否仍然匹配。
 	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, req.Type)
 	if err != nil {
-		if errors.Is(err, repository.ErrRedisNil) {
+		if errors.Is(err, repoerr.ErrRedisNil) {
 			return nil, apperr.New(consts.CodeVerifyCodeExpire)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
@@ -469,7 +470,7 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *authpb.RefreshT
 	// 先读取当前设备保存的 RefreshToken，再做字面量比较，防止跨设备串用续签。
 	storedRefreshToken, err := s.deviceRepo.GetRefreshToken(ctx, userUUID, deviceID)
 	if err != nil {
-		if errors.Is(err, repository.ErrRedisNil) {
+		if errors.Is(err, repoerr.ErrRedisNil) {
 			return nil, apperr.New(consts.CodeDeviceNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取 Refresh Token 失败")
@@ -534,7 +535,7 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *authpb.LogoutRequest)
 
 	// 再把设备会话标记为 logged_out；如果会话本身不存在，则按幂等成功处理。
 	if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, model.DeviceStatusLoggedOut); err != nil {
-		if !errors.Is(err, repository.ErrRecordNotFound) {
+		if !errors.Is(err, repoerr.ErrRecordNotFound) {
 			return apperr.Wrap(err, consts.CodeInternalError, "更新设备注销状态失败")
 		}
 		logger.Warn(ctx, "登出时设备会话不存在，按幂等成功处理",
@@ -562,7 +563,7 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *authpb.ResetPa
 	// 先按邮箱定位账号，避免对不存在账号做验证码与哈希计算。
 	user, err := s.authRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return apperr.New(consts.CodeUserNotFound)
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "查询用户失败")
@@ -571,7 +572,7 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *authpb.ResetPa
 	// type=3 对应重置密码验证码；这里同样区分“过期”和“错误”。
 	isValid, err := s.authRepo.VerifyVerifyCode(ctx, req.Email, req.VerifyCode, 3)
 	if err != nil {
-		if errors.Is(err, repository.ErrRedisNil) {
+		if errors.Is(err, repoerr.ErrRedisNil) {
 			return apperr.New(consts.CodeVerifyCodeExpire)
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")

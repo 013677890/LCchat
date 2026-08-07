@@ -9,6 +9,7 @@ import (
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
@@ -99,7 +100,7 @@ func (s *blacklistServiceImpl) RemoveBlacklist(ctx context.Context, req *pb.Remo
 	}
 
 	if err := s.blacklistRepo.RemoveBlacklist(ctx, currentUserUUID, req.UserUuid); err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return apperr.New(consts.CodeNotInBlacklist)
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "取消拉黑失败")

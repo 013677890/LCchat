@@ -3,6 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"github.com/013677890/LCchat-Backend/consts"
@@ -11,13 +15,11 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepb"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
-	"strings"
-	"testing"
-	"time"
 )
 
 type fakeGroupRepoForService struct {
@@ -224,7 +226,7 @@ func (f *fakeGroupRepoForService) GetJoinRequestPendingCount(ctx context.Context
 
 func (f *fakeGroupRepoForService) GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error) {
 	if f.getGroupInfoFn == nil {
-		return nil, repository.ErrRecordNotFound
+		return nil, repoerr.ErrRecordNotFound
 	}
 	return f.getGroupInfoFn(ctx, groupUUID)
 }
@@ -706,7 +708,7 @@ func TestGroupWriteErrorMapping(t *testing.T) {
 		want int
 	}{
 		{name: "群已解散", err: repository.ErrGroupDismissed, want: consts.CodeGroupAlreadyDismiss},
-		{name: "群不存在", err: repository.ErrRecordNotFound, want: consts.CodeGroupNotFound},
+		{name: "群不存在", err: repoerr.ErrRecordNotFound, want: consts.CodeGroupNotFound},
 		{name: "无权限", err: repository.ErrNoPermission, want: consts.CodeNoPermission},
 		{name: "不能踢群主", err: repository.ErrCannotKickOwner, want: consts.CodeCannotKickOwner},
 		{name: "群主不能退群", err: repository.ErrCannotQuitAsOwner, want: consts.CodeCannotQuitAsOwner},

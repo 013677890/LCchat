@@ -11,6 +11,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -39,7 +40,7 @@ func NewApplyRepository(db *gorm.DB, redisClient *goredis.Client) IApplyReposito
 func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequest) (*model.ApplyRequest, error) {
 	// 先落库，再以“缓存存在才增量更新”的策略做 best-effort 缓存维护，避免把局部写入误当成完整列表。
 	if err := r.db.WithContext(ctx).Create(apply).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 
 	if r.redisClient == nil {
@@ -62,7 +63,7 @@ func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequ
 		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
-			LogRedisError(ctx, err)
+			repoerr.LogRedisError(ctx, err)
 		}
 	}
 
@@ -73,7 +74,7 @@ func (r *applyRepositoryImpl) Create(ctx context.Context, apply *model.ApplyRequ
 		pipe.Incr(ctx, notifyKey)
 		pipe.Expire(ctx, notifyKey, rediskey.ApplyUnreadNotifyTTL)
 		if _, err := pipe.Exec(ctx); err != nil && err != goredis.Nil {
-			LogRedisError(ctx, err)
+			repoerr.LogRedisError(ctx, err)
 		}
 	}
 
@@ -88,7 +89,7 @@ func (r *applyRepositoryImpl) GetByID(ctx context.Context, id int64) (*model.App
 	if err := r.db.WithContext(ctx).
 		Where("id = ? AND apply_type = ? AND deleted_at IS NULL", id, 0).
 		First(&apply).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &apply, nil
 }
@@ -105,7 +106,7 @@ func (r *applyRepositoryImpl) GetPendingList(ctx context.Context, targetUUID str
 			return applies, total, nil
 		}
 		if err != goredis.Nil {
-			LogRedisError(ctx, err)
+			repoerr.LogRedisError(ctx, err)
 		}
 	}
 
@@ -165,7 +166,7 @@ func (r *applyRepositoryImpl) getPendingListFromCache(ctx context.Context, targe
 			0, targetUUID, 0, filteredUUIDs).
 		Order("created_at DESC").
 		Find(&applies).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	realTotal := total
@@ -195,7 +196,7 @@ func (r *applyRepositoryImpl) getPendingListFromDB(ctx context.Context, targetUU
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	var applies []*model.ApplyRequest
@@ -204,7 +205,7 @@ func (r *applyRepositoryImpl) getPendingListFromDB(ctx context.Context, targetUU
 		Offset(offset).
 		Limit(pageSize).
 		Find(&applies).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	if status == 0 && r.redisClient != nil {
@@ -256,7 +257,7 @@ func (r *applyRepositoryImpl) rebuildPendingCacheAsync(ctx context.Context, targ
 		}
 
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisPipelineTimeout)
 }
@@ -279,7 +280,7 @@ func (r *applyRepositoryImpl) GetSentList(ctx context.Context, applicantUUID str
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	var applies []*model.ApplyRequest
@@ -288,7 +289,7 @@ func (r *applyRepositoryImpl) GetSentList(ctx context.Context, applicantUUID str
 		Offset(offset).
 		Limit(pageSize).
 		Find(&applies).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	return applies, total, nil
@@ -313,7 +314,7 @@ func (r *applyRepositoryImpl) CleanupAccountApplies(ctx context.Context, userUUI
 		Select("DISTINCT target_uuid").
 		Where("apply_type = ? AND (applicant_uuid = ? OR target_uuid = ?) AND deleted_at IS NULL", 0, userUUID, userUUID).
 		Find(&rows).Error; err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	now := time.Now()
@@ -324,7 +325,7 @@ func (r *applyRepositoryImpl) CleanupAccountApplies(ctx context.Context, userUUI
 			"deleted_at": gorm.DeletedAt{Time: now, Valid: true},
 			"updated_at": now,
 		}).Error; err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	affectedTargets := make([]string, 0, len(rows)+1)
@@ -365,7 +366,7 @@ func (r *applyRepositoryImpl) invalidateApplyCachesAsync(ctx context.Context, ta
 		}
 
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisPipelineTimeout)
 }
@@ -377,10 +378,10 @@ func (r *applyRepositoryImpl) UpdateStatus(ctx context.Context, id int64, status
 		Select("applicant_uuid", "target_uuid").
 		Where("id = ? AND apply_type = ? AND deleted_at IS NULL", id, 0).
 		Take(&apply).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			return ErrApplyNotFound
 		}
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	updates := map[string]interface{}{"status": status}
@@ -394,7 +395,7 @@ func (r *applyRepositoryImpl) UpdateStatus(ctx context.Context, id int64, status
 		Where("id = ? AND status = ?", id, 0).
 		Updates(updates)
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 	r.removePendingApplyCache(ctx, apply.TargetUuid, apply.ApplicantUuid)
 	if result.RowsAffected == 0 {
@@ -472,7 +473,7 @@ func (r *applyRepositoryImpl) AcceptApplyAndCreateRelation(ctx context.Context, 
 	})
 
 	if err != nil {
-		return false, WrapDBError(err)
+		return false, repoerr.WrapDBError(err)
 	}
 
 	r.removePendingApplyCache(ctx, userUUID, friendUUID)
@@ -533,7 +534,7 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 					_ = r.redisClient.Del(runCtx, pair.userKey).Err()
 					continue
 				}
-				LogRedisError(runCtx, err)
+				repoerr.LogRedisError(runCtx, err)
 			}
 		}
 	}, async.AsyncRedisTimeout)
@@ -562,7 +563,7 @@ func (r *applyRepositoryImpl) removePendingApplyCache(ctx context.Context, targe
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 			return
 		}
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	}
 }
 
@@ -578,7 +579,7 @@ func (r *applyRepositoryImpl) MarkAsRead(ctx context.Context, targetUUID string,
 		Where("id IN ? AND target_uuid = ? AND apply_type = ? AND is_read = ? AND deleted_at IS NULL",
 			ids, targetUUID, 0, false).
 		Update("is_read", true)
-	return result.RowsAffected, WrapDBError(result.Error)
+	return result.RowsAffected, repoerr.WrapDBError(result.Error)
 }
 
 // MarkAllAsRead 标记当前用户全部好友申请已读。
@@ -593,7 +594,7 @@ func (r *applyRepositoryImpl) MarkAllAsRead(ctx context.Context, targetUUID stri
 		Where("apply_type = ? AND target_uuid = ? AND is_read = ? AND deleted_at IS NULL",
 			0, targetUUID, false).
 		Update("is_read", true)
-	return result.RowsAffected, WrapDBError(result.Error)
+	return result.RowsAffected, repoerr.WrapDBError(result.Error)
 }
 
 // MarkAsReadAsync 异步标记申请已读。
@@ -631,7 +632,7 @@ func (r *applyRepositoryImpl) GetUnreadCount(ctx context.Context, targetUUID str
 		if err == goredis.Nil {
 			return 0, nil
 		}
-		return 0, WrapRedisError(err)
+		return 0, repoerr.WrapRedisError(err)
 	}
 
 	count, convErr := strconv.ParseInt(val, 10, 64)
@@ -648,7 +649,7 @@ func (r *applyRepositoryImpl) GetUnreadCount(ctx context.Context, targetUUID str
 	}
 
 	if err := r.redisClient.Expire(ctx, notifyKey, rediskey.ApplyUnreadNotifyTTL).Err(); err != nil && err != goredis.Nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	}
 
 	return count, nil
@@ -661,7 +662,7 @@ func (r *applyRepositoryImpl) countUnreadFromDB(ctx context.Context, targetUUID 
 		Model(&model.ApplyRequest{}).
 		Where("apply_type = ? AND target_uuid = ? AND is_read = ? AND deleted_at IS NULL", 0, targetUUID, false).
 		Count(&count).Error; err != nil {
-		return 0, WrapDBError(err)
+		return 0, repoerr.WrapDBError(err)
 	}
 	return count, nil
 }
@@ -675,7 +676,7 @@ func (r *applyRepositoryImpl) ClearUnreadCount(ctx context.Context, targetUUID s
 	// 红点清除只删除计数 key；申请记录本身的已读状态仍由 MarkAsRead / MarkAllAsRead 控制。
 	notifyKey := rediskey.ApplyUnreadNotifyKey(targetUUID)
 	if err := r.redisClient.Del(ctx, notifyKey).Err(); err != nil && err != goredis.Nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -698,7 +699,7 @@ func (r *applyRepositoryImpl) ExistsPendingRequest(ctx context.Context, applican
 			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
-				LogRedisError(ctx, err)
+				repoerr.LogRedisError(ctx, err)
 			}
 		} else if err == nil && existsCmd.Val() > 0 {
 			if scoreCmd.Err() == nil {
@@ -710,7 +711,7 @@ func (r *applyRepositoryImpl) ExistsPendingRequest(ctx context.Context, applican
 			if cachex.IsRedisWrongType(scoreCmd.Err()) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
-				LogRedisError(ctx, scoreCmd.Err())
+				repoerr.LogRedisError(ctx, scoreCmd.Err())
 			}
 		}
 	}
@@ -720,7 +721,7 @@ func (r *applyRepositoryImpl) ExistsPendingRequest(ctx context.Context, applican
 	if err := r.db.WithContext(ctx).
 		Where("apply_type = ? AND target_uuid = ? AND status = ? AND deleted_at IS NULL", 0, targetUUID, 0).
 		Find(&applies).Error; err != nil {
-		return false, WrapDBError(err)
+		return false, repoerr.WrapDBError(err)
 	}
 
 	if r.redisClient != nil {

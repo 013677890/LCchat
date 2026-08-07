@@ -7,6 +7,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -33,7 +34,7 @@ func (r *authRepositoryImpl) GetByEmail(ctx context.Context, email string) (*mod
 	// deleted_at IS NULL 明确只返回当前仍可登录的账号，避免把已注销账号重新暴露给登录链路。
 	err := r.db.WithContext(ctx).Where("email = ? AND deleted_at IS NULL", email).First(&user).Error
 	if err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &user, nil
 }
@@ -44,7 +45,7 @@ func (r *authRepositoryImpl) GetByUserUUID(ctx context.Context, userUUID string)
 	// 这里同样过滤掉已注销账号，保证 service 层看到的是当前有效账号视图。
 	err := r.db.WithContext(ctx).Where("user_uuid = ? AND deleted_at IS NULL", userUUID).First(&user).Error
 	if err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &user, nil
 }
@@ -55,7 +56,7 @@ func (r *authRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (b
 	// 使用 count 而不是直接查整行，减少换绑邮箱等只关心“是否存在”的场景开销。
 	err := r.db.WithContext(ctx).Model(&model.UserAccount{}).Where("email = ? AND deleted_at IS NULL", email).Count(&count).Error
 	if err != nil {
-		return false, WrapDBError(err)
+		return false, repoerr.WrapDBError(err)
 	}
 	return count > 0, nil
 }
@@ -78,7 +79,7 @@ func (r *authRepositoryImpl) CreateWithOutboxEvent(ctx context.Context, user *mo
 		}
 		// 第二步把跨服务事件与账号创建放进同一事务，保证最终一致链路有事实来源。
 		if err := outbox.InsertEvent(tx, eventType, user.UserUuid, payload); err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		return nil
 	})
@@ -95,10 +96,10 @@ func (r *authRepositoryImpl) UpdatePassword(ctx context.Context, userUUID, passw
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
 		Update("password_hash", password)
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 	return nil
 }
@@ -110,10 +111,10 @@ func (r *authRepositoryImpl) UpdateEmail(ctx context.Context, userUUID, email st
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
 		Update("email", email)
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 	return nil
 }
@@ -138,10 +139,10 @@ func (r *authRepositoryImpl) UpdateLoginDisplay(ctx context.Context, userUUID, n
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
 		Updates(updates)
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 	return nil
 }
@@ -154,10 +155,10 @@ func (r *authRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
 		Updates(map[string]interface{}{"status": 1, "deleted_at": now, "updated_at": now})
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 	return nil
 }
@@ -172,15 +173,15 @@ func (r *authRepositoryImpl) DeleteWithOutboxEvent(ctx context.Context, userUUID
 			Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
 			Updates(map[string]interface{}{"status": 1, "deleted_at": now, "updated_at": now})
 		if result.Error != nil {
-			return WrapDBError(result.Error)
+			return repoerr.WrapDBError(result.Error)
 		}
 		if result.RowsAffected == 0 {
-			return ErrRecordNotFound
+			return repoerr.ErrRecordNotFound
 		}
 
 		// 再追加 outbox 事件，让 user/relation 等下游服务后续做清理。
 		if err := outbox.InsertEvent(tx, eventType, userUUID, payload); err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		return nil
 	})
@@ -194,12 +195,12 @@ func (r *authRepositoryImpl) DeleteWithOutboxEvent(ctx context.Context, userUUID
 // VerifyVerifyCode 校验验证码是否匹配。
 func (r *authRepositoryImpl) VerifyVerifyCode(ctx context.Context, email, verifyCode string, codeType int32) (bool, error) {
 	if r.redisClient == nil {
-		return false, ErrRedisNil
+		return false, repoerr.ErrRedisNil
 	}
 	// 验证码按 email + type 存储，先直接读取当前生效值，再在仓储层完成字面量比较。
 	value, err := r.redisClient.Get(ctx, rediskey.VerifyCodeKey(email, codeType)).Result()
 	if err != nil {
-		return false, WrapRedisError(err)
+		return false, repoerr.WrapRedisError(err)
 	}
 	return value == verifyCode, nil
 }
@@ -207,14 +208,14 @@ func (r *authRepositoryImpl) VerifyVerifyCode(ctx context.Context, email, verify
 // StoreVerifyCode 存储验证码。
 func (r *authRepositoryImpl) StoreVerifyCode(ctx context.Context, email, verifyCode string, codeType int32, expireDuration time.Duration) error {
 	if r.redisClient == nil {
-		return ErrRedis
+		return repoerr.ErrRedis
 	}
 	// key 由邮箱和验证码类型共同决定，支持注册/登录/重置密码等不同场景隔离存储。
 	key := rediskey.VerifyCodeKey(email, codeType)
 	err := r.redisClient.Set(ctx, key, verifyCode, expireDuration).Err()
 	if err != nil {
 		// 验证码有严格时效，禁止异步写回已经过期或被新验证码替换的旧值。
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -229,7 +230,7 @@ func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string,
 	err := r.redisClient.Del(ctx, key).Err()
 	if err != nil {
 		// 同一个 key 可被新验证码复用，延迟 DEL 可能误删新值，只允许调用方同步重试。
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -237,7 +238,7 @@ func (r *authRepositoryImpl) DeleteVerifyCode(ctx context.Context, email string,
 // CheckAndIncrementVerifyCodeRateLimit 原子校验验证码发送限流并占用一次计数。
 func (r *authRepositoryImpl) CheckAndIncrementVerifyCodeRateLimit(ctx context.Context, email, ip string) (bool, error) {
 	if r.redisClient == nil {
-		return false, ErrRedis
+		return false, repoerr.ErrRedis
 	}
 
 	// 检查与递增必须在 Redis 单脚本内完成，避免并发请求在检查通过后一起写入计数。
@@ -254,7 +255,7 @@ func (r *authRepositoryImpl) CheckAndIncrementVerifyCodeRateLimit(ctx context.Co
 		int(rediskey.VerifyCodeIPTTL.Seconds()),
 	).Int()
 	if err != nil {
-		return false, WrapRedisError(err)
+		return false, repoerr.WrapRedisError(err)
 	}
 	return result != 0, nil
 }
@@ -280,7 +281,7 @@ func (r *authRepositoryImpl) BatchGetAccountStatus(ctx context.Context, userUUID
 		Find(&rows).Error
 
 	if err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 
 	statusMap := make(map[string]*AccountStatusItem, len(rows))
@@ -322,13 +323,13 @@ func (r *authRepositoryImpl) createUser(db *gorm.DB, user *model.UserAccount) er
 	if user.Telephone == "" {
 		// 不带手机号的注册路径只写入当前最小账号字段集合。
 		if err := db.Omit("Telephone").Create(user).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		return nil
 	}
 	// 已显式传入手机号时，按完整模型插入。
 	if err := db.Create(user).Error; err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 	return nil
 }

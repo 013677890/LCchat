@@ -9,6 +9,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/alicebob/miniredis/v2"
 
 	"github.com/redis/go-redis/v9"
@@ -87,7 +88,7 @@ func TestAuthRepositoryWriteReturnsNotFoundOnZeroRows(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.call()
-			require.ErrorIs(t, err, ErrRecordNotFound)
+			require.ErrorIs(t, err, repoerr.ErrRecordNotFound)
 		})
 	}
 }
@@ -97,7 +98,7 @@ func TestAuthRepositoryDeleteWithOutboxDoesNotEmitEventWhenAccountMissing(t *tes
 	ctx := context.Background()
 
 	err := repo.DeleteWithOutboxEvent(ctx, "missing", "account_deleted", `{"event_id":"e1"}`)
-	require.ErrorIs(t, err, ErrRecordNotFound)
+	require.ErrorIs(t, err, repoerr.ErrRecordNotFound)
 
 	var count int64
 	require.NoError(t, repo.db.Model(&outbox.Event{}).Count(&count).Error)
@@ -115,7 +116,7 @@ func TestAuthRepositoryWritesExistingAccount(t *testing.T) {
 	require.NoError(t, repo.DeleteWithOutboxEvent(ctx, "u1", "account_deleted", `{"event_id":"e1"}`))
 
 	_, err := repo.GetByUserUUID(ctx, "u1")
-	require.True(t, errors.Is(err, ErrRecordNotFound))
+	require.True(t, errors.Is(err, repoerr.ErrRecordNotFound))
 
 	var count int64
 	require.NoError(t, repo.db.Model(&outbox.Event{}).Count(&count).Error)
@@ -129,7 +130,7 @@ func TestAuthRepositoryUpdateEmailDuplicateReturnsDuplicateKey(t *testing.T) {
 	seedAuthAccount(t, repo, "u2")
 
 	err := repo.UpdateEmail(ctx, "u2", "u1@test.com")
-	require.ErrorIs(t, err, ErrDuplicateKey)
+	require.ErrorIs(t, err, repoerr.ErrDuplicateKey)
 }
 
 func TestAuthRepositoryLeavesUserOwnedProfileCacheUntouched(t *testing.T) {
@@ -173,6 +174,6 @@ func TestCheckAndIncrementVerifyCodeRateLimitRequiresRedis(t *testing.T) {
 	repo := newAuthRepositoryForTest(t)
 
 	limited, err := repo.CheckAndIncrementVerifyCodeRateLimit(context.Background(), "u1@test.com", "127.0.0.1")
-	require.ErrorIs(t, err, ErrRedis)
+	require.ErrorIs(t, err, repoerr.ErrRedis)
 	require.False(t, limited)
 }

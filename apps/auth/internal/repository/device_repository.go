@@ -10,6 +10,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/redisretry"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -89,7 +90,7 @@ func (r *deviceRepositoryImpl) GetByUserUUID(ctx context.Context, userUUID strin
 		Order("updated_at DESC, id DESC").
 		Find(&sessions).Error
 	if err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return sessions, nil
 }
@@ -102,7 +103,7 @@ func (r *deviceRepositoryImpl) GetByDeviceID(ctx context.Context, userUUID, devi
 		Where("user_uuid = ? AND device_id = ?", userUUID, deviceID).
 		First(&session).Error
 	if err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &session, nil
 }
@@ -136,7 +137,7 @@ func (r *deviceRepositoryImpl) UpsertSession(ctx context.Context, session *model
 		session.AppVersion, session.IP, session.UserAgent, onlineStatus, now, now, onlineStatus).Error
 
 	if err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	// 只有数据库权威记录成功后，才刷新 Redis 里的设备快照缓存。
@@ -165,7 +166,7 @@ func (r *deviceRepositoryImpl) storeDeviceInfoCache(ctx context.Context, session
 	// JSON 序列化失败说明缓存载荷本身不可用，此时只记录降级日志，不影响主流程。
 	value, err := json.Marshal(item)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 		return
 	}
 
@@ -192,7 +193,7 @@ func (r *deviceRepositoryImpl) TouchDeviceInfoTTL(ctx context.Context, userUUID 
 	err := r.redisClient.Expire(ctx, key, rediskey.DeviceInfoTTL).Err()
 	if err != nil {
 		// 延迟续期可能延长已经失效的旧快照，因此只把错误交给调用方同步处理。
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -242,7 +243,7 @@ func (r *deviceRepositoryImpl) BatchGetOnlineStatus(ctx context.Context, userUUI
 		_, err := pipe.Exec(ctx)
 		if err != nil && err != redis.Nil {
 			// 整体缓存读取失败时统一降级到 MySQL 回源。
-			LogRedisError(ctx, err)
+			repoerr.LogRedisError(ctx, err)
 			missedUsers = append(missedUsers, uniqueUsers...)
 		} else {
 			for _, userUUID := range uniqueUsers {
@@ -301,7 +302,7 @@ func (r *deviceRepositoryImpl) BatchGetOnlineStatus(ctx context.Context, userUUI
 			Find(&dbSessions).Error
 
 		if err != nil {
-			return nil, WrapDBError(err)
+			return nil, repoerr.WrapDBError(err)
 		}
 
 		// 先按 user_uuid 聚合数据库记录，便于后续按用户回填 result。
@@ -358,7 +359,7 @@ func (r *deviceRepositoryImpl) BatchGetOnlineStatus(ctx context.Context, userUUI
 			}
 			if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 				// 回填缓存失败只记降级日志，不影响主查询结果返回。
-				LogRedisError(ctx, err)
+				repoerr.LogRedisError(ctx, err)
 			}
 		}
 	}
@@ -376,7 +377,7 @@ func (r *deviceRepositoryImpl) BatchGetOnlineStatus(ctx context.Context, userUUI
 // StoreAccessToken 存储 AccessToken。
 func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, deviceID, accessToken string, expireDuration time.Duration) error {
 	if r.redisClient == nil {
-		return ErrRedis
+		return repoerr.ErrRedis
 	}
 	key := r.accessTokenKey(userUUID, deviceID)
 	// AccessToken 落 Redis 前先做 md5 摘要，避免明文 token 直接驻留缓存。
@@ -384,7 +385,7 @@ func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, d
 	err := r.redisClient.Set(ctx, key, value, expireDuration).Err()
 	if err != nil {
 		// 登录态写入失败必须让登录链路失败，禁止稍后写入已经失效的 token。
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -392,14 +393,14 @@ func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, d
 // StoreRefreshToken 存储 RefreshToken。
 func (r *deviceRepositoryImpl) StoreRefreshToken(ctx context.Context, userUUID, deviceID, refreshToken string, expireDuration time.Duration) error {
 	if r.redisClient == nil {
-		return ErrRedis
+		return repoerr.ErrRedis
 	}
 	key := r.refreshTokenKey(userUUID, deviceID)
 	// RefreshToken 当前仍按明文保存，便于后续刷新链路做字面量比对。
 	err := r.redisClient.Set(ctx, key, refreshToken, expireDuration).Err()
 	if err != nil {
 		// RefreshToken 同样可能在重试期间被轮换，禁止异步写回旧值。
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -407,12 +408,12 @@ func (r *deviceRepositoryImpl) StoreRefreshToken(ctx context.Context, userUUID, 
 // GetRefreshToken 获取 RefreshToken。
 func (r *deviceRepositoryImpl) GetRefreshToken(ctx context.Context, userUUID, deviceID string) (string, error) {
 	if r.redisClient == nil {
-		return "", ErrRedisNil
+		return "", repoerr.ErrRedisNil
 	}
 	// 这里直接按 (user_uuid, device_id) 精确读取单设备 RefreshToken。
 	value, err := r.redisClient.Get(ctx, r.refreshTokenKey(userUUID, deviceID)).Result()
 	if err != nil {
-		return "", WrapRedisError(err)
+		return "", repoerr.WrapRedisError(err)
 	}
 	return value, nil
 }
@@ -431,7 +432,7 @@ func (r *deviceRepositoryImpl) DeleteTokens(ctx context.Context, userUUID, devic
 	pipe.Del(ctx, refreshKey)
 	if _, err := pipe.Exec(ctx); err != nil {
 		// 设备重新登录会复用这些 key，延迟 DEL 可能误删新 token。
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -470,7 +471,7 @@ func (r *deviceRepositoryImpl) DeleteByUserUUID(ctx context.Context, userUUID st
 		}).Error
 
 	if err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	if r.redisClient != nil {
@@ -499,12 +500,12 @@ func (r *deviceRepositoryImpl) UpdateOnlineStatus(ctx context.Context, userUUID,
 			"updated_at": time.Now(),
 		})
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 
 	// 没有命中任何会话记录时，明确返回 not found，供上层做幂等判断。
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 
 	// 没有 Redis 时到此为止，数据库状态已经是最终权威结果。
@@ -523,14 +524,14 @@ func (r *deviceRepositoryImpl) UpdateOnlineStatus(ctx context.Context, userUUID,
 	}
 	if err != nil {
 		// 缓存读取失败只做降级日志，不回滚已成功的数据库写入。
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 		return nil
 	}
 
 	var item deviceCacheItem
 	// 单条缓存坏掉时不阻塞主流程，后续读路径会重新回源覆盖。
 	if err := json.Unmarshal([]byte(raw), &item); err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 		return nil
 	}
 
@@ -541,7 +542,7 @@ func (r *deviceRepositoryImpl) UpdateOnlineStatus(ctx context.Context, userUUID,
 	value, err := json.Marshal(item)
 	if err != nil {
 		// 重新序列化失败说明缓存载荷异常，同样按降级处理即可。
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 		return nil
 	}
 

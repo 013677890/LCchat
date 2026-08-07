@@ -9,6 +9,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/cachex"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -46,8 +47,9 @@ func (r *blacklistRepositoryImpl) AddBlacklist(ctx context.Context, userUUID, ta
 			Select("status").
 			Where("user_uuid = ? AND peer_uuid = ?", userUUID, targetUUID).
 			First(&existing).Error; err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
+			dbErr := repoerr.WrapDBError(err)
+			if !errors.Is(dbErr, repoerr.ErrRecordNotFound) {
+				return dbErr
 			}
 		} else if existing.Status == 0 || existing.Status == 1 || existing.Status == 2 {
 			// 曾经是好友或删除好友，都按“拉黑前为好友”处理，便于取消拉黑时恢复关系。
@@ -77,7 +79,7 @@ func (r *blacklistRepositoryImpl) AddBlacklist(ctx context.Context, userUUID, ta
 	})
 
 	if err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	// 黑名单 ZSet 与好友 Hash 都只维护当前用户视角，因此这里只更新单侧缓存。
@@ -93,7 +95,7 @@ func (r *blacklistRepositoryImpl) AddBlacklist(ctx context.Context, userUUID, ta
 // 这样可以避免“非好友取消拉黑后错误变成好友”。
 func (r *blacklistRepositoryImpl) RemoveBlacklist(ctx context.Context, userUUID, targetUUID string) error {
 	if userUUID == "" || targetUUID == "" {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 
 	var relation model.UserRelation
@@ -104,10 +106,10 @@ func (r *blacklistRepositoryImpl) RemoveBlacklist(ctx context.Context, userUUID,
 		Select("status").
 		Where("user_uuid = ? AND peer_uuid = ? AND status IN ?", userUUID, targetUUID, []int{1, 3}).
 		First(&relation).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrRecordNotFound
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
+			return repoerr.ErrRecordNotFound
 		}
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	now := time.Now()
@@ -134,10 +136,10 @@ func (r *blacklistRepositoryImpl) RemoveBlacklist(ctx context.Context, userUUID,
 		Where("user_uuid = ? AND peer_uuid = ?", userUUID, targetUUID).
 		Updates(updates)
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 
 	// 先删黑名单缓存，再根据恢复结果选择补回好友缓存或继续维持“非好友”状态。
@@ -208,7 +210,7 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
-				LogRedisError(ctx, err)
+				repoerr.LogRedisError(ctx, err)
 			}
 		}
 	}
@@ -221,7 +223,7 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 
 	// 缓存 miss 时先走数据库 count，再做分页查询，最后异步重建整份 ZSet。
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	var relations []*model.UserRelation
@@ -230,7 +232,7 @@ func (r *blacklistRepositoryImpl) GetBlacklistList(ctx context.Context, userUUID
 		Offset(offset).
 		Limit(pageSize).
 		Find(&relations).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	// 列表缓存必须从全量数据重建，避免把当前分页误写成完整黑名单集合。
@@ -266,14 +268,14 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 				if cachex.IsRedisWrongType(scoreCmd.Err()) {
 					_ = r.redisClient.Del(ctx, cacheKey).Err()
 				} else {
-					LogRedisError(ctx, scoreCmd.Err())
+					repoerr.LogRedisError(ctx, scoreCmd.Err())
 				}
 			}
 		} else if err != goredis.Nil {
 			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
-				LogRedisError(ctx, err)
+				repoerr.LogRedisError(ctx, err)
 			}
 		}
 	}
@@ -285,7 +287,7 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND peer_uuid = ? AND status IN ? AND deleted_at IS NULL", userUUID, targetUUID, []int{1, 3}).
 		Count(&count).Error; err != nil {
-		return false, WrapDBError(err)
+		return false, repoerr.WrapDBError(err)
 	}
 
 	r.rebuildBlacklistCacheFromDBAsync(ctx, userUUID)
@@ -294,16 +296,16 @@ func (r *blacklistRepositoryImpl) IsBlocked(ctx context.Context, userUUID, targe
 
 // GetBlacklistRelation 查询一条有效黑名单关系。
 //
-// 当关系不存在时返回 ErrRecordNotFound，调用方可据此映射为“不在黑名单中”的业务错误。
+// 当关系不存在时返回 repoerr.ErrRecordNotFound，调用方可据此映射为“不在黑名单中”的业务错误。
 func (r *blacklistRepositoryImpl) GetBlacklistRelation(ctx context.Context, userUUID, targetUUID string) (*model.UserRelation, error) {
 	var relation model.UserRelation
 	if err := r.db.WithContext(ctx).
 		Where("user_uuid = ? AND peer_uuid = ? AND status IN ? AND deleted_at IS NULL", userUUID, targetUUID, []int{1, 3}).
 		First(&relation).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrRecordNotFound
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
+			return nil, repoerr.ErrRecordNotFound
 		}
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &relation, nil
 }
@@ -375,7 +377,7 @@ func (r *blacklistRepositoryImpl) rebuildBlacklistCacheAsync(ctx context.Context
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisPipelineTimeout)
 }
@@ -406,7 +408,7 @@ func (r *blacklistRepositoryImpl) updateBlacklistCacheAsync(ctx context.Context,
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }
@@ -434,7 +436,7 @@ func (r *blacklistRepositoryImpl) removeBlacklistCacheAsync(ctx context.Context,
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }
@@ -464,7 +466,7 @@ func (r *blacklistRepositoryImpl) removeFriendCacheAsync(ctx context.Context, us
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }
@@ -494,7 +496,7 @@ func (r *blacklistRepositoryImpl) restoreFriendCacheAsync(ctx context.Context, u
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }

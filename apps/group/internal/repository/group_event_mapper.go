@@ -7,6 +7,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	idutil "github.com/013677890/LCchat-Backend/pkg/util"
 	"gorm.io/gorm"
 )
@@ -210,7 +211,7 @@ func (r *groupRepositoryImpl) insertJoinRequestCanceledEvent(tx *gorm.DB, groupU
 //  5. event_id 在这里统一生成，避免调用方漏填导致幂等链路失效。
 func (r *groupRepositoryImpl) insertGroupCacheEvent(tx *gorm.DB, payload groupevent.GroupCacheEventPayload) error {
 	if tx == nil || payload.GroupUUID == "" || payload.Action == "" {
-		return fmt.Errorf("%w: invalid group cache event payload", ErrDatabase)
+		return fmt.Errorf("%w: invalid group cache event payload", repoerr.ErrDatabase)
 	}
 	projectionVersion, err := r.nextGroupCacheProjectionVersion(tx, payload.GroupUUID)
 	if err != nil {
@@ -232,7 +233,7 @@ func (r *groupRepositoryImpl) insertGroupCacheEvent(tx *gorm.DB, payload groupev
 		return fmt.Errorf("编码群缓存事件失败: %w", err)
 	}
 	if err := outbox.InsertEvent(tx, groupevent.EventTypeGroupCache, payload.GroupUUID, encoded); err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 	return nil
 }
@@ -246,27 +247,27 @@ func (r *groupRepositoryImpl) insertGroupCacheEvent(tx *gorm.DB, payload groupev
 // 被 Redis 的“<= 已投影版本”规则误判成重复。
 func (r *groupRepositoryImpl) nextGroupCacheProjectionVersion(tx *gorm.DB, groupUUID string) (int64, error) {
 	if tx == nil || groupUUID == "" {
-		return 0, fmt.Errorf("%w: invalid group cache projection version request", ErrDatabase)
+		return 0, fmt.Errorf("%w: invalid group cache projection version request", repoerr.ErrDatabase)
 	}
 	result := tx.Model(&model.GroupInfo{}).
 		Where("uuid = ?", groupUUID).
 		UpdateColumn("cache_version", gorm.Expr("cache_version + 1"))
 	if result.Error != nil {
-		return 0, WrapDBError(result.Error)
+		return 0, repoerr.WrapDBError(result.Error)
 	}
 	if result.RowsAffected != 1 {
-		return 0, fmt.Errorf("%w: group %s not found while allocating cache version", ErrDatabase, groupUUID)
+		return 0, fmt.Errorf("%w: group %s not found while allocating cache version", repoerr.ErrDatabase, groupUUID)
 	}
 	var projectionVersion int64
 	if err := tx.Model(&model.GroupInfo{}).
 		Select("cache_version").
 		Where("uuid = ?", groupUUID).
 		Scan(&projectionVersion).Error; err != nil {
-		return 0, WrapDBError(err)
+		return 0, repoerr.WrapDBError(err)
 	}
 
 	if projectionVersion <= 0 {
-		return 0, fmt.Errorf("%w: allocated invalid cache version %d", ErrDatabase, projectionVersion)
+		return 0, fmt.Errorf("%w: allocated invalid cache version %d", repoerr.ErrDatabase, projectionVersion)
 	}
 	return projectionVersion, nil
 }
@@ -382,7 +383,7 @@ func (r *groupRepositoryImpl) loadActiveMemberUUIDs(ctx context.Context, tx *gor
 		Select("user_uuid").
 		Where("group_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, memberStatusNormal).
 		Find(&members).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	userUUIDs := make([]string, 0, len(members))
 	for _, member := range members {

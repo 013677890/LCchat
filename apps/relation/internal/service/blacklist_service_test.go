@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/013677890/LCchat-Backend/apps/relation/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/relation/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -80,7 +80,7 @@ func TestRelationBlacklistServiceRemoveBlacklist(t *testing.T) {
 		{name: "param_error", ctx: withRelationUserUUID("u1"), req: nil, wantErr: consts.CodeParamError},
 		{name: "not_in_blacklist", ctx: withRelationUserUUID("u1"), req: &pb.RemoveBlacklistRequest{UserUuid: "u2"}, wantErr: consts.CodeNotInBlacklist},
 		{name: "is_blocked_error", ctx: withRelationUserUUID("u1"), req: &pb.RemoveBlacklistRequest{UserUuid: "u2"}, isBlockedErr: repoErr, wantErr: consts.CodeInternalError},
-		{name: "remove_not_found", ctx: withRelationUserUUID("u1"), req: &pb.RemoveBlacklistRequest{UserUuid: "u2"}, isBlocked: true, removeErr: repository.ErrRecordNotFound, wantErr: consts.CodeNotInBlacklist},
+		{name: "remove_not_found", ctx: withRelationUserUUID("u1"), req: &pb.RemoveBlacklistRequest{UserUuid: "u2"}, isBlocked: true, removeErr: repoerr.ErrRecordNotFound, wantErr: consts.CodeNotInBlacklist},
 		{name: "remove_error", ctx: withRelationUserUUID("u1"), req: &pb.RemoveBlacklistRequest{UserUuid: "u2"}, isBlocked: true, removeErr: repoErr, wantErr: consts.CodeInternalError},
 		{name: "success", ctx: withRelationUserUUID("u1"), req: &pb.RemoveBlacklistRequest{UserUuid: "u2"}, isBlocked: true},
 	}

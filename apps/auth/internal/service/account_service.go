@@ -12,6 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -55,7 +56,7 @@ func (s *accountServiceImpl) ChangePassword(ctx context.Context, req *authpb.Cha
 	// 读取账号当前密码哈希，后续旧密码校验和新密码去重都依赖这份快照。
 	user, err := s.authRepo.GetByUserUUID(ctx, userUUID)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return apperr.New(consts.CodeUserNotFound)
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
@@ -114,7 +115,7 @@ func (s *accountServiceImpl) ChangeEmail(ctx context.Context, req *authpb.Change
 	// 换绑验证码按 type=4 存储；这里明确区分“验证码过期”和“验证码不匹配”。
 	isValid, err := s.authRepo.VerifyVerifyCode(ctx, newEmail, req.VerifyCode, 4)
 	if err != nil {
-		if errors.Is(err, repository.ErrRedisNil) {
+		if errors.Is(err, repoerr.ErrRedisNil) {
 			return nil, apperr.New(consts.CodeVerifyCodeExpire)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "校验验证码失败")
@@ -126,7 +127,7 @@ func (s *accountServiceImpl) ChangeEmail(ctx context.Context, req *authpb.Change
 
 	// 在真正更新前再次确认账号存在，避免使用过期登录态写入已删除账号。
 	if _, err := s.authRepo.GetByUserUUID(ctx, userUUID); err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeUserNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")
@@ -134,7 +135,7 @@ func (s *accountServiceImpl) ChangeEmail(ctx context.Context, req *authpb.Change
 
 	// 数据库唯一索引是邮箱占用的最终裁决点；并发换绑冲突按业务冲突返回。
 	if err := s.authRepo.UpdateEmail(ctx, userUUID, newEmail); err != nil {
-		if errors.Is(err, repository.ErrDuplicateKey) {
+		if errors.Is(err, repoerr.ErrDuplicateKey) {
 			return nil, apperr.New(consts.CodeEmailAlreadyExist)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新邮箱失败")
@@ -179,7 +180,7 @@ func (s *accountServiceImpl) DeleteAccount(ctx context.Context, req *authpb.Dele
 	// 先取出账号快照，后续要依赖密码哈希做“本人确认”校验。
 	user, err := s.authRepo.GetByUserUUID(ctx, userUUID)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeUserNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "查询用户信息失败")

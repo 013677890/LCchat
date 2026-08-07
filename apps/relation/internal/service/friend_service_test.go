@@ -13,6 +13,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -168,7 +169,7 @@ func (f *fakeApplyRepoForService) Create(ctx context.Context, apply *model.Apply
 
 func (f *fakeApplyRepoForService) GetByID(ctx context.Context, id int64) (*model.ApplyRequest, error) {
 	if f.getByIDFn == nil {
-		return nil, repository.ErrRecordNotFound
+		return nil, repoerr.ErrRecordNotFound
 	}
 	return f.getByIDFn(ctx, id)
 }

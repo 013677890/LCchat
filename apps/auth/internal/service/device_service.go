@@ -12,6 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/presence"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
@@ -207,7 +208,7 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *authpb.KickDevi
 
 	session, err := s.deviceRepo.GetByDeviceID(ctx, userUUID, req.DeviceId)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return apperr.New(consts.CodeDeviceNotFound)
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：查询设备会话失败")
@@ -222,7 +223,7 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *authpb.KickDevi
 	}
 	if session.Status == model.DeviceStatusOnline || session.Status == model.DeviceStatusOffline {
 		if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, model.DeviceStatusKicked); err != nil {
-			if errors.Is(err, repository.ErrRecordNotFound) {
+			if errors.Is(err, repoerr.ErrRecordNotFound) {
 				return apperr.New(consts.CodeDeviceNotFound)
 			}
 			return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：更新设备状态失败")
@@ -322,7 +323,7 @@ func (s *deviceServiceImpl) UpdateDeviceStatus(ctx context.Context, req *authpb.
 		return apperr.New(consts.CodeParamError)
 	}
 	if err := s.deviceRepo.UpdateOnlineStatus(ctx, req.UserUuid, req.DeviceId, targetStatus); err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "更新设备状态失败")

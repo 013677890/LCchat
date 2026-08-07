@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/013677890/LCchat-Backend/pkg/async"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 )
 
 // initGroupUUIDBloom 在仓储构造阶段初始化 group_uuid Bloom Filter。
@@ -17,7 +18,7 @@ func (r *groupRepositoryImpl) initGroupUUIDBloom(ctx context.Context) {
 	initCtx, cancel := context.WithTimeout(ctx, async.AsyncRedisTimeout)
 	defer cancel()
 	if err := groupUUIDBloomFilter.Ensure(initCtx, r.redisClient); err != nil {
-		LogRedisError(initCtx, err)
+		repoerr.LogRedisError(initCtx, err)
 	}
 }
 
@@ -31,7 +32,7 @@ func (r *groupRepositoryImpl) groupUUIDMayExist(ctx context.Context, groupUUID s
 	}
 	exists, usable, err := groupUUIDBloomFilter.Exists(ctx, r.redisClient, groupUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	}
 	if !usable {
 		return true
@@ -48,7 +49,7 @@ func (r *groupRepositoryImpl) filterGroupUUIDsByBloom(ctx context.Context, group
 	}
 	exists, usable, err := groupUUIDBloomFilter.MExists(ctx, r.redisClient, groupUUIDs)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	}
 	if !usable || len(exists) != len(groupUUIDs) {
 		return groupUUIDs
@@ -78,7 +79,7 @@ func (r *groupRepositoryImpl) ensureGroupUUIDInBloom(ctx context.Context, groupU
 // 这些场景不是创建事实的入口，补写失败只记录日志，不影响当前读结果或投影主流程。
 func (r *groupRepositoryImpl) addGroupUUIDToBloomBestEffort(ctx context.Context, groupUUID string) {
 	if err := r.ensureGroupUUIDInBloom(ctx, groupUUID); err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	}
 }
 
@@ -107,7 +108,7 @@ func (r *groupRepositoryImpl) addGroupUUIDsToBloomAsync(ctx context.Context, gro
 	}
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		if err := groupUUIDBloomFilter.MAdd(runCtx, r.redisClient, items); err != nil {
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }

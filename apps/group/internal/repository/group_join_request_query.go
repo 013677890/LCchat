@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/013677890/LCchat-Backend/model"
-	"gorm.io/gorm"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 )
 
 // loadLatestJoinRequestByApplicant 读取当前用户在指定群的最新申请记录。
@@ -22,10 +22,10 @@ func (r *groupRepositoryImpl) loadLatestJoinRequestByApplicant(ctx context.Conte
 		Order("id DESC").
 		Take(&joinRequest).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &joinRequest, nil
 }
@@ -41,10 +41,10 @@ func (r *groupRepositoryImpl) GetJoinRequestApplicant(ctx context.Context, group
 		Where("id = ? AND group_uuid = ? AND deleted_at IS NULL", applyID, groupUUID).
 		Take(&joinRequest).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			return "", nil
 		}
-		return "", WrapDBError(err)
+		return "", repoerr.WrapDBError(err)
 	}
 	return joinRequest.ApplicantUuid, nil
 }
@@ -68,7 +68,7 @@ func (r *groupRepositoryImpl) ListMyJoinGroupApplications(ctx context.Context, a
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 	if total == 0 {
 		return []*model.GroupJoinRequest{}, 0, nil
@@ -79,7 +79,7 @@ func (r *groupRepositoryImpl) ListMyJoinGroupApplications(ctx context.Context, a
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&items).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	return items, total, nil
@@ -117,7 +117,7 @@ func (r *groupRepositoryImpl) ListReviewedJoinRequests(ctx context.Context, grou
 		Where("group_uuid = ? AND status IN ? AND deleted_at IS NULL", groupUUID, statuses)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 	if total == 0 {
 		return []*model.GroupJoinRequest{}, 0, nil
@@ -128,7 +128,7 @@ func (r *groupRepositoryImpl) ListReviewedJoinRequests(ctx context.Context, grou
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&items).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	return items, total, nil
@@ -169,7 +169,7 @@ func (r *groupRepositoryImpl) GetGroupsByUUIDs(ctx context.Context, groupUUIDs [
 	if err := r.db.WithContext(ctx).
 		Where("uuid IN ? AND deleted_at IS NULL", queryUUIDs).
 		Find(&groups).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 
 	foundGroupUUIDs := make([]string, 0, len(groups))

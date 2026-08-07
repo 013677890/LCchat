@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -51,7 +53,7 @@ func NewRepository(db *gorm.DB, redisClient *redis.Client) Repository {
 // 客户端收到消息后按 seq 排序展示，并利用 seq gap 检测消息丢失。
 func (r *repositoryImpl) AllocSeq(ctx context.Context, convId string) (int64, error) {
 	if r.redis == nil {
-		return 0, fmt.Errorf("AllocSeq: redis client is nil")
+		return 0, fmt.Errorf("%w: AllocSeq: redis client is nil", repoerr.ErrRedis)
 	}
 	key := rediskey.MsgSeqKey(convId)
 
@@ -59,7 +61,7 @@ func (r *repositoryImpl) AllocSeq(ctx context.Context, convId string) (int64, er
 	// 如果返回 -1，说明 key 缺失，必须先用 DB 最大已落库 seq 作为恢复基准。
 	seq, err := r.redis.Eval(ctx, allocExistingSeqScript, []string{key}).Int64()
 	if err != nil {
-		return 0, fmt.Errorf("AllocSeq: redis allocate %s failed: %w", key, err)
+		return 0, fmt.Errorf("AllocSeq: redis allocate %s failed: %w", key, repoerr.WrapRedisError(err))
 	}
 	if seq >= 0 {
 		return seq, nil
@@ -73,7 +75,7 @@ func (r *repositoryImpl) AllocSeq(ctx context.Context, convId string) (int64, er
 	}
 	seq, err = r.redis.Eval(ctx, recoverSeqScript, []string{key}, maxSeq).Int64()
 	if err != nil {
-		return 0, fmt.Errorf("AllocSeq: redis recover %s failed: %w", key, err)
+		return 0, fmt.Errorf("AllocSeq: redis recover %s failed: %w", key, repoerr.WrapRedisError(err))
 	}
 	return seq, nil
 }
@@ -81,7 +83,7 @@ func (r *repositoryImpl) AllocSeq(ctx context.Context, convId string) (int64, er
 // RepairSeq 将 Redis seq 计数器修复到不小于 DB 最大已落库 seq。
 func (r *repositoryImpl) RepairSeq(ctx context.Context, convId string) error {
 	if r.redis == nil {
-		return fmt.Errorf("RepairSeq: redis client is nil")
+		return fmt.Errorf("%w: RepairSeq: redis client is nil", repoerr.ErrRedis)
 	}
 	maxSeq, err := r.getDBMaxSeq(ctx, convId)
 	if err != nil {
@@ -90,7 +92,7 @@ func (r *repositoryImpl) RepairSeq(ctx context.Context, convId string) error {
 	key := rediskey.MsgSeqKey(convId)
 	// RepairSeq 只修复 Redis 上界，不直接 INCR，避免一次修复操作额外消耗 seq 造成更大的空洞。
 	if err := r.redis.Eval(ctx, repairSeqScript, []string{key}, maxSeq).Err(); err != nil {
-		return fmt.Errorf("RepairSeq: redis repair %s failed: %w", key, err)
+		return fmt.Errorf("RepairSeq: redis repair %s failed: %w", key, repoerr.WrapRedisError(err))
 	}
 	return nil
 }
@@ -103,7 +105,7 @@ func (r *repositoryImpl) getDBMaxSeq(ctx context.Context, convId string) (int64,
 		Where("conv_id = ?", convId).
 		Select("COALESCE(MAX(seq), 0)").
 		Scan(&maxSeq).Error; err != nil {
-		return 0, err
+		return 0, repoerr.WrapDBError(err)
 	}
 	return maxSeq, nil
 }
@@ -188,7 +190,7 @@ func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, dev
 	ok, err := r.redis.SetNX(ctx, key, processingValue, time.Duration(idempotentLockTTLSec)*time.Second).Result()
 
 	if err != nil {
-		return nil, fmt.Errorf("TryAcquireIdempotent: redis SETNX failed: %w", err)
+		return nil, fmt.Errorf("TryAcquireIdempotent: redis SETNX failed: %w", repoerr.WrapRedisError(err))
 	}
 
 	if ok {
@@ -200,7 +202,7 @@ func (r *repositoryImpl) TryAcquireIdempotent(ctx context.Context, fromUuid, dev
 	val, err := r.redis.Get(ctx, key).Result()
 
 	if err != nil {
-		return nil, fmt.Errorf("TryAcquireIdempotent: redis GET failed: %w", err)
+		return nil, fmt.Errorf("TryAcquireIdempotent: redis GET failed: %w", repoerr.WrapRedisError(err))
 	}
 
 	if isIdempotentProcessingValue(val) {
@@ -243,7 +245,7 @@ func (r *repositoryImpl) CompleteIdempotentResult(ctx context.Context, fromUuid,
 		string(data),
 		rediskey.MsgIdempotentTTL.Milliseconds(),
 	).Err(); err != nil {
-		return fmt.Errorf("CompleteIdempotentResult: redis CAS SET failed: %w", err)
+		return fmt.Errorf("CompleteIdempotentResult: redis CAS SET failed: %w", repoerr.WrapRedisError(err))
 	}
 	return nil
 }
@@ -255,7 +257,7 @@ func (r *repositoryImpl) ReleaseIdempotentProcessing(ctx context.Context, fromUu
 	}
 	key := rediskey.MsgIdempotentKey(fromUuid, deviceId, clientMsgId)
 	if err := r.redis.Eval(ctx, releaseIdempotentProcessingScript, []string{key}, idempotentProcessingValue(token)).Err(); err != nil {
-		return fmt.Errorf("ReleaseIdempotentProcessing: redis CAS DEL failed: %w", err)
+		return fmt.Errorf("ReleaseIdempotentProcessing: redis CAS DEL failed: %w", repoerr.WrapRedisError(err))
 	}
 	return nil
 }
@@ -277,7 +279,7 @@ func (r *repositoryImpl) SetIdempotentResult(ctx context.Context, fromUuid, devi
 
 	// SET (覆盖) + 新 TTL = 10 分钟
 	if err := r.redis.Set(ctx, key, string(data), rediskey.MsgIdempotentTTL).Err(); err != nil {
-		return fmt.Errorf("SetIdempotentResult: redis SET failed: %w", err)
+		return fmt.Errorf("SetIdempotentResult: redis SET failed: %w", repoerr.WrapRedisError(err))
 	}
 	return nil
 }
@@ -307,7 +309,7 @@ func (r *repositoryImpl) Create(ctx context.Context, msg *model.Message) error {
 		if duplicateErr := mapDuplicateMessageError(err); duplicateErr != nil {
 			return duplicateErr
 		}
-		return fmt.Errorf("Create: db insert failed: %w", err)
+		return fmt.Errorf("Create: db insert failed: %w", repoerr.WrapDBError(err))
 	}
 	return nil
 }
@@ -322,10 +324,10 @@ func (r *repositoryImpl) CreateWithOutbox(ctx context.Context, msg *model.Messag
 			if duplicateErr := mapDuplicateMessageError(err); duplicateErr != nil {
 				return duplicateErr
 			}
-			return fmt.Errorf("CreateWithOutbox: db insert failed: %w", err)
+			return fmt.Errorf("CreateWithOutbox: db insert failed: %w", repoerr.WrapDBError(err))
 		}
 		if err := outbox.InsertEvent(tx, event.EventType, event.EntityID, event.Payload); err != nil {
-			return fmt.Errorf("CreateWithOutbox: outbox insert failed: %w", err)
+			return fmt.Errorf("CreateWithOutbox: outbox insert failed: %w", repoerr.WrapDBError(err))
 		}
 		return nil
 	})
@@ -345,10 +347,11 @@ func (r *repositoryImpl) GetByDuplicateKey(ctx context.Context, fromUuid, device
 		Where("from_uuid = ? AND device_id = ? AND client_msg_id = ?", fromUuid, deviceId, clientMsgId).
 		First(&msg).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		dbErr := repoerr.WrapDBError(err)
+		if errors.Is(dbErr, repoerr.ErrRecordNotFound) {
 			return nil, ErrMessageNotFound
 		}
-		return nil, fmt.Errorf("GetByDuplicateKey: db query failed: %w", err)
+		return nil, fmt.Errorf("GetByDuplicateKey: db query failed: %w", dbErr)
 	}
 	return &msg, nil
 }
@@ -392,7 +395,7 @@ func (r *repositoryImpl) GetBySeqRange(ctx context.Context, convId string, ancho
 	}
 
 	if err := query.Limit(limit).Find(&msgs).Error; err != nil {
-		return nil, fmt.Errorf("GetBySeqRange: db query failed: %w", err)
+		return nil, fmt.Errorf("GetBySeqRange: db query failed: %w", repoerr.WrapDBError(err))
 	}
 	return msgs, nil
 }
@@ -407,7 +410,7 @@ func (r *repositoryImpl) GetByIds(ctx context.Context, convId string, msgIds []s
 		Where("conv_id = ? AND msg_id IN ? AND status != 2", convId, msgIds).
 		Find(&msgs).Error
 	if err != nil {
-		return nil, fmt.Errorf("GetByIds: db query failed: %w", err)
+		return nil, fmt.Errorf("GetByIds: db query failed: %w", repoerr.WrapDBError(err))
 	}
 	return msgs, nil
 }
@@ -419,10 +422,11 @@ func (r *repositoryImpl) GetById(ctx context.Context, convId string, msgId strin
 		Where("conv_id = ? AND msg_id = ?", convId, msgId).
 		First(&msg).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		dbErr := repoerr.WrapDBError(err)
+		if errors.Is(dbErr, repoerr.ErrRecordNotFound) {
 			return nil, ErrMessageNotFound
 		}
-		return nil, fmt.Errorf("GetById: db query failed: %w", err)
+		return nil, fmt.Errorf("GetById: db query failed: %w", dbErr)
 	}
 	return &msg, nil
 }
@@ -467,7 +471,7 @@ func (r *repositoryImpl) UpdateStatusWithOutbox(ctx context.Context, convId stri
 			return err
 		}
 		if err := outbox.InsertEvent(tx, event.EventType, event.EntityID, event.Payload); err != nil {
-			return fmt.Errorf("UpdateStatusWithOutbox: outbox insert failed: %w", err)
+			return fmt.Errorf("UpdateStatusWithOutbox: outbox insert failed: %w", repoerr.WrapDBError(err))
 		}
 		return nil
 	})
@@ -482,7 +486,7 @@ func updateMessageStatus(db *gorm.DB, convId string, msgId string, status int8, 
 			"content": content,
 		})
 	if result.Error != nil {
-		return fmt.Errorf("UpdateStatus: db update failed: %w", result.Error)
+		return fmt.Errorf("UpdateStatus: db update failed: %w", repoerr.WrapDBError(result.Error))
 	}
 	if result.RowsAffected == 0 {
 		return ErrMessageNotFound
@@ -494,7 +498,7 @@ func updateMessageStatus(db *gorm.DB, convId string, msgId string, status int8, 
 
 // mapDuplicateMessageError 将唯一索引冲突映射为更细粒度的领域错误。
 func mapDuplicateMessageError(err error) error {
-	if !isDuplicateKeyError(err) {
+	if !errors.Is(repoerr.WrapDBError(err), repoerr.ErrDuplicateKey) {
 		return nil
 	}
 	errMsg := err.Error()
@@ -508,20 +512,6 @@ func mapDuplicateMessageError(err error) error {
 	default:
 		return ErrDuplicateMessage
 	}
-}
-
-// isDuplicateKeyError 判断 MySQL/SQLite 错误是否为唯一索引冲突。
-//
-// MySQL Error 1062: Duplicate entry 'xxx' for key 'uidx_sender_client'
-// SQLite 测试会返回 UNIQUE constraint failed，需要兼容单元测试环境。
-func isDuplicateKeyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := err.Error()
-	return strings.Contains(errMsg, "1062") ||
-		strings.Contains(errMsg, "Duplicate entry") ||
-		strings.Contains(errMsg, "UNIQUE constraint failed")
 }
 
 func hasAll(s string, subs ...string) bool {

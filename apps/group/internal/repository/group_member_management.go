@@ -3,10 +3,12 @@ package repository
 import (
 	"context"
 	"errors"
-	"github.com/013677890/LCchat-Backend/model"
-	"gorm.io/gorm"
 	"strings"
 	"time"
+
+	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
+	"gorm.io/gorm"
 )
 
 const (
@@ -48,7 +50,7 @@ func (r *groupRepositoryImpl) SearchGroupMembers(ctx context.Context, groupUUID,
 	}
 	var total int64
 	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 	if total == 0 {
 		return []*model.GroupMember{}, 0, nil
@@ -60,7 +62,7 @@ func (r *groupRepositoryImpl) SearchGroupMembers(ctx context.Context, groupUUID,
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&members).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	return members, total, nil
@@ -85,7 +87,7 @@ func (r *groupRepositoryImpl) SearchGroups(ctx context.Context, keyword string, 
 		Where("uuid = ? OR name LIKE ?", keyword, likeKeyword)
 	var total int64
 	if err := baseQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 	if total == 0 {
 		return []*model.GroupInfo{}, 0, nil
@@ -96,7 +98,7 @@ func (r *groupRepositoryImpl) SearchGroups(ctx context.Context, keyword string, 
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&groups).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	return groups, total, nil
@@ -118,7 +120,7 @@ func (r *groupRepositoryImpl) UpdateMyGroupNickname(ctx context.Context, groupUU
 		}
 		member, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, userUUID)
 		if err != nil {
-			if errors.Is(err, ErrRecordNotFound) {
+			if errors.Is(err, repoerr.ErrRecordNotFound) {
 				return ErrNoPermission
 			}
 			return err
@@ -134,13 +136,13 @@ func (r *groupRepositoryImpl) UpdateMyGroupNickname(ctx context.Context, groupUU
 				"remark":     nickname,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Update("updated_at", updatedAt).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		updatedMember := *member
 		updatedMember.Remark = nickname
@@ -179,7 +181,7 @@ func (r *groupRepositoryImpl) UpdateGroupMemberNickname(ctx context.Context, gro
 		}
 		target, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, targetUserUUID)
 		if err != nil {
-			if errors.Is(err, ErrRecordNotFound) {
+			if errors.Is(err, repoerr.ErrRecordNotFound) {
 				return ErrGroupMemberNotFound
 			}
 			return err
@@ -198,13 +200,13 @@ func (r *groupRepositoryImpl) UpdateGroupMemberNickname(ctx context.Context, gro
 				"remark":     nickname,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Update("updated_at", updatedAt).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		updatedMember := *target
 		updatedMember.Remark = nickname
@@ -240,7 +242,7 @@ func (r *groupRepositoryImpl) MuteGroupMember(ctx context.Context, groupUUID, op
 		}
 		target, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, targetUserUUID)
 		if err != nil {
-			if errors.Is(err, ErrRecordNotFound) {
+			if errors.Is(err, repoerr.ErrRecordNotFound) {
 				return ErrGroupMemberNotFound
 			}
 			return err
@@ -259,13 +261,13 @@ func (r *groupRepositoryImpl) MuteGroupMember(ctx context.Context, groupUUID, op
 				"mute_until": muteUntil,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Update("updated_at", updatedAt).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		updatedMember := *target
 		updatedMember.MuteUntil = cloneTimePtr(muteUntil)
@@ -307,7 +309,7 @@ func (r *groupRepositoryImpl) UpdateGroupMuteSetting(ctx context.Context, groupU
 				"mute_all":   muteAll,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		group.MuteAll = muteAll
 		group.UpdatedAt = updatedAt
@@ -372,7 +374,7 @@ func (r *groupRepositoryImpl) GetJoinRequestPendingCount(ctx context.Context, gr
 		Where("group_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, joinRequestStatusPending).
 		Count(&count).Error
 	if err != nil {
-		return 0, WrapDBError(err)
+		return 0, repoerr.WrapDBError(err)
 	}
 	return count, nil
 }
@@ -385,10 +387,10 @@ func (r *groupRepositoryImpl) ensureActiveMemberRole(ctx context.Context, groupU
 		Where("group_uuid = ? AND user_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, userUUID, memberStatusNormal).
 		Take(&member).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			return nil, ErrNoPermission
 		}
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	if member.Role < minRole {
 		return nil, ErrNoPermission
@@ -400,23 +402,23 @@ func (r *groupRepositoryImpl) ensureActiveMemberRole(ctx context.Context, groupU
 func (r *groupRepositoryImpl) loadReadableGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error) {
 	groupInfo, cacheHit, err := r.getGroupInfoFromCache(ctx, groupUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	} else if cacheHit {
 		if groupInfo == nil {
-			return nil, ErrRecordNotFound
+			return nil, repoerr.ErrRecordNotFound
 		}
 		if groupInfo.Status == groupStatusDismissed {
 			return nil, ErrGroupDismissed
 		}
 		if groupInfo.Status != groupStatusNormal {
-			return nil, ErrRecordNotFound
+			return nil, repoerr.ErrRecordNotFound
 		}
 		return groupInfo, nil
 	}
 
 	// 发送权限检查是高频链路，缓存 miss 后先用 Bloom 拦截明显不存在的 group_uuid。
 	if !r.groupUUIDMayExist(ctx, groupUUID) {
-		return nil, ErrRecordNotFound
+		return nil, repoerr.ErrRecordNotFound
 	}
 	var group model.GroupInfo
 	err = r.db.WithContext(ctx).
@@ -425,14 +427,14 @@ func (r *groupRepositoryImpl) loadReadableGroupInfo(ctx context.Context, groupUU
 		Take(&group).Error
 
 	if err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	r.addGroupUUIDToBloomBestEffort(ctx, groupUUID)
 	if group.Status == groupStatusDismissed {
 		return nil, ErrGroupDismissed
 	}
 	if group.Status != groupStatusNormal {
-		return nil, ErrRecordNotFound
+		return nil, repoerr.ErrRecordNotFound
 	}
 	return &group, nil
 }
@@ -441,7 +443,7 @@ func (r *groupRepositoryImpl) loadReadableGroupInfo(ctx context.Context, groupUU
 func (r *groupRepositoryImpl) loadActiveMemberForRead(ctx context.Context, groupUUID, userUUID string) (*model.GroupMember, error) {
 	members, cacheHit, err := r.getGroupMembersFromCache(ctx, groupUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	} else if cacheHit {
 		for _, member := range members {
 			if member != nil && member.UserUuid == userUUID {
@@ -458,10 +460,10 @@ func (r *groupRepositoryImpl) loadActiveMemberForRead(ctx context.Context, group
 		Take(&member).Error
 
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 
 	return &member, nil

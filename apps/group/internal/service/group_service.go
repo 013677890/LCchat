@@ -3,15 +3,17 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
+	"time"
+
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	pb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
-	"strings"
-	"time"
 )
 
 // groupServiceImpl 是 group-service 业务层实现。
@@ -21,7 +23,7 @@ import (
 //  2. 组装最小业务实体并调用 repository 落库；
 //  3. 把仓储层语义错误映射为稳定业务错误码。
 type groupServiceImpl struct {
-	groupRepo          repository.IGroupRepository
+	groupRepo         repository.IGroupRepository
 	realtimePublisher realtimepush.Publisher
 }
 
@@ -31,7 +33,7 @@ const defaultGroupAvatarURL = "https://cube.elemecdn.com/0/88/03b0d39583f4820676
 // NewGroupService 创建 group 服务实例。
 func NewGroupService(groupRepo repository.IGroupRepository, publishers ...realtimepush.Publisher) IGroupService {
 	return &groupServiceImpl{
-		groupRepo:          groupRepo,
+		groupRepo:         groupRepo,
 		realtimePublisher: selectGroupRealtimePublisher(publishers),
 	}
 }
@@ -130,7 +132,7 @@ func (s *groupServiceImpl) GetGroupInfo(ctx context.Context, req *pb.GetGroupInf
 	}
 	groupInfo, err := s.groupRepo.GetGroupInfo(ctx, groupUUID)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeGroupNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取群资料失败")
@@ -299,7 +301,7 @@ func (s *groupServiceImpl) GetMemberList(ctx context.Context, req *pb.GetMemberL
 	}
 	members, err := s.groupRepo.GetGroupMembers(ctx, groupUUID)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeGroupNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取群成员列表失败")
@@ -348,7 +350,7 @@ func (s *groupServiceImpl) GetGroupMemberIds(ctx context.Context, req *pb.GetGro
 	}
 	members, err := s.groupRepo.GetGroupMembers(ctx, groupUUID)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeGroupNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取群成员 ID 列表失败")
@@ -373,7 +375,7 @@ func (s *groupServiceImpl) CheckGroupMember(ctx context.Context, req *pb.CheckGr
 		if errors.Is(err, repository.ErrGroupDismissed) {
 			return nil, apperr.New(consts.CodeGroupAlreadyDismiss)
 		}
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeGroupNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "检查群成员关系失败")
@@ -481,7 +483,7 @@ func mapGroupWriteError(err error, fallbackMessage string) error {
 	if errors.Is(err, repository.ErrGroupDismissed) {
 		return apperr.New(consts.CodeGroupAlreadyDismiss)
 	}
-	if errors.Is(err, repository.ErrRecordNotFound) {
+	if errors.Is(err, repoerr.ErrRecordNotFound) {
 		return apperr.New(consts.CodeGroupNotFound)
 	}
 	if errors.Is(err, repository.ErrNoPermission) {

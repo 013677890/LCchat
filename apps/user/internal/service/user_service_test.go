@@ -14,6 +14,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/stretchr/testify/assert"
@@ -74,7 +75,7 @@ func (f *fakeUserSvcRepo) UpdateAvatarWithDisplayEvent(ctx context.Context, user
 
 func (f *fakeUserSvcRepo) GetQRCodeTokenByUserUUID(ctx context.Context, userUUID string) (string, time.Time, error) {
 	if f.getQRCodeByUserUUIDFn == nil {
-		return "", time.Time{}, repository.ErrRedisNil
+		return "", time.Time{}, repoerr.ErrRedisNil
 	}
 	return f.getQRCodeByUserUUIDFn(ctx, userUUID)
 }
@@ -88,7 +89,7 @@ func (f *fakeUserSvcRepo) SaveQRCode(ctx context.Context, userUUID, token string
 
 func (f *fakeUserSvcRepo) GetUUIDByQRCodeToken(ctx context.Context, token string) (string, error) {
 	if f.getUUIDByQRCodeTokenFn == nil {
-		return "", repository.ErrRedisNil
+		return "", repoerr.ErrRedisNil
 	}
 	return f.getUUIDByQRCodeTokenFn(ctx, token)
 }
@@ -247,7 +248,7 @@ func TestUserServiceQRCodeDeleteAndBatch(t *testing.T) {
 	t.Run("get_qrcode_save_error", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{
 			getQRCodeByUserUUIDFn: func(_ context.Context, _ string) (string, time.Time, error) {
-				return "", time.Time{}, repository.ErrRedisNil
+				return "", time.Time{}, repoerr.ErrRedisNil
 			},
 			saveQRCodeFn: func(_ context.Context, _, _ string) error {
 				return errors.New("save failed")
@@ -266,7 +267,7 @@ func TestUserServiceQRCodeDeleteAndBatch(t *testing.T) {
 
 		svcExpired := NewProfileUserService(&fakeUserSvcRepo{
 			getUUIDByQRCodeTokenFn: func(_ context.Context, _ string) (string, error) {
-				return "", repository.ErrRedisNil
+				return "", repoerr.ErrRedisNil
 			},
 		})
 		resp2, err2 := svcExpired.ParseQRCode(context.Background(), &pb.ParseQRCodeRequest{Token: "tk1"})

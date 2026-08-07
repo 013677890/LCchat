@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -140,11 +141,11 @@ func TestUserRepositoryQRCodeRequiresRedis(t *testing.T) {
 	repo := newUserRepositoryForTest(t)
 	ctx := context.Background()
 
-	require.ErrorIs(t, repo.SaveQRCode(ctx, "u1", "token1"), ErrRedis)
+	require.ErrorIs(t, repo.SaveQRCode(ctx, "u1", "token1"), repoerr.ErrRedis)
 
 	_, err := repo.GetUUIDByQRCodeToken(ctx, "token1")
-	require.True(t, errors.Is(err, ErrRedis))
+	require.True(t, errors.Is(err, repoerr.ErrRedis))
 
 	_, _, err = repo.GetQRCodeTokenByUserUUID(ctx, "u1")
-	require.True(t, errors.Is(err, ErrRedis))
+	require.True(t, errors.Is(err, repoerr.ErrRedis))
 }

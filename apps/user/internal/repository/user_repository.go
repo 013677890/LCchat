@@ -15,6 +15,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/013677890/LCchat-Backend/pkg/redisbloom"
 	"github.com/013677890/LCchat-Backend/pkg/redisretry"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 
 	"github.com/redis/go-redis/v9"
@@ -58,7 +59,7 @@ func (r *userRepositoryImpl) initUserUUIDBloom(ctx context.Context) {
 	initCtx, cancel := context.WithTimeout(ctx, async.AsyncRedisTimeout)
 	defer cancel()
 	if err := userUUIDBloomFilter.Ensure(initCtx, r.redisClient); err != nil {
-		LogRedisError(initCtx, err)
+		repoerr.LogRedisError(initCtx, err)
 	}
 }
 
@@ -72,7 +73,7 @@ func (r *userRepositoryImpl) userUUIDMayExist(ctx context.Context, userUUID stri
 	}
 	exists, usable, err := userUUIDBloomFilter.Exists(ctx, r.redisClient, userUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	}
 	if !usable {
 		return true
@@ -89,7 +90,7 @@ func (r *userRepositoryImpl) filterUserUUIDsByBloom(ctx context.Context, userUUI
 	}
 	exists, usable, err := userUUIDBloomFilter.MExists(ctx, r.redisClient, userUUIDs)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	}
 	if !usable || len(exists) != len(userUUIDs) {
 		return userUUIDs
@@ -119,7 +120,7 @@ func (r *userRepositoryImpl) ensureUserUUIDInBloom(ctx context.Context, userUUID
 // 这里不是创建事实的关键路径，失败只记录日志，不能影响一次已经查到 DB 的正常读取。
 func (r *userRepositoryImpl) addUserUUIDToBloomBestEffort(ctx context.Context, userUUID string) {
 	if err := r.ensureUserUUIDInBloom(ctx, userUUID); err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	}
 }
 
@@ -148,7 +149,7 @@ func (r *userRepositoryImpl) addUserUUIDsToBloomAsync(ctx context.Context, userU
 	}
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		if err := userUUIDBloomFilter.MAdd(runCtx, r.redisClient, items); err != nil {
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }
@@ -179,7 +180,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 		}
 
 		if err != nil && err != redis.Nil {
-			LogRedisError(ctx, err) // 记录日志 降级处理
+			repoerr.LogRedisError(ctx, err) // 记录日志 降级处理
 		}
 	}
 
@@ -194,11 +195,11 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	err := r.db.WithContext(ctx).Where("user_uuid = ?", uuid).First(&profile).Error
 
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			r.setUserProfileEmptyCacheAsync(ctx, uuid)
 			return nil, nil
 		} else {
-			return nil, WrapDBError(err)
+			return nil, repoerr.WrapDBError(err)
 		}
 	}
 
@@ -219,7 +220,7 @@ func (r *userRepositoryImpl) GetByUUID(ctx context.Context, uuid string) (*model
 	if r.redisClient != nil {
 		async.RunSafe(ctx, func(runCtx context.Context) {
 			if err := r.redisClient.Set(runCtx, cacheKey, profileJSON, ttl).Err(); err != nil {
-				LogRedisError(runCtx, err)
+				repoerr.LogRedisError(runCtx, err)
 			}
 		}, async.AsyncRedisTimeout)
 	}
@@ -235,7 +236,7 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 	// Bloom 是读路径的前置存在性索引，必须先于 DB 写入成功。
 	// 若 Bloom 写入成功而 DB 失败，只会留下 false positive；反过来会造成真实用户被误判不存在。
 	if err := r.ensureUserUUIDInBloom(ctx, userUUID); err != nil {
-		return nil, WrapRedisError(err)
+		return nil, repoerr.WrapRedisError(err)
 	}
 
 	var profile model.UserProfile
@@ -245,8 +246,8 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return WrapDBError(err)
+		if !errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
+			return repoerr.WrapDBError(err)
 		}
 
 		now := time.Now()
@@ -264,12 +265,12 @@ func (r *userRepositoryImpl) CreateProfile(ctx context.Context, userUUID, nickna
 			Columns:   []clause.Column{{Name: "user_uuid"}},
 			DoNothing: true,
 		}).Create(&profile).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		// 冲突忽略后必须回查权威记录，避免返回被并发请求忽略的内存对象。
 		if err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		return nil
 	})
@@ -308,7 +309,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 		cachedValues, err := r.redisClient.MGet(ctx, keys...).Result()
 
 		if err != nil && err != redis.Nil {
-			LogRedisError(ctx, err)
+			repoerr.LogRedisError(ctx, err)
 
 			// Redis 异常时降级走 DB 全量查询
 			cachedValues = nil
@@ -368,7 +369,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 				Find(&dbProfiles).
 				Error
 			if err != nil {
-				return nil, WrapDBError(err)
+				return nil, repoerr.WrapDBError(err)
 			}
 		}
 
@@ -420,7 +421,7 @@ func (r *userRepositoryImpl) BatchGetByUUIDs(ctx context.Context, uuids []string
 				}
 
 				if _, err := pipe.Exec(runCtx); err != nil {
-					LogRedisError(runCtx, err)
+					repoerr.LogRedisError(runCtx, err)
 				}
 			}, async.AsyncRedisPipelineTimeout)
 		}
@@ -446,11 +447,11 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 		if err := tx.Model(&model.UserProfile{}).
 			Where("user_uuid = ?", userUUID).
 			Update("avatar", avatar).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		if err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		eventID := util.GenIDString()
@@ -466,7 +467,7 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 		}
 
 		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, profile.UserUuid, payload); err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		return nil
 	})
@@ -488,7 +489,7 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 		}
 
 		if err := tx.Where("user_uuid = ?", userUUID).First(&profile).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		eventID := util.GenIDString()
@@ -504,7 +505,7 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 		}
 
 		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, profile.UserUuid, payload); err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		return nil
 	})
@@ -528,7 +529,7 @@ func (r *userRepositoryImpl) Delete(ctx context.Context, userUUID string) error 
 		Delete(&model.UserProfile{}).
 		Error
 	if err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	r.invalidateUserCache(ctx, userUUID, "UserRepository.Delete")
@@ -546,7 +547,7 @@ func (r *userRepositoryImpl) setUserProfileEmptyCacheAsync(ctx context.Context, 
 	cacheKey := rediskey.UserProfileKey(userUUID)
 	async.RunSafe(ctx, func(runCtx context.Context) {
 		if err := r.redisClient.Set(runCtx, cacheKey, "{}", cachex.JitterTTL(rediskey.UserProfileEmptyTTL)).Err(); err != nil {
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }
@@ -577,7 +578,7 @@ func (r *userRepositoryImpl) applyBasicInfoUpdate(db *gorm.DB, userUUID string, 
 		Where("user_uuid = ?", userUUID).
 		Updates(updates).
 		Error; err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	return nil
@@ -603,21 +604,21 @@ func (r *userRepositoryImpl) invalidateUserCache(ctx context.Context, userUUID, 
 // 便于“扫码解析”和“复用已有二维码”两个场景共用一份 48 小时有效期数据。
 func (r *userRepositoryImpl) SaveQRCode(ctx context.Context, userUUID, token string) error {
 	if r.redisClient == nil {
-		return ErrRedis
+		return repoerr.ErrRedis
 	}
 
 	// 1. 保存 token -> userUUID 映射
 	tokenKey := rediskey.QRCodeTokenKey(token)
 	err := r.redisClient.Set(ctx, tokenKey, userUUID, rediskey.QRCodeTTL).Err()
 	if err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 
 	// 2. 保存 userUUID -> token 反向映射
 	userKey := rediskey.QRCodeUserKey(userUUID)
 	err = r.redisClient.Set(ctx, userKey, token, rediskey.QRCodeTTL).Err()
 	if err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 
 	return nil
@@ -625,19 +626,19 @@ func (r *userRepositoryImpl) SaveQRCode(ctx context.Context, userUUID, token str
 
 // GetUUIDByQRCodeToken 根据二维码 token 反查用户 UUID。
 //
-// 当 token 过期或不存在时返回 ErrRedisNil，供 service 层映射为二维码失效类业务反馈。
+// 当 token 过期或不存在时返回 repoerr.ErrRedisNil，供 service 层映射为二维码失效类业务反馈。
 func (r *userRepositoryImpl) GetUUIDByQRCodeToken(ctx context.Context, token string) (string, error) {
 	if r.redisClient == nil {
-		return "", ErrRedis
+		return "", repoerr.ErrRedis
 	}
 
 	tokenKey := rediskey.QRCodeTokenKey(token)
 	userUUID, err := r.redisClient.Get(ctx, tokenKey).Result()
 	if err != nil {
 		if err == redis.Nil {
-			return "", ErrRedisNil
+			return "", repoerr.ErrRedisNil
 		}
-		return "", WrapRedisError(err)
+		return "", repoerr.WrapRedisError(err)
 	}
 	return userUUID, nil
 }
@@ -647,7 +648,7 @@ func (r *userRepositoryImpl) GetUUIDByQRCodeToken(ctx context.Context, token str
 // 通过一次 pipeline 同时读取 token 和 TTL，避免 service 层再发第二次 Redis 请求拼接过期时间。
 func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userUUID string) (string, time.Time, error) {
 	if r.redisClient == nil {
-		return "", time.Time{}, ErrRedis
+		return "", time.Time{}, repoerr.ErrRedis
 	}
 
 	userKey := rediskey.QRCodeUserKey(userUUID)
@@ -656,7 +657,7 @@ func (r *userRepositoryImpl) GetQRCodeTokenByUserUUID(ctx context.Context, userU
 	pipe.TTL(ctx, userKey)
 	cmds, err := pipe.Exec(ctx)
 	if err != nil {
-		return "", time.Time{}, WrapRedisError(err)
+		return "", time.Time{}, repoerr.WrapRedisError(err)
 	}
 	token := cmds[0].(*redis.StringCmd).Val()
 	expireTime := time.Now().Add(cmds[1].(*redis.DurationCmd).Val().Round(time.Second))
@@ -681,7 +682,7 @@ func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, pag
 	// 先查询总数
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	// 查询用户列表
@@ -692,7 +693,7 @@ func (r *userRepositoryImpl) SearchUser(ctx context.Context, keyword string, pag
 		Limit(pageSize).
 		Find(&profiles).
 		Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 
 	return profiles, total, nil

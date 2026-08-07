@@ -13,6 +13,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	"github.com/013677890/LCchat-Backend/pkg/redisbloom"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	goredis "github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
@@ -73,7 +74,7 @@ func NewGroupRepository(db *gorm.DB, redisClient *goredis.Client) IGroupReposito
 func (r *groupRepositoryImpl) CreateGroup(ctx context.Context, group *model.GroupInfo, members []*model.GroupMember) error {
 	// repository 再做一次最小防御校验，避免 service 以外的调用方写入半成品聚合。
 	if r == nil || r.db == nil || group == nil || group.Uuid == "" || group.OwnerUuid == "" || len(members) == 0 {
-		return fmt.Errorf("%w: invalid create group payload", ErrDatabase)
+		return fmt.Errorf("%w: invalid create group payload", repoerr.ErrDatabase)
 	}
 	if group.MemberCnt <= 0 {
 		// member_cnt 以初始成员关系为准，避免上层漏填导致群人数与成员表不一致。
@@ -83,16 +84,16 @@ func (r *groupRepositoryImpl) CreateGroup(ctx context.Context, group *model.Grou
 	// 先写 Bloom 再写 DB，确保新群一旦提交成功，读路径不会被 Bloom false 拦截。
 	// 如果后续 DB 事务失败，Bloom 中多一个 group_uuid 只会导致未来多一次 DB 回源。
 	if err := r.ensureGroupUUIDInBloom(ctx, group.Uuid); err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 
 	// 群基础资料和初始成员必须同事务写入，否则会出现“有群无群主”的不可恢复状态。
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(group).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		if err := tx.Create(members).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		// GORM 通常会在 Create 后回填时间字段，这里再做一次兜底，
@@ -184,7 +185,7 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 					"updated_at":   now,
 					"deleted_at":   nil,
 				}).Error; err != nil {
-				return WrapDBError(err)
+				return repoerr.WrapDBError(err)
 			}
 			restored := *existing
 			restored.Status = 0
@@ -201,7 +202,7 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 			// OnConflict 兜底处理极端并发重复插入，最终 member_cnt 只按实际影响行数增加。
 			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(pendingCreates)
 			if result.Error != nil {
-				return WrapDBError(result.Error)
+				return repoerr.WrapDBError(result.Error)
 			}
 			insertedCount = int(result.RowsAffected)
 		}
@@ -215,7 +216,7 @@ func (r *groupRepositoryImpl) AddMembers(ctx context.Context, groupUUID, operato
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Update("member_cnt", gorm.Expr("member_cnt + ?", delta)).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		// 事件快照需要携带最新 member_cnt 和 updated_at，
@@ -298,14 +299,14 @@ func (r *groupRepositoryImpl) RemoveMember(ctx context.Context, groupUUID, opera
 				"updated_at": now,
 				"deleted_at": now,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		// 使用 CASE 防御异常数据，避免成员数被并发/脏数据扣成负数。
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Update("member_cnt", gorm.Expr("CASE WHEN member_cnt > 0 THEN member_cnt - 1 ELSE 0 END")).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		// 删除事件同样要带上最新群快照，
@@ -344,7 +345,7 @@ func (r *groupRepositoryImpl) DismissGroup(ctx context.Context, groupUUID, opera
 			return nil
 		}
 		if group.Status != groupStatusNormal {
-			return ErrRecordNotFound
+			return repoerr.ErrRecordNotFound
 		}
 		userUUIDs, err := r.loadActiveMemberUUIDs(ctx, tx, groupUUID)
 		if err != nil {
@@ -359,7 +360,7 @@ func (r *groupRepositoryImpl) DismissGroup(ctx context.Context, groupUUID, opera
 				"status":     groupStatusDismissed,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		group.Status = groupStatusDismissed
 		group.UpdatedAt = updatedAt
@@ -403,7 +404,7 @@ func (r *groupRepositoryImpl) UpdateGroupInfo(ctx context.Context, groupUUID, op
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Updates(updateMap).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		applyGroupInfoUpdates(group, updates)
@@ -438,7 +439,7 @@ func (r *groupRepositoryImpl) UpdateGroupNotice(ctx context.Context, groupUUID, 
 				"notice":     notice,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		group.Notice = notice
 		group.UpdatedAt = updatedAt
@@ -486,7 +487,7 @@ func (r *groupRepositoryImpl) TransferGroupOwner(ctx context.Context, groupUUID,
 				"owner_uuid": targetUserUUID,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		if err := tx.Model(&model.GroupMember{}).
@@ -495,7 +496,7 @@ func (r *groupRepositoryImpl) TransferGroupOwner(ctx context.Context, groupUUID,
 				"role":       memberRoleMember,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		if err := tx.Model(&model.GroupMember{}).
@@ -504,7 +505,7 @@ func (r *groupRepositoryImpl) TransferGroupOwner(ctx context.Context, groupUUID,
 				"role":       memberRoleOwner,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		demotedOwner := *currentOwner
 		demotedOwner.Role = memberRoleMember
@@ -545,7 +546,7 @@ func (r *groupRepositoryImpl) UpdateMemberRole(ctx context.Context, groupUUID, o
 		}
 		targetMember, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, targetUserUUID)
 		if err != nil {
-			if errors.Is(err, ErrRecordNotFound) {
+			if errors.Is(err, repoerr.ErrRecordNotFound) {
 				return ErrGroupMemberNotFound
 			}
 			return err
@@ -574,13 +575,13 @@ func (r *groupRepositoryImpl) UpdateMemberRole(ctx context.Context, groupUUID, o
 				"role":       role,
 				"updated_at": updatedAt,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		if err := tx.Model(&model.GroupInfo{}).
 			Where("id = ?", group.Id).
 			Update("updated_at", updatedAt).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		updatedMember := *targetMember
 		updatedMember.Role = role
@@ -630,7 +631,7 @@ func (r *groupRepositoryImpl) ApplyJoinGroup(ctx context.Context, groupUUID, app
 				}
 
 				if err := tx.Create(member).Error; err != nil {
-					return WrapDBError(err)
+					return repoerr.WrapDBError(err)
 				}
 				changedMember = member
 			} else {
@@ -644,7 +645,7 @@ func (r *groupRepositoryImpl) ApplyJoinGroup(ctx context.Context, groupUUID, app
 						"updated_at":   now,
 						"deleted_at":   nil,
 					}).Error; err != nil {
-					return WrapDBError(err)
+					return repoerr.WrapDBError(err)
 				}
 				restored := *existing
 				restored.Status = memberStatusNormal
@@ -662,7 +663,7 @@ func (r *groupRepositoryImpl) ApplyJoinGroup(ctx context.Context, groupUUID, app
 					"member_cnt": gorm.Expr("member_cnt + 1"),
 					"updated_at": now,
 				}).Error; err != nil {
-				return WrapDBError(err)
+				return repoerr.WrapDBError(err)
 			}
 			group.MemberCnt++
 			group.UpdatedAt = now
@@ -685,7 +686,7 @@ func (r *groupRepositoryImpl) ApplyJoinGroup(ctx context.Context, groupUUID, app
 		}
 
 		if err := tx.Create(joinRequest).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		result.ApplyID = joinRequest.Id
 		return r.insertJoinRequestCreatedEvent(tx, groupUUID, applicantUUID, joinRequest)
@@ -720,7 +721,7 @@ func (r *groupRepositoryImpl) CancelJoinGroupApplication(ctx context.Context, gr
 				"status":     joinRequestStatusCanceled,
 				"updated_at": now,
 			}).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		joinRequest.Status = joinRequestStatusCanceled
 		joinRequest.UpdatedAt = now
@@ -774,7 +775,7 @@ func (r *groupRepositoryImpl) ReviewJoinGroup(ctx context.Context, groupUUID, op
 			if err := tx.Model(&model.GroupJoinRequest{}).
 				Where("id = ?", joinRequest.Id).
 				Updates(requestUpdates).Error; err != nil {
-				return WrapDBError(err)
+				return repoerr.WrapDBError(err)
 			}
 
 			return r.insertJoinRequestReviewedEvent(tx, groupUUID, operatorUUID, joinRequest)
@@ -797,7 +798,7 @@ func (r *groupRepositoryImpl) ReviewJoinGroup(ctx context.Context, groupUUID, op
 				}
 
 				if err := tx.Create(member).Error; err != nil {
-					return WrapDBError(err)
+					return repoerr.WrapDBError(err)
 				}
 				changedMember = member
 			} else {
@@ -811,7 +812,7 @@ func (r *groupRepositoryImpl) ReviewJoinGroup(ctx context.Context, groupUUID, op
 						"updated_at":   now,
 						"deleted_at":   nil,
 					}).Error; err != nil {
-					return WrapDBError(err)
+					return repoerr.WrapDBError(err)
 				}
 				restored := *existing
 				restored.Status = memberStatusNormal
@@ -829,7 +830,7 @@ func (r *groupRepositoryImpl) ReviewJoinGroup(ctx context.Context, groupUUID, op
 					"member_cnt": gorm.Expr("member_cnt + 1"),
 					"updated_at": now,
 				}).Error; err != nil {
-				return WrapDBError(err)
+				return repoerr.WrapDBError(err)
 			}
 			group.MemberCnt++
 			group.UpdatedAt = now
@@ -838,7 +839,7 @@ func (r *groupRepositoryImpl) ReviewJoinGroup(ctx context.Context, groupUUID, op
 		if err := tx.Model(&model.GroupJoinRequest{}).
 			Where("id = ?", joinRequest.Id).
 			Updates(requestUpdates).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		if err := r.insertJoinRequestReviewedEvent(tx, groupUUID, operatorUUID, joinRequest); err != nil {
@@ -871,7 +872,7 @@ func (r *groupRepositoryImpl) ListJoinRequests(ctx context.Context, groupUUID, o
 	}
 	cachedItems, cacheHit, cacheErr := r.getGroupJoinRequestsFromCache(ctx, groupUUID)
 	if cacheErr != nil {
-		LogRedisError(ctx, cacheErr)
+		repoerr.LogRedisError(ctx, cacheErr)
 	} else if cacheHit {
 		total := int64(len(cachedItems))
 		if total == 0 {
@@ -892,7 +893,7 @@ func (r *groupRepositoryImpl) ListJoinRequests(ctx context.Context, groupUUID, o
 		Where("group_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, joinRequestStatusPending)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 	if total == 0 {
 		r.scheduleGroupCacheReconcile(ctx, groupUUID)
@@ -900,7 +901,7 @@ func (r *groupRepositoryImpl) ListJoinRequests(ctx context.Context, groupUUID, o
 	}
 	items := make([]*model.GroupJoinRequest, 0, total)
 	if err := query.Order("created_at DESC, id DESC").Find(&items).Error; err != nil {
-		return nil, 0, WrapDBError(err)
+		return nil, 0, repoerr.WrapDBError(err)
 	}
 	r.scheduleGroupCacheReconcile(ctx, groupUUID)
 	start := (page - 1) * pageSize
@@ -963,7 +964,7 @@ func (r *groupRepositoryImpl) countGroupAdminsForUpdate(ctx context.Context, tx 
 		Where("group_uuid = ? AND role = ? AND status = ? AND deleted_at IS NULL", groupUUID, memberRoleAdmin, memberStatusNormal).
 		Count(&count).Error
 	if err != nil {
-		return 0, WrapDBError(err)
+		return 0, repoerr.WrapDBError(err)
 	}
 	return count, nil
 }
@@ -976,10 +977,10 @@ func (r *groupRepositoryImpl) loadPendingJoinRequestForUpdate(ctx context.Contex
 		Where("id = ? AND group_uuid = ? AND status = ? AND deleted_at IS NULL", applyID, groupUUID, joinRequestStatusPending).
 		Take(&joinRequest).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			return nil, ErrGroupApplyNotFound
 		}
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &joinRequest, nil
 }
@@ -996,10 +997,10 @@ func (r *groupRepositoryImpl) loadPendingJoinRequestByApplicantForUpdate(ctx con
 		Order("id DESC").
 		Take(&joinRequest).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &joinRequest, nil
 }
@@ -1024,7 +1025,7 @@ func (r *groupRepositoryImpl) getGroupJoinRequestsFromCache(ctx context.Context,
 		if cachex.IsRedisWrongType(err) {
 			return nil, false, nil
 		}
-		return nil, false, WrapRedisError(err)
+		return nil, false, repoerr.WrapRedisError(err)
 	}
 
 	if len(values) == 0 {
@@ -1084,7 +1085,7 @@ func (r *groupRepositoryImpl) getGroupJoinRequestsFromCache(ctx context.Context,
 	sortGroupJoinRequests(items)
 	if cachex.Chance(0.01) {
 		if expireErr := r.redisClient.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.GroupJoinRequestTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
-			LogRedisError(ctx, expireErr)
+			repoerr.LogRedisError(ctx, expireErr)
 		}
 	}
 
@@ -1102,7 +1103,7 @@ func (r *groupRepositoryImpl) loadGroupForUpdate(ctx context.Context, tx *gorm.D
 		Where("uuid = ? AND deleted_at IS NULL", groupUUID).
 		First(&group).Error
 	if err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &group, nil
 }
@@ -1121,7 +1122,7 @@ func (r *groupRepositoryImpl) loadWritableGroupForUpdate(ctx context.Context, tx
 	}
 	// 非正常态不暴露内部状态细节，上层统一按群不存在处理。
 	if group.Status != groupStatusNormal {
-		return nil, ErrRecordNotFound
+		return nil, repoerr.ErrRecordNotFound
 	}
 	return group, nil
 }
@@ -1131,27 +1132,27 @@ func (r *groupRepositoryImpl) loadWritableGroupForUpdate(ctx context.Context, tx
 // 高频读链路优先查缓存中的群状态，再按需回源数据库，避免每次权限校验都落到 MySQL。
 func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID string) error {
 	if r == nil || r.db == nil || groupUUID == "" {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 	groupInfo, cacheHit, err := r.getGroupInfoFromCache(ctx, groupUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	} else if cacheHit {
 		if groupInfo == nil {
-			return ErrRecordNotFound
+			return repoerr.ErrRecordNotFound
 		}
 		if groupInfo.Status == groupStatusDismissed {
 			return ErrGroupDismissed
 		}
 		if groupInfo.Status != groupStatusNormal {
-			return ErrRecordNotFound
+			return repoerr.ErrRecordNotFound
 		}
 		return nil
 	}
 
 	if !r.groupUUIDMayExist(ctx, groupUUID) {
 		r.setGroupInfoEmptyCacheAsync(ctx, groupUUID)
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 	var group model.GroupInfo
 	// 高频读路径只需要 status，避免为了权限检查读取整行群资料。
@@ -1161,7 +1162,7 @@ func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID s
 		Take(&group).Error
 
 	if err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 	r.addGroupUUIDToBloomBestEffort(ctx, groupUUID)
 
@@ -1172,7 +1173,7 @@ func (r *groupRepositoryImpl) ensureGroupNormal(ctx context.Context, groupUUID s
 		return ErrGroupDismissed
 	}
 	if group.Status != groupStatusNormal {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 	return nil
 }
@@ -1186,7 +1187,7 @@ func (r *groupRepositoryImpl) loadActiveMemberForUpdate(ctx context.Context, tx 
 		Where("group_uuid = ? AND user_uuid = ? AND status = ? AND deleted_at IS NULL", groupUUID, userUUID, memberStatusNormal).
 		Take(&member).Error
 	if err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &member, nil
 }
@@ -1196,7 +1197,7 @@ func (r *groupRepositoryImpl) ensureOperatorRoleAtLeast(ctx context.Context, tx 
 	member, err := r.loadActiveMemberForUpdate(ctx, tx, groupUUID, operatorUUID)
 	if err != nil {
 		// 操作者不是有效成员时，对外统一表现为无权限，而不是泄露成员状态细节。
-		if errors.Is(err, ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, ErrNoPermission
 		}
 		return nil, err
@@ -1264,7 +1265,7 @@ func (r *groupRepositoryImpl) loadExistingMembersForUpdate(ctx context.Context, 
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("group_uuid = ? AND user_uuid IN ?", groupUUID, userUUIDs).
 		Find(&members).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 
 	for _, member := range members {
@@ -1298,7 +1299,7 @@ func (r *groupRepositoryImpl) getGroupInfoFromCache(ctx context.Context, groupUU
 		if cachex.IsRedisWrongType(err) {
 			return nil, false, nil
 		}
-		return nil, false, WrapRedisError(err)
+		return nil, false, repoerr.WrapRedisError(err)
 	}
 
 	entry, projectionVersion, empty, decodeErr := decodeGroupInfoCacheValue(raw)
@@ -1313,7 +1314,7 @@ func (r *groupRepositoryImpl) getGroupInfoFromCache(ctx context.Context, groupUU
 	}
 	if cachex.Chance(0.01) {
 		if expireErr := r.redisClient.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.GroupInfoTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
-			LogRedisError(ctx, expireErr)
+			repoerr.LogRedisError(ctx, expireErr)
 		}
 	}
 
@@ -1334,7 +1335,7 @@ func (r *groupRepositoryImpl) setGroupInfoEmptyCacheAsync(ctx context.Context, g
 		// NOT_FOUND 覆盖已经存在的正版本群快照；group_created 则能在 Lua 内
 		// 以 version>0 安全覆盖这条负缓存。
 		if err := r.redisClient.SetNX(runCtx, cacheKey, groupInfoEmptyValue, rediskey.GroupInfoEmptyTTL).Err(); err != nil {
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }
@@ -1416,25 +1417,25 @@ func collectWriteMemberUUIDs(members []*model.GroupMember) []string {
 //  3. 上层无需感知 groups 表的存储细节。
 func (r *groupRepositoryImpl) GetGroupInfo(ctx context.Context, groupUUID string) (*model.GroupInfo, error) {
 	if r == nil || r.db == nil || groupUUID == "" {
-		return nil, ErrRecordNotFound
+		return nil, repoerr.ErrRecordNotFound
 	}
 	groupInfo, cacheHit, err := r.getGroupInfoFromCache(ctx, groupUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	} else if cacheHit {
 		if groupInfo == nil || groupInfo.Status != groupStatusNormal {
-			return nil, ErrRecordNotFound
+			return nil, repoerr.ErrRecordNotFound
 		}
 		return groupInfo, nil
 	}
 
 	if !r.groupUUIDMayExist(ctx, groupUUID) {
 		r.setGroupInfoEmptyCacheAsync(ctx, groupUUID)
-		return nil, ErrRecordNotFound
+		return nil, repoerr.ErrRecordNotFound
 	}
 	groupInfo, err = r.loadGroupInfoFromDB(ctx, groupUUID)
 	if err != nil {
-		if errors.Is(err, ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			r.setGroupInfoEmptyCacheAsync(ctx, groupUUID)
 		}
 		return nil, err
@@ -1454,7 +1455,7 @@ func (r *groupRepositoryImpl) loadGroupInfoFromDB(ctx context.Context, groupUUID
 	if err := r.db.WithContext(ctx).
 		Where("uuid = ? AND status = 0 AND deleted_at IS NULL", groupUUID).
 		First(&groupInfo).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &groupInfo, nil
 }
@@ -1476,7 +1477,7 @@ func (r *groupRepositoryImpl) GetGroupMembers(ctx context.Context, groupUUID str
 	}
 	members, cacheHit, err := r.getGroupMembersFromCache(ctx, groupUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	} else if cacheHit {
 		return members, nil
 	}
@@ -1496,7 +1497,7 @@ func (r *groupRepositoryImpl) loadGroupMembersFromDB(ctx context.Context, groupU
 		Where("g.status = 0 AND g.deleted_at IS NULL").
 		Order("gm.role DESC, gm.joined_at ASC, gm.id ASC").
 		Find(&members).Error; err != nil {
-		return nil, fmt.Errorf("查询群成员失败: %w", WrapDBError(err))
+		return nil, fmt.Errorf("查询群成员失败: %w", repoerr.WrapDBError(err))
 	}
 	return members, nil
 }
@@ -1531,7 +1532,7 @@ func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, grou
 		if cachex.IsRedisWrongType(err) {
 			return nil, false, nil
 		}
-		return nil, false, WrapRedisError(err)
+		return nil, false, repoerr.WrapRedisError(err)
 	}
 
 	if len(values) == 0 {
@@ -1590,7 +1591,7 @@ func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, grou
 	sortGroupMembers(members)
 	if cachex.Chance(0.01) {
 		if expireErr := r.redisClient.Expire(ctx, cacheKey, cachex.JitterTTL(rediskey.GroupMembersTTL)).Err(); expireErr != nil && !errors.Is(expireErr, goredis.Nil) {
-			LogRedisError(ctx, expireErr)
+			repoerr.LogRedisError(ctx, expireErr)
 		}
 	}
 
@@ -1603,14 +1604,14 @@ func (r *groupRepositoryImpl) getGroupMembersFromCache(ctx context.Context, grou
 // 避免群已解散后仅凭 group_members 残留缓存读出“幽灵成员”结论。
 func (r *groupRepositoryImpl) CheckGroupMember(ctx context.Context, groupUUID, userUUID string) (bool, int8, error) {
 	if r == nil || r.db == nil || groupUUID == "" || userUUID == "" {
-		return false, -1, ErrRecordNotFound
+		return false, -1, repoerr.ErrRecordNotFound
 	}
 	if err := r.ensureGroupNormal(ctx, groupUUID); err != nil {
 		return false, -1, err
 	}
 	cacheHit, isMember, role, err := r.checkGroupMemberFromCache(ctx, groupUUID, userUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	} else if cacheHit {
 		return isMember, role, nil
 	}
@@ -1664,7 +1665,7 @@ func (r *groupRepositoryImpl) ListUserGroups(ctx context.Context, userUUID strin
 	}
 	groups, cacheHit, err := r.getUserGroupsFromCache(ctx, userUUID)
 	if err != nil {
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 	} else if cacheHit {
 		// READY 只证明缓存结构完整，不能证明它与 DB 的成员事实永远一致。
 		// 命中后通过每用户租约低频触发权威对账，修复“多出一个从未加入的群”等
@@ -1695,7 +1696,7 @@ func (r *groupRepositoryImpl) loadUserGroupsFromDB(ctx context.Context, userUUID
 		Where("g.status = 0 AND g.deleted_at IS NULL").
 		Order("g.updated_at DESC, g.id DESC").
 		Find(&groups).Error; err != nil {
-		return nil, fmt.Errorf("查询用户群列表失败: %w", WrapDBError(err))
+		return nil, fmt.Errorf("查询用户群列表失败: %w", repoerr.WrapDBError(err))
 	}
 	return groups, nil
 }
@@ -1713,7 +1714,7 @@ func (r *groupRepositoryImpl) GetUserProfiles(ctx context.Context, userUUIDs []s
 	if err := r.db.WithContext(ctx).
 		Where("user_uuid IN ?", userUUIDs).
 		Find(&profiles).Error; err != nil {
-		return nil, fmt.Errorf("批量查询用户资料失败: %w", WrapDBError(err))
+		return nil, fmt.Errorf("批量查询用户资料失败: %w", repoerr.WrapDBError(err))
 	}
 	for _, profile := range profiles {
 		if profile == nil || profile.UserUuid == "" {

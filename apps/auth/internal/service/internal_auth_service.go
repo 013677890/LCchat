@@ -8,6 +8,7 @@ import (
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 )
 
 // internalAuthServiceImpl 实现内部账号查询与同步逻辑。
@@ -37,7 +38,7 @@ func (s *internalAuthServiceImpl) FindAccountByEmail(ctx context.Context, req *a
 	// internal 接口把“账号不存在”视为普通查询结果，而不是业务异常，方便上游直接分支处理。
 	user, err := s.authRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return &authpb.FindAccountByEmailResponse{Found: false}, nil
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "按邮箱查询账号失败")
@@ -71,7 +72,7 @@ func (s *internalAuthServiceImpl) UpdateLoginDisplay(ctx context.Context, req *a
 	}
 	// 这里只回写 login_nickname / login_avatar 两个冗余字段，供登录态最小展示复用。
 	if err := s.authRepo.UpdateLoginDisplay(ctx, req.UserUuid, req.Nickname, req.Avatar); err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return &authpb.UpdateLoginDisplayResponse{}, nil
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新登录展示字段失败")

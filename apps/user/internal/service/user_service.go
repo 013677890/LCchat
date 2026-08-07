@@ -11,6 +11,7 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/user/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
@@ -176,7 +177,7 @@ func (s *userServiceImpl) UpdateProfile(ctx context.Context, req *pb.UpdateProfi
 	// 真正的资料写入和展示字段事件由 repository 在事务内统一完成，service 不重复拼事务。
 	userInfo, err := s.userRepo.UpdateBasicInfoWithDisplayEvent(ctx, userUUID, req.Nickname, req.Signature, req.Birthday, int8(req.Gender))
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeUserNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新基本信息失败")
@@ -218,7 +219,7 @@ func (s *userServiceImpl) UploadAvatar(ctx context.Context, req *pb.UploadAvatar
 	// 仓储层会在同一条写链路里同时更新头像字段并写入 profile_display_changed 事件。
 	userInfo, err := s.userRepo.UpdateAvatarWithDisplayEvent(ctx, userUUID, req.AvatarUrl)
 	if err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeUserNotFound)
 		}
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新头像失败")
@@ -259,7 +260,7 @@ func (s *userServiceImpl) GetQRCode(ctx context.Context, req *pb.GetQRCodeReques
 			Qrcode:   fmt.Sprintf("https://www.LCchat.top/q/%s", token),
 			ExpireAt: expireTime.Format(time.RFC3339),
 		}, nil
-	} else if errors.Is(err, repository.ErrRedisNil) {
+	} else if errors.Is(err, repoerr.ErrRedisNil) {
 		// token 不存在属于正常 miss，继续走新建二维码逻辑。
 	} else {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "获取用户二维码 token失败")
@@ -348,7 +349,7 @@ func (s *userServiceImpl) ParseQRCode(ctx context.Context, req *pb.ParseQRCodeRe
 	// 二维码解析完全依赖 Redis 中的短期映射；命中后只返回 user_uuid 供上游继续拉资料。
 	userUUID, err := s.userRepo.GetUUIDByQRCodeToken(ctx, req.Token)
 	if err != nil {
-		if errors.Is(err, repository.ErrRedisNil) {
+		if errors.Is(err, repoerr.ErrRedisNil) {
 			// Redis 中不存在该 token，说明二维码已过期或无效。
 			return nil, apperr.New(consts.CodeQRCodeExpired)
 		}

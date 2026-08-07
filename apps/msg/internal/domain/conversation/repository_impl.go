@@ -2,11 +2,13 @@ package conversation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -31,10 +33,11 @@ func (r *repositoryImpl) GetByOwnerAndConvId(ctx context.Context, ownerUuid, con
 		Where("owner_uuid = ? AND conv_id = ?", ownerUuid, convId).
 		First(&conv).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		dbErr := repoerr.WrapDBError(err)
+		if errors.Is(dbErr, repoerr.ErrRecordNotFound) {
 			return nil, ErrConversationNotFound
 		}
-		return nil, fmt.Errorf("GetByOwnerAndConvId: db query failed: %w", err)
+		return nil, fmt.Errorf("GetByOwnerAndConvId: db query failed: %w", dbErr)
 	}
 	return &conv, nil
 }
@@ -62,7 +65,7 @@ func (r *repositoryImpl) ListP2P(ctx context.Context, ownerUuid string, updatedS
 		Limit(pageSize).
 		Find(&convs).Error
 
-	return convs, err
+	return convs, repoerr.WrapDBError(err)
 }
 
 // ListGroup 专属查询群聊（个人视图 + 群成员投影 + 群共享热数据）。
@@ -137,7 +140,7 @@ func (r *repositoryImpl) ListGroup(ctx context.Context, ownerUuid string, update
 		Find(&rows).Error
 
 	if err != nil {
-		return nil, err
+		return nil, repoerr.WrapDBError(err)
 	}
 
 	convs := make([]*model.Conversation, 0, len(rows))
@@ -210,7 +213,7 @@ func (r *repositoryImpl) Upsert(ctx context.Context, conv *model.Conversation, i
 		}).Create(conv).Error
 
 	if err != nil {
-		return fmt.Errorf("Upsert: db upsert failed: %w", err)
+		return fmt.Errorf("Upsert: db upsert failed: %w", repoerr.WrapDBError(err))
 	}
 	return nil
 }
@@ -228,7 +231,7 @@ func (r *repositoryImpl) RepairForMessage(ctx context.Context, conv *model.Conve
 			DoNothing: true,
 		}).Create(conv)
 		if insertResult.Error != nil {
-			return fmt.Errorf("RepairForMessage: insert conversation failed: %w", insertResult.Error)
+			return fmt.Errorf("RepairForMessage: insert conversation failed: %w", repoerr.WrapDBError(insertResult.Error))
 		}
 		if insertResult.RowsAffected > 0 {
 			return nil
@@ -254,14 +257,14 @@ func (r *repositoryImpl) RepairForMessage(ctx context.Context, conv *model.Conve
 		if err := tx.Model(&model.Conversation{}).
 			Where("owner_uuid = ? AND conv_id = ? AND max_seq < ?", conv.OwnerUuid, conv.ConvId, conv.MaxSeq).
 			Updates(staleUpdates).Error; err != nil {
-			return fmt.Errorf("RepairForMessage: update stale conversation failed: %w", err)
+			return fmt.Errorf("RepairForMessage: update stale conversation failed: %w", repoerr.WrapDBError(err))
 		}
 
 		if isSender {
 			if err := tx.Model(&model.Conversation{}).
 				Where("owner_uuid = ? AND conv_id = ?", conv.OwnerUuid, conv.ConvId).
 				UpdateColumn("read_seq", gorm.Expr("CASE WHEN read_seq > ? THEN read_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq)).Error; err != nil {
-				return fmt.Errorf("RepairForMessage: repair sender read_seq failed: %w", err)
+				return fmt.Errorf("RepairForMessage: repair sender read_seq failed: %w", repoerr.WrapDBError(err))
 			}
 
 			return nil
@@ -270,7 +273,7 @@ func (r *repositoryImpl) RepairForMessage(ctx context.Context, conv *model.Conve
 		if err := tx.Model(&model.Conversation{}).
 			Where("owner_uuid = ? AND conv_id = ?", conv.OwnerUuid, conv.ConvId).
 			UpdateColumn("unread_count", gorm.Expr("CASE WHEN read_seq >= max_seq THEN 0 ELSE max_seq - read_seq END")).Error; err != nil {
-			return fmt.Errorf("RepairForMessage: recompute receiver unread failed: %w", err)
+			return fmt.Errorf("RepairForMessage: recompute receiver unread failed: %w", repoerr.WrapDBError(err))
 		}
 
 		return nil
@@ -302,15 +305,16 @@ func (r *repositoryImpl) UpdateReadSeqWithOutbox(ctx context.Context, ownerUuid,
 		}
 		for _, event := range events {
 			if err := outbox.InsertEvent(tx, event.EventType, event.EntityID, event.Payload); err != nil {
-				return fmt.Errorf("UpdateReadSeqWithOutbox: outbox insert failed: %w", err)
+				return fmt.Errorf("UpdateReadSeqWithOutbox: outbox insert failed: %w", repoerr.WrapDBError(err))
 			}
 		}
 
 		if err := tx.Where("owner_uuid = ? AND conv_id = ?", ownerUuid, convId).First(&conv).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
+			dbErr := repoerr.WrapDBError(err)
+			if errors.Is(dbErr, repoerr.ErrRecordNotFound) {
 				return ErrConversationNotFound
 			}
-			return fmt.Errorf("UpdateReadSeqWithOutbox: db query failed: %w", err)
+			return fmt.Errorf("UpdateReadSeqWithOutbox: db query failed: %w", dbErr)
 		}
 
 		return nil
@@ -358,16 +362,16 @@ func (r *repositoryImpl) UpsertGroupReadSeqWithOutbox(ctx context.Context, owner
 				),
 			}),
 		}).Create(row).Error; err != nil {
-			return fmt.Errorf("UpsertGroupReadSeqWithOutbox: upsert failed: %w", err)
+			return fmt.Errorf("UpsertGroupReadSeqWithOutbox: upsert failed: %w", repoerr.WrapDBError(err))
 		}
 		for _, event := range events {
 			if err := outbox.InsertEvent(tx, event.EventType, event.EntityID, event.Payload); err != nil {
-				return fmt.Errorf("UpsertGroupReadSeqWithOutbox: outbox insert failed: %w", err)
+				return fmt.Errorf("UpsertGroupReadSeqWithOutbox: outbox insert failed: %w", repoerr.WrapDBError(err))
 			}
 		}
 
 		if err := tx.Where("owner_uuid = ? AND conv_id = ?", ownerUuid, groupUuid).First(&conv).Error; err != nil {
-			return fmt.Errorf("UpsertGroupReadSeqWithOutbox: db query failed: %w", err)
+			return fmt.Errorf("UpsertGroupReadSeqWithOutbox: db query failed: %w", repoerr.WrapDBError(err))
 		}
 		return nil
 	})
@@ -395,7 +399,7 @@ func updateConversationReadSeq(db *gorm.DB, ownerUuid, convId string, readSeq in
 			),
 		})
 	if result.Error != nil {
-		return fmt.Errorf("UpdateReadSeq: db update failed: %w", result.Error)
+		return fmt.Errorf("UpdateReadSeq: db update failed: %w", repoerr.WrapDBError(result.Error))
 	}
 	if result.RowsAffected == 0 {
 		return ErrConversationNotFound
@@ -421,7 +425,7 @@ func (r *repositoryImpl) Delete(ctx context.Context, ownerUuid, convId string) e
 			"unread_count": 0,
 		})
 	if result.Error != nil {
-		return fmt.Errorf("Delete: db update failed: %w", result.Error)
+		return fmt.Errorf("Delete: db update failed: %w", repoerr.WrapDBError(result.Error))
 	}
 	if result.RowsAffected == 0 {
 		return ErrConversationNotFound
@@ -447,7 +451,7 @@ func (r *repositoryImpl) UpdateSettings(ctx context.Context, ownerUuid, convId s
 		Where("owner_uuid = ? AND conv_id = ?", ownerUuid, convId).
 		Updates(updates)
 	if result.Error != nil {
-		return fmt.Errorf("UpdateSettings: db update failed: %w", result.Error)
+		return fmt.Errorf("UpdateSettings: db update failed: %w", repoerr.WrapDBError(result.Error))
 	}
 	if result.RowsAffected == 0 {
 		return ErrConversationNotFound
@@ -495,7 +499,7 @@ func (r *repositoryImpl) UpsertGroupConv(ctx context.Context, gc *model.GroupCon
 		}).Create(gc).Error
 
 	if err != nil {
-		return fmt.Errorf("UpsertGroupConv: db upsert failed: %w", err)
+		return fmt.Errorf("UpsertGroupConv: db upsert failed: %w", repoerr.WrapDBError(err))
 	}
 	return nil
 }
@@ -507,10 +511,11 @@ func (r *repositoryImpl) GetGroupConv(ctx context.Context, groupUuid string) (*m
 		Where("group_uuid = ?", groupUuid).
 		First(&gc).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		dbErr := repoerr.WrapDBError(err)
+		if errors.Is(dbErr, repoerr.ErrRecordNotFound) {
 			return nil, ErrConversationNotFound
 		}
-		return nil, fmt.Errorf("GetGroupConv: db query failed: %w", err)
+		return nil, fmt.Errorf("GetGroupConv: db query failed: %w", dbErr)
 	}
 	return &gc, nil
 }

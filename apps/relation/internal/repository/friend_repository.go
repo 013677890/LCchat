@@ -9,6 +9,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/cachex"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -63,7 +64,7 @@ func (r *friendRepositoryImpl) GetFriendList(ctx context.Context, userUUID, grou
 
 	// 先 count 再分页查询，让上层能直接返回完整分页信息。
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, 0, WrapDBError(err)
+		return nil, 0, 0, repoerr.WrapDBError(err)
 	}
 
 	var relations []*model.UserRelation
@@ -73,7 +74,7 @@ func (r *friendRepositoryImpl) GetFriendList(ctx context.Context, userUUID, grou
 		Offset(offset).
 		Limit(pageSize).
 		Find(&relations).Error; err != nil {
-		return nil, 0, 0, WrapDBError(err)
+		return nil, 0, 0, repoerr.WrapDBError(err)
 	}
 
 	// version 先使用服务端当前毫秒时间，供上层做下一次增量同步锚点。
@@ -82,16 +83,16 @@ func (r *friendRepositoryImpl) GetFriendList(ctx context.Context, userUUID, grou
 
 // GetFriendRelation 查询一条有效好友关系。
 //
-// 当关系不存在时返回 ErrRecordNotFound，方便 service 层统一映射为“不是好友”。
+// 当关系不存在时返回 repoerr.ErrRecordNotFound，方便 service 层统一映射为“不是好友”。
 func (r *friendRepositoryImpl) GetFriendRelation(ctx context.Context, userUUID, friendUUID string) (*model.UserRelation, error) {
 	var relation model.UserRelation
 	if err := r.db.WithContext(ctx).
 		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
 		First(&relation).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrRecordNotFound
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
+			return nil, repoerr.ErrRecordNotFound
 		}
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return &relation, nil
 }
@@ -120,7 +121,7 @@ func (r *friendRepositoryImpl) CreateFriendRelation(ctx context.Context, userUUI
 			"updated_at":     now,
 		}),
 	}).Create(&relations).Error; err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	// 事务成功后只做“缓存存在时”的增量补丁；若 key 已过期，则后续读路径会负责全量重建。
@@ -143,11 +144,11 @@ func (r *friendRepositoryImpl) DeleteFriendRelation(ctx context.Context, userUUI
 			"updated_at": now,
 		})
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
-	// 没有命中任何有效好友关系时，返回 ErrRecordNotFound 供 service 层映射业务错误。
+	// 没有命中任何有效好友关系时，返回 repoerr.ErrRecordNotFound 供 service 层映射业务错误。
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 
 	// 删除好友只影响当前用户单侧视角，因此这里只移除当前 userUUID 对应的 Hash field。
@@ -174,7 +175,7 @@ func (r *friendRepositoryImpl) CleanupAccountRelations(ctx context.Context, user
 		Select("DISTINCT user_uuid").
 		Where("(user_uuid = ? OR peer_uuid = ?) AND deleted_at IS NULL", userUUID, userUUID).
 		Find(&rows).Error; err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	now := time.Now()
@@ -187,7 +188,7 @@ func (r *friendRepositoryImpl) CleanupAccountRelations(ctx context.Context, user
 			"deleted_at":     gorm.DeletedAt{Time: now, Valid: true},
 			"updated_at":     now,
 		}).Error; err != nil {
-		return WrapDBError(err)
+		return repoerr.WrapDBError(err)
 	}
 
 	affectedUsers := make([]string, 0, len(rows)+1)
@@ -213,10 +214,10 @@ func (r *friendRepositoryImpl) SetFriendRemark(ctx context.Context, userUUID, fr
 		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
 		Updates(map[string]interface{}{"remark": remark, "updated_at": now})
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 
 	// 备注是单条元数据修改，优先走单 field 增量回写，避免整份好友列表重建。
@@ -234,10 +235,10 @@ func (r *friendRepositoryImpl) SetFriendTag(ctx context.Context, userUUID, frien
 		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, friendUUID, 0).
 		Updates(map[string]interface{}{"group_tag": groupTag, "updated_at": now})
 	if result.Error != nil {
-		return WrapDBError(result.Error)
+		return repoerr.WrapDBError(result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return ErrRecordNotFound
+		return repoerr.ErrRecordNotFound
 	}
 
 	// 标签与备注一样都是好友元数据的一部分，可以在已有 Hash 上做细粒度更新。
@@ -283,7 +284,7 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
-			LogRedisError(ctx, err)
+			repoerr.LogRedisError(ctx, err)
 		}
 		return false, false
 	}
@@ -306,7 +307,7 @@ func (r *friendRepositoryImpl) checkFriendCache(ctx context.Context, userUUID, f
 		return false, false
 	}
 
-	LogRedisError(ctx, metaCmd.Err())
+	repoerr.LogRedisError(ctx, metaCmd.Err())
 	return false, false
 }
 
@@ -334,7 +335,7 @@ func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID,
 		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
-			LogRedisError(ctx, err)
+			repoerr.LogRedisError(ctx, err)
 		}
 		return false, nil, false
 	}
@@ -361,7 +362,7 @@ func (r *friendRepositoryImpl) getFriendMetaCache(ctx context.Context, userUUID,
 		return false, nil, false
 	}
 
-	LogRedisError(ctx, metaCmd.Err())
+	repoerr.LogRedisError(ctx, metaCmd.Err())
 	return false, nil, false
 }
 
@@ -389,7 +390,7 @@ func (r *friendRepositoryImpl) checkBlacklistCache(ctx context.Context, userUUID
 		if cachex.IsRedisWrongType(err) {
 			_ = r.redisClient.Del(ctx, cacheKey).Err()
 		} else {
-			LogRedisError(ctx, err)
+			repoerr.LogRedisError(ctx, err)
 		}
 		return false, false
 	}
@@ -408,7 +409,7 @@ func (r *friendRepositoryImpl) checkBlacklistCache(ctx context.Context, userUUID
 		return false, false
 	}
 
-	LogRedisError(ctx, scoreCmd.Err())
+	repoerr.LogRedisError(ctx, scoreCmd.Err())
 	return false, false
 }
 
@@ -427,7 +428,7 @@ func (r *friendRepositoryImpl) CheckIsFriendRelation(ctx context.Context, userUU
 		Model(&model.UserRelation{}).
 		Where("user_uuid = ? AND peer_uuid = ? AND status = ? AND deleted_at IS NULL", userUUID, peerUUID, 0).
 		Count(&count).Error; err != nil {
-		return false, WrapDBError(err)
+		return false, repoerr.WrapDBError(err)
 	}
 
 	// 缓存未命中时异步重建整份好友 Hash，避免后续同用户的高频关系判断持续打 DB。
@@ -479,7 +480,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 			if cachex.IsRedisWrongType(err) {
 				_ = r.redisClient.Del(ctx, cacheKey).Err()
 			} else {
-				LogRedisError(ctx, err)
+				repoerr.LogRedisError(ctx, err)
 			}
 		}
 	}
@@ -491,7 +492,7 @@ func (r *friendRepositoryImpl) BatchCheckIsFriend(ctx context.Context, userUUID 
 		Select("peer_uuid").
 		Where("user_uuid = ? AND peer_uuid IN ? AND status = ? AND deleted_at IS NULL", userUUID, peerUUIDs, 0).
 		Find(&relations).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 
 	for _, relation := range relations {
@@ -546,10 +547,10 @@ func (r *friendRepositoryImpl) GetRelationStatus(ctx context.Context, userUUID, 
 		Unscoped().
 		Where("user_uuid = ? AND peer_uuid = ?", userUUID, peerUUID).
 		First(&relation).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(repoerr.WrapDBError(err), repoerr.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 
 	return &relation, nil
@@ -586,7 +587,7 @@ func (r *friendRepositoryImpl) SyncFriendList(ctx context.Context, userUUID stri
 		Order("updated_at ASC, id ASC").
 		Limit(limit + 1).
 		Find(&relations).Error; err != nil {
-		return nil, cursor, false, WrapDBError(err)
+		return nil, cursor, false, repoerr.WrapDBError(err)
 	}
 
 	// 多查一条判断是否还有更多，避免追加一次 count 查询。
@@ -669,7 +670,7 @@ func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, u
 					_ = r.redisClient.Del(runCtx, pair.userKey).Err()
 					continue
 				}
-				LogRedisError(runCtx, err)
+				repoerr.LogRedisError(runCtx, err)
 			}
 		}
 	}, async.AsyncRedisTimeout)
@@ -700,7 +701,7 @@ func (r *friendRepositoryImpl) removeFriendCacheAsync(ctx context.Context, userU
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }
@@ -749,7 +750,7 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisPipelineTimeout)
 }
@@ -775,7 +776,7 @@ func (r *friendRepositoryImpl) invalidateRelationCachesAsync(ctx context.Context
 		}
 
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisPipelineTimeout)
 }
@@ -811,7 +812,7 @@ func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, u
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRedisTimeout)
 }
@@ -837,7 +838,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 			return
 		}
 
@@ -867,7 +868,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 					_ = r.redisClient.Del(runCtx, cacheKey).Err()
 					return
 				}
-				LogRedisError(runCtx, err)
+				repoerr.LogRedisError(runCtx, err)
 			}
 			return
 		}
@@ -876,7 +877,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 			if cachex.IsRedisWrongType(metaCmd.Err()) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 			} else {
-				LogRedisError(runCtx, metaCmd.Err())
+				repoerr.LogRedisError(runCtx, metaCmd.Err())
 			}
 			return
 		}
@@ -914,7 +915,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 				return
 			}
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 			return
 		}
 
@@ -944,7 +945,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 					_ = r.redisClient.Del(runCtx, cacheKey).Err()
 					return
 				}
-				LogRedisError(runCtx, err)
+				repoerr.LogRedisError(runCtx, err)
 			}
 			return
 		}
@@ -953,7 +954,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 			if cachex.IsRedisWrongType(metaCmd.Err()) {
 				_ = r.redisClient.Del(runCtx, cacheKey).Err()
 			} else {
-				LogRedisError(runCtx, metaCmd.Err())
+				repoerr.LogRedisError(runCtx, metaCmd.Err())
 			}
 			return
 		}

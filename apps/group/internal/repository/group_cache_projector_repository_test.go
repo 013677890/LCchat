@@ -10,6 +10,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	miniredis "github.com/alicebob/miniredis/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -435,7 +436,7 @@ func TestReconcileSoftDeletedGroupPublishesUnavailableTombstones(t *testing.T) {
 	assert.Equal(t, groupMembersEmptyValue, memberFields[groupMembersEmptyField])
 
 	_, err := repo.GetGroupInfo(ctx, group.Uuid)
-	assert.ErrorIs(t, err, ErrRecordNotFound)
+	assert.ErrorIs(t, err, repoerr.ErrRecordNotFound)
 	_, err = repo.GetGroupMembers(ctx, group.Uuid)
 	assert.ErrorIs(t, err, ErrGroupDismissed,
 		"有效空成员 tombstone 不能把不可用群降级成成功空列表")

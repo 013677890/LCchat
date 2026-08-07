@@ -11,6 +11,7 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/cachex"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -111,7 +112,7 @@ func (r *groupRepositoryImpl) setVersionedGroupInfoProjection(
 		repairEqualFlag,
 	).Int64()
 	if err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	// -2 表示旧格式已被主动清理。增量事件没有义务从局部 payload 重建一份此前
 	// 不受信任的缓存；下一次读 miss 或周期对账会用 DB 完整快照重新创建。
@@ -170,7 +171,7 @@ func (r *groupRepositoryImpl) replaceVersionedHashProjection(
 	if _, err := goredis.NewScript(luaReplaceVersionedHash).
 		Run(ctx, r.redisClient, []string{cacheKey}, args...).
 		Int64(); err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 
 	return nil
@@ -213,7 +214,7 @@ func (r *groupRepositoryImpl) upsertVersionedHashProjectionIfExists(
 	if _, err := goredis.NewScript(luaUpsertVersionedHash).
 		Run(ctx, r.redisClient, []string{cacheKey}, args...).
 		Int64(); err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 
 	return nil
@@ -251,7 +252,7 @@ func (r *groupRepositoryImpl) removeVersionedHashProjectionIfExists(
 	if _, err := goredis.NewScript(luaRemoveVersionedHash).
 		Run(ctx, r.redisClient, []string{cacheKey}, args...).
 		Int64(); err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 
 	return nil
@@ -286,52 +287,52 @@ func (r *groupRepositoryImpl) readVersionedHashFieldProjection(
 	).Slice()
 
 	if err != nil {
-		return "", false, false, WrapRedisError(err)
+		return "", false, false, repoerr.WrapRedisError(err)
 	}
 	if len(result) == 0 {
-		return "", false, false, fmt.Errorf("%w: empty versioned hash read response", ErrRedis)
+		return "", false, false, fmt.Errorf("%w: empty versioned hash read response", repoerr.ErrRedis)
 	}
 
 	status, err := redisLuaInt64(result[0])
 	if err != nil {
-		return "", false, false, fmt.Errorf("%w: invalid versioned hash read status: %v", ErrRedis, err)
+		return "", false, false, fmt.Errorf("%w: invalid versioned hash read status: %v", repoerr.ErrRedis, err)
 	}
 	switch status {
 	case 0, -1:
 		return "", false, false, nil
 	case 1:
 	default:
-		return "", false, false, fmt.Errorf("%w: unknown versioned hash read status %d", ErrRedis, status)
+		return "", false, false, fmt.Errorf("%w: unknown versioned hash read status %d", repoerr.ErrRedis, status)
 	}
 
 	if len(result) < 3 {
-		return "", false, false, fmt.Errorf("%w: incomplete versioned hash read response", ErrRedis)
+		return "", false, false, fmt.Errorf("%w: incomplete versioned hash read response", repoerr.ErrRedis)
 	}
 	existsFlag, err := redisLuaString(result[1])
 	if err != nil {
-		return "", false, false, fmt.Errorf("%w: invalid versioned hash exists flag: %v", ErrRedis, err)
+		return "", false, false, fmt.Errorf("%w: invalid versioned hash exists flag: %v", repoerr.ErrRedis, err)
 	}
 	if _, err := redisLuaPositiveInt64(result[2]); err != nil {
-		return "", false, false, fmt.Errorf("%w: invalid versioned hash version: %v", ErrRedis, err)
+		return "", false, false, fmt.Errorf("%w: invalid versioned hash version: %v", repoerr.ErrRedis, err)
 	}
 
 	switch existsFlag {
 	case "0":
 		if len(result) != 3 {
-			return "", false, false, fmt.Errorf("%w: malformed missing-field response", ErrRedis)
+			return "", false, false, fmt.Errorf("%w: malformed missing-field response", repoerr.ErrRedis)
 		}
 		return "", false, true, nil
 	case "1":
 		if len(result) != 4 {
-			return "", false, false, fmt.Errorf("%w: malformed present-field response", ErrRedis)
+			return "", false, false, fmt.Errorf("%w: malformed present-field response", repoerr.ErrRedis)
 		}
 		raw, err = redisLuaString(result[3])
 		if err != nil {
-			return "", false, false, fmt.Errorf("%w: invalid versioned hash field value: %v", ErrRedis, err)
+			return "", false, false, fmt.Errorf("%w: invalid versioned hash field value: %v", repoerr.ErrRedis, err)
 		}
 		return raw, true, true, nil
 	default:
-		return "", false, false, fmt.Errorf("%w: unknown versioned hash exists flag %q", ErrRedis, existsFlag)
+		return "", false, false, fmt.Errorf("%w: unknown versioned hash exists flag %q", repoerr.ErrRedis, existsFlag)
 	}
 }
 
@@ -358,48 +359,48 @@ func (r *groupRepositoryImpl) readVersionedUserGroupsProjection(
 	).Slice()
 
 	if err != nil {
-		return nil, false, WrapRedisError(err)
+		return nil, false, repoerr.WrapRedisError(err)
 	}
 	if len(result) == 0 {
-		return nil, false, fmt.Errorf("%w: empty user-group read response", ErrRedis)
+		return nil, false, fmt.Errorf("%w: empty user-group read response", repoerr.ErrRedis)
 	}
 
 	status, err := redisLuaInt64(result[0])
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: invalid user-group read status: %v", ErrRedis, err)
+		return nil, false, fmt.Errorf("%w: invalid user-group read status: %v", repoerr.ErrRedis, err)
 	}
 	switch status {
 	case 0, -1:
 		return nil, false, nil
 	case 1:
 	default:
-		return nil, false, fmt.Errorf("%w: unknown user-group read status %d", ErrRedis, status)
+		return nil, false, fmt.Errorf("%w: unknown user-group read status %d", repoerr.ErrRedis, status)
 	}
 
 	if len(result) < 2 {
-		return nil, false, fmt.Errorf("%w: incomplete user-group read response", ErrRedis)
+		return nil, false, fmt.Errorf("%w: incomplete user-group read response", repoerr.ErrRedis)
 	}
 	count, err := redisLuaInt64(result[1])
 	if err != nil || count <= 0 || int64(len(result)) != 2+count*2 {
-		return nil, false, fmt.Errorf("%w: malformed user-group read count", ErrRedis)
+		return nil, false, fmt.Errorf("%w: malformed user-group read count", repoerr.ErrRedis)
 	}
 
 	references := make([]userGroupProjectionReference, 0, count)
 	for index := 0; index < int(count); index++ {
 		groupUUID, stringErr := redisLuaString(result[2+index*2])
 		if stringErr != nil || groupUUID == "" {
-			return nil, false, fmt.Errorf("%w: invalid user-group uuid", ErrRedis)
+			return nil, false, fmt.Errorf("%w: invalid user-group uuid", repoerr.ErrRedis)
 		}
 		version, versionErr := redisLuaInt64(result[3+index*2])
 		if versionErr != nil {
-			return nil, false, fmt.Errorf("%w: invalid user-group version: %v", ErrRedis, versionErr)
+			return nil, false, fmt.Errorf("%w: invalid user-group version: %v", repoerr.ErrRedis, versionErr)
 		}
 		if groupUUID == userGroupsEmptyValue {
 			if count != 1 || version != 0 {
-				return nil, false, fmt.Errorf("%w: malformed user-group empty sentinel", ErrRedis)
+				return nil, false, fmt.Errorf("%w: malformed user-group empty sentinel", repoerr.ErrRedis)
 			}
 		} else if version <= 0 {
-			return nil, false, fmt.Errorf("%w: non-positive user-group version", ErrRedis)
+			return nil, false, fmt.Errorf("%w: non-positive user-group version", repoerr.ErrRedis)
 		}
 		references = append(references, userGroupProjectionReference{groupUUID: groupUUID, version: version})
 	}
@@ -641,7 +642,7 @@ func (r *groupRepositoryImpl) patchUserGroupProjection(
 		activeFlag,
 		repairEqualFlag,
 	).Int64(); err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -688,7 +689,7 @@ func (r *groupRepositoryImpl) reconcileUserGroupProjection(
 		[]string{rediskey.UserGroupListKey(userUUID), rediskey.UserGroupVersionKey(userUUID)},
 		args...,
 	).Int64(); err != nil {
-		return WrapRedisError(err)
+		return repoerr.WrapRedisError(err)
 	}
 	return nil
 }
@@ -700,10 +701,10 @@ func (r *groupRepositoryImpl) ListGroupCacheReconcileTargets(
 	limit int,
 ) ([]GroupCacheReconcileTarget, error) {
 	if r == nil || r.db == nil {
-		return nil, ErrDatabase
+		return nil, repoerr.ErrDatabase
 	}
 	if afterID < 0 || limit <= 0 {
-		return nil, fmt.Errorf("%w: invalid group cache reconcile cursor", ErrDatabase)
+		return nil, fmt.Errorf("%w: invalid group cache reconcile cursor", repoerr.ErrDatabase)
 	}
 	var targets []GroupCacheReconcileTarget
 	if err := r.db.WithContext(ctx).
@@ -714,7 +715,7 @@ func (r *groupRepositoryImpl) ListGroupCacheReconcileTargets(
 		Order("id ASC").
 		Limit(limit).
 		Scan(&targets).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	return targets, nil
 }
@@ -727,7 +728,7 @@ func (r *groupRepositoryImpl) ListGroupCacheReconcileTargets(
 // 也只会被脚本拒绝，不会把新缓存回滚。
 func (r *groupRepositoryImpl) ReconcileGroupCache(ctx context.Context, groupUUID string) error {
 	if r == nil || r.db == nil || groupUUID == "" {
-		return fmt.Errorf("%w: invalid group cache reconcile request", ErrDatabase)
+		return fmt.Errorf("%w: invalid group cache reconcile request", repoerr.ErrDatabase)
 	}
 	if r.redisClient == nil {
 		return nil
@@ -738,7 +739,7 @@ func (r *groupRepositoryImpl) ReconcileGroupCache(ctx context.Context, groupUUID
 	}
 	version := snapshot.group.CacheVersion
 	if version <= 0 {
-		return fmt.Errorf("%w: group %s cache_version is not initialized", ErrDatabase, groupUUID)
+		return fmt.Errorf("%w: group %s cache_version is not initialized", repoerr.ErrDatabase, groupUUID)
 	}
 
 	r.addGroupUUIDToBloomBestEffort(ctx, groupUUID)
@@ -792,14 +793,14 @@ func (r *groupRepositoryImpl) loadGroupCacheReconcileSnapshot(
 			Clauses(clause.Locking{Strength: "SHARE"}).
 			Where("uuid = ?", groupUUID).
 			Take(&group).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 		var allMembers []*model.GroupMember
 		if err := tx.Unscoped().
 			Where("group_uuid = ?", groupUUID).
 			Order("id ASC").
 			Find(&allMembers).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		activeMembers := make([]*model.GroupMember, 0, len(allMembers))
@@ -815,7 +816,7 @@ func (r *groupRepositoryImpl) loadGroupCacheReconcileSnapshot(
 			if err := tx.Where("group_uuid = ? AND status = ?", groupUUID, joinRequestStatusPending).
 				Order("created_at DESC, id DESC").
 				Find(&pendingRequests).Error; err != nil {
-				return WrapDBError(err)
+				return repoerr.WrapDBError(err)
 			}
 		}
 		snapshot = groupCacheReconcileSnapshot{
@@ -840,7 +841,7 @@ func (r *groupRepositoryImpl) loadGroupCacheReconcileSnapshot(
 // 在“读快照 vN 与删除事件 vN+1 交错”时可能把已退出群重新加回缓存。
 func (r *groupRepositoryImpl) ReconcileUserGroupsCache(ctx context.Context, userUUID string) error {
 	if r == nil || r.db == nil || userUUID == "" {
-		return fmt.Errorf("%w: invalid user-group reconcile request", ErrDatabase)
+		return fmt.Errorf("%w: invalid user-group reconcile request", repoerr.ErrDatabase)
 	}
 	if r.redisClient == nil {
 		return nil
@@ -910,7 +911,7 @@ func (r *groupRepositoryImpl) loadUserGroupReconcileTargets(
 
 	return nil, fmt.Errorf(
 		"%w: user %s memberships 在 %d 次快照尝试内持续变化",
-		ErrDatabase,
+		repoerr.ErrDatabase,
 		userUUID,
 		maxUserGroupReconcileSnapshotAttempts,
 	)
@@ -933,7 +934,7 @@ func (r *groupRepositoryImpl) discoverUserGroupReconcileCandidates(
 		Distinct("group_uuid").
 		Where("user_uuid = ?", userUUID).
 		Pluck("group_uuid", &membershipUUIDs).Error; err != nil {
-		return nil, WrapDBError(err)
+		return nil, repoerr.WrapDBError(err)
 	}
 	candidates := make([]string, 0, len(membershipUUIDs)+len(cachedVersions))
 	candidates = append(candidates, membershipUUIDs...)
@@ -970,7 +971,7 @@ func (r *groupRepositoryImpl) loadUserGroupReconcileTargetsOnce(
 				Where("uuid IN ?", candidateUUIDs).
 				Order("uuid ASC").
 				Find(&groups).Error; err != nil {
-				return WrapDBError(err)
+				return repoerr.WrapDBError(err)
 			}
 		}
 
@@ -981,7 +982,7 @@ func (r *groupRepositoryImpl) loadUserGroupReconcileTargetsOnce(
 			Where("user_uuid = ?", userUUID).
 			Order("id ASC").
 			Find(&memberships).Error; err != nil {
-			return WrapDBError(err)
+			return repoerr.WrapDBError(err)
 		}
 
 		for _, membership := range memberships {
@@ -1077,7 +1078,7 @@ func (r *groupRepositoryImpl) loadCachedUserGroupProjectionVersions(
 		if cachex.IsRedisWrongType(err) {
 			return result, nil
 		}
-		return nil, WrapRedisError(err)
+		return nil, repoerr.WrapRedisError(err)
 	}
 
 	if len(values) == 0 || values[groupProjectionSchemaField] != groupCacheSchemaVersion {
@@ -1109,8 +1110,8 @@ func (r *groupRepositoryImpl) scheduleGroupCacheReconcile(ctx context.Context, g
 		_, err, _ := r.memberGroup.Do("cache-reconcile-group:"+groupUUID, func() (interface{}, error) {
 			return nil, r.ReconcileGroupCache(runCtx, groupUUID)
 		})
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) && !errors.Is(err, ErrRecordNotFound) {
-			LogRedisError(runCtx, err)
+		if err != nil && !errors.Is(err, repoerr.ErrRecordNotFound) {
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRetryTimeout)
 }
@@ -1124,7 +1125,7 @@ func (r *groupRepositoryImpl) scheduleUserGroupsCacheReconcile(ctx context.Conte
 			return nil, r.ReconcileUserGroupsCache(runCtx, userUUID)
 		})
 		if err != nil {
-			LogRedisError(runCtx, err)
+			repoerr.LogRedisError(runCtx, err)
 		}
 	}, async.AsyncRetryTimeout)
 }
@@ -1139,7 +1140,7 @@ func (r *groupRepositoryImpl) scheduleUserGroupsCacheAuditAfterHit(ctx context.C
 	claimed, err := r.claimUserGroupsReconcileLease(ctx, userUUID)
 	if err != nil {
 		// 对账是读路径的自愈增强项。Redis 短暂异常不能把已经成功完成的业务读降级为失败。
-		LogRedisError(ctx, err)
+		repoerr.LogRedisError(ctx, err)
 		return
 	}
 	if claimed {
@@ -1158,7 +1159,7 @@ func (r *groupRepositoryImpl) claimUserGroupsReconcileLease(ctx context.Context,
 		rediskey.UserGroupReconcileLeaseTTL,
 	).Result()
 	if err != nil {
-		return false, WrapRedisError(err)
+		return false, repoerr.WrapRedisError(err)
 	}
 	return claimed, nil
 }

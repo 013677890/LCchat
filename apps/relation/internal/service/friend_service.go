@@ -12,6 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
+	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 )
 
@@ -617,7 +618,7 @@ func (s *friendServiceImpl) DeleteFriend(ctx context.Context, req *pb.DeleteFrie
 
 	// 仓储层按“当前用户 -> 对端用户”的单向关系删除；不存在时映射为不是好友。
 	if err := s.friendRepo.DeleteFriendRelation(ctx, currentUserUUID, req.UserUuid); err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return apperr.New(consts.CodeNotFriend)
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "删除好友关系失败")
@@ -648,7 +649,7 @@ func (s *friendServiceImpl) SetFriendRemark(ctx context.Context, req *pb.SetFrie
 
 	// 备注只更新当前用户这一侧的 relation 记录；不存在时说明当前不是好友。
 	if err := s.friendRepo.SetFriendRemark(ctx, currentUserUUID, req.UserUuid, req.Remark); err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return apperr.New(consts.CodeNotFriend)
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "设置好友备注失败")
@@ -679,7 +680,7 @@ func (s *friendServiceImpl) SetFriendTag(ctx context.Context, req *pb.SetFriendT
 
 	// groupTag 可以为空，表示清空标签；但 relation 不存在时仍视为不是好友。
 	if err := s.friendRepo.SetFriendTag(ctx, currentUserUUID, req.UserUuid, req.GroupTag); err != nil {
-		if errors.Is(err, repository.ErrRecordNotFound) {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return apperr.New(consts.CodeNotFriend)
 		}
 		return apperr.Wrap(err, consts.CodeInternalError, "设置好友标签失败")
