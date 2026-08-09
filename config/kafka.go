@@ -17,6 +17,8 @@ type KafkaConfig struct {
 	AuthRedisRetryGroupID      string `json:"authRedisRetryGroupId" yaml:"authRedisRetryGroupId"`           // auth 缓存失效补偿消费者组
 	UserRedisRetryTopic        string `json:"userRedisRetryTopic" yaml:"userRedisRetryTopic"`               // user 缓存失效补偿 topic
 	UserRedisRetryGroupID      string `json:"userRedisRetryGroupId" yaml:"userRedisRetryGroupId"`           // user 缓存失效补偿消费者组
+	RelationRedisRetryTopic    string `json:"relationRedisRetryTopic" yaml:"relationRedisRetryTopic"`       // relation 缓存失效补偿 topic
+	RelationRedisRetryGroupID  string `json:"relationRedisRetryGroupId" yaml:"relationRedisRetryGroupId"`   // relation 缓存失效补偿消费者组
 	UserCreatedTopic           string `json:"userCreatedTopic" yaml:"userCreatedTopic"`                     // 注册完成事件 topic
 	ProfileDisplayChangedTopic string `json:"profileDisplayChangedTopic" yaml:"profileDisplayChangedTopic"` // 资料展示字段变更事件 topic
 	AccountDeletedTopic        string `json:"accountDeletedTopic" yaml:"accountDeletedTopic"`               // 账号注销事件 topic
@@ -62,6 +64,8 @@ func DefaultKafkaConfig() KafkaConfig {
 		AuthRedisRetryGroupID:      getenvString("KAFKA_AUTH_REDIS_RETRY_GROUP_ID", "auth-redis-invalidate-group"),
 		UserRedisRetryTopic:        getenvString("KAFKA_USER_REDIS_RETRY_TOPIC", "user.redis.invalidate"),
 		UserRedisRetryGroupID:      getenvString("KAFKA_USER_REDIS_RETRY_GROUP_ID", "user-redis-invalidate-group"),
+		RelationRedisRetryTopic:    getenvString("KAFKA_RELATION_REDIS_RETRY_TOPIC", "relation.redis.invalidate"),
+		RelationRedisRetryGroupID:  getenvString("KAFKA_RELATION_REDIS_RETRY_GROUP_ID", "relation-redis-invalidate-group"),
 		UserCreatedTopic:           getenvString("KAFKA_USER_CREATED_TOPIC", "user_created"),
 		ProfileDisplayChangedTopic: getenvString("KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC", "profile_display_changed"),
 		AccountDeletedTopic:        getenvString("KAFKA_ACCOUNT_DELETED_TOPIC", "account.deleted"),

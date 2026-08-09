@@ -1,9 +1,12 @@
 package redisretry
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
@@ -53,14 +56,15 @@ func (c *RedisRetryConsumer) Close() error {
 }
 
 func (c *RedisRetryConsumer) processMessage(ctx context.Context, message []byte) error {
-	var task RedisTask
-	if err := json.Unmarshal(message, &task); err != nil {
+	task, err := decodeRedisTask(message)
+	if err != nil {
 		return kafka.Permanent(fmt.Errorf("解析 Redis DEL 任务失败: %w", err))
 	}
 	if err := task.Validate(); err != nil {
 		return kafka.Permanent(err)
 	}
 	ctx = contextFromTask(ctx, task)
+	ctx = withCompensationContext(ctx)
 
 	if err := c.redisClient.Del(ctx, task.Keys...).Err(); err != nil {
 		return fmt.Errorf("执行 Redis DEL 失败: %w", err)
@@ -71,6 +75,24 @@ func (c *RedisRetryConsumer) processMessage(ctx context.Context, message []byte)
 		"source": task.Source,
 	})
 	return nil
+}
+
+// decodeRedisTask 严格按当前 RedisTask 契约解码；未知字段和尾随 JSON 一律拒绝。
+func decodeRedisTask(message []byte) (RedisTask, error) {
+	decoder := json.NewDecoder(bytes.NewReader(message))
+	decoder.DisallowUnknownFields()
+
+	var task RedisTask
+	if err := decoder.Decode(&task); err != nil {
+		return RedisTask{}, err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return RedisTask{}, errors.New("Redis DEL 任务包含尾随 JSON")
+		}
+		return RedisTask{}, err
+	}
+	return task, nil
 }
 
 func contextFromTask(ctx context.Context, task RedisTask) context.Context {

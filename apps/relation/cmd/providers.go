@@ -17,10 +17,13 @@ import (
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
+	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/google/wire"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
@@ -48,6 +51,11 @@ func provideRelationRedisConfig() config.RedisConfig {
 	cfg := config.DefaultRedisConfig()
 	cfg.ReadTimeout = 50 * time.Millisecond
 	cfg.WriteTimeout = 50 * time.Millisecond
+	// relation 的权限事实位于 MySQL；Redis 最多做 2 次短重试（共 3 次尝试），
+	// 避免 Redis 故障把 300ms gRPC 请求预算全部吃满，最终失败交给 Kafka DEL 补偿。
+	cfg.MaxRetries = 2
+	cfg.MinRetryBackoff = 10 * time.Millisecond
+	cfg.MaxRetryBackoff = 50 * time.Millisecond
 	return cfg
 }
 
@@ -75,7 +83,36 @@ func provideRelationRedisClient(log *zap.Logger, cfg config.RedisConfig) (*gored
 		_ = log
 		return nil, nil
 	}
+	client.AddHook(redisretry.NewWriteFailureHook("relation-service.redis-write"))
 	return client, nil
+}
+
+// 缓存失效补偿仅在 Redis 客户端启用时工作；MySQL-Only 模式没有待清理缓存。
+func provideRelationRedisRetryProducer(redisClient *goredis.Client, cfg config.KafkaConfig) *kafka.Producer {
+	if redisClient == nil {
+		return nil
+	}
+	return kafka.NewProducer(cfg.Brokers, cfg.RelationRedisRetryTopic)
+}
+
+// Consumer 的失败重试由通用 Kafka 消费器负责，超过预算后写入 dead_events。
+func provideRelationRedisRetryConsumer(
+	redisClient *goredis.Client,
+	cfg config.KafkaConfig,
+	log *zap.Logger,
+	db *gorm.DB,
+) *redisretry.RedisRetryConsumer {
+	if redisClient == nil {
+		return nil
+	}
+	return redisretry.NewRedisRetryConsumer(
+		cfg.Brokers,
+		cfg.RelationRedisRetryTopic,
+		cfg.RelationRedisRetryGroupID,
+		redisClient,
+		outbox.NewDeadLetterSink(db, "relation-service:redis-invalidation"),
+		kafka.NewZapLoggerAdapter(log),
+	)
 }
 
 func provideRelationGRPCAddress() relationGRPCAddress {
@@ -191,6 +228,8 @@ var relationInfraProviderSet = wire.NewSet(
 	provideRelationAsyncReleaseTimeout,
 	provideRelationMySQLDB,
 	provideRelationRedisClient,
+	provideRelationRedisRetryProducer,
+	provideRelationRedisRetryConsumer,
 	provideRelationGRPCAddress,
 	provideRelationMetricsAddress,
 	provideRelationAuthGRPCAddress,

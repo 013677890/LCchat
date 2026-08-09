@@ -90,3 +90,47 @@ func TestApplyRepositoryAcceptApplyRemovesPendingCache(t *testing.T) {
 
 	requirePendingApplyRemoved(t, repo, client, apply.TargetUuid, apply.ApplicantUuid)
 }
+
+func TestApplyRepositoryGetUnreadCountFallsBackToDBOnCacheMiss(t *testing.T) {
+	repo, client := newApplyRepositoryTestRepo(t)
+	ctx := context.Background()
+	targetUUID := "user-1"
+
+	require.NoError(t, repo.db.WithContext(ctx).Create([]*model.ApplyRequest{
+		{ApplyType: 0, ApplicantUuid: "user-2", TargetUuid: targetUUID, Status: 0, IsRead: false},
+		{ApplyType: 0, ApplicantUuid: "user-3", TargetUuid: targetUUID, Status: 1, IsRead: false},
+		{ApplyType: 0, ApplicantUuid: "user-4", TargetUuid: targetUUID, Status: 2, IsRead: true},
+	}).Error)
+
+	count, err := repo.GetUnreadCount(ctx, targetUUID)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count)
+	cached, err := client.Get(ctx, rediskey.ApplyUnreadNotifyKey(targetUUID)).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, 2, cached)
+}
+
+func TestApplyRepositoryGetUnreadCountRepairsMalformedCacheFromDB(t *testing.T) {
+	repo, client := newApplyRepositoryTestRepo(t)
+	ctx := context.Background()
+	targetUUID := "user-1"
+	notifyKey := rediskey.ApplyUnreadNotifyKey(targetUUID)
+
+	require.NoError(t, repo.db.WithContext(ctx).Create(&model.ApplyRequest{
+		ApplyType:     0,
+		ApplicantUuid: "user-2",
+		TargetUuid:    targetUUID,
+		Status:        0,
+		IsRead:        false,
+	}).Error)
+	require.NoError(t, client.Set(ctx, notifyKey, "invalid", 0).Err())
+
+	count, err := repo.GetUnreadCount(ctx, targetUUID)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	cached, err := client.Get(ctx, notifyKey).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, cached)
+}

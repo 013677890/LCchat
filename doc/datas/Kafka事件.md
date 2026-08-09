@@ -8,6 +8,7 @@
 | --- | --- | --- | --- | --- |
 | `auth.redis.invalidate` | `KAFKA_AUTH_REDIS_RETRY_TOPIC` | auth | auth | 只补偿 auth 所属缓存的安全 `DEL`。 |
 | `user.redis.invalidate` | `KAFKA_USER_REDIS_RETRY_TOPIC` | user | user | 只补偿 user 所属缓存的安全 `DEL`。 |
+| `relation.redis.invalidate` | `KAFKA_RELATION_REDIS_RETRY_TOPIC` | relation | relation | 补偿好友、黑名单、申请列表与未读计数缓存的安全 `DEL`。 |
 | `user_created` | `KAFKA_USER_CREATED_TOPIC` | auth Outbox | user | 注册成功后初始化用户资料。 |
 | `profile_display_changed` | `KAFKA_PROFILE_DISPLAY_CHANGED_TOPIC` | user | auth | 昵称/头像变化后回写登录展示冗余。 |
 | `account.deleted` | `KAFKA_ACCOUNT_DELETED_TOPIC` | auth Outbox | user/relation/group 等 | 账号注销后的下游清理。 |
@@ -43,7 +44,7 @@
 
 ### Redis 缓存失效补偿
 
-auth 和 user 使用不同 Topic 与 consumer group，任务不会跨服务竞争，也不会因不同 group 广播到两个服务。payload 只包含待删除的 key 和追踪元数据，不接受 `SET`、`HSET`、Pipeline 或 Lua 等可写回旧值的命令。
+auth、user 和 relation 使用不同 Topic 与 consumer group，任务不会跨服务竞争，也不会因不同 group 广播到其他服务。payload 只包含当前 `RedisTask` 契约声明的待删除 key 和追踪元数据，不接受未知字段、尾随 JSON、`SET`、`HSET`、Pipeline 或 Lua 等可写回旧值的命令。relation 在 go-redis 完成最多 2 次短重试（共 3 次尝试）后投递补偿；消费者对 Redis DEL 原地重试最多约 2 分钟，之后写 relation 数据库的 `dead_events`。
 
 消费者使用手动提交：`DEL` 成功后提交 offset；Redis 暂时失败时原地重试同一条消息；payload 非法或重试预算耗尽时，只有写入当前服务数据库的 `dead_events` 成功后才提交。初次投递使用第一个 key 作为 Kafka key。
 

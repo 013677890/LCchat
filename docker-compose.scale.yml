@@ -54,7 +54,7 @@ services:
       - |
         # 空数据基线：业务 topic 固定 3 partitions。不在应用进程内 alter。
         # 若本地已存在错误 partition 数的旧 topic，应停写排空后删除重建，禁止假设在线扩容后同群历史顺序仍成立。
-        topics="auth.redis.invalidate user.redis.invalidate user_created profile_display_changed account.deleted msg.push realtime.push group.cache"
+        topics="auth.redis.invalidate user.redis.invalidate relation.redis.invalidate user_created profile_display_changed account.deleted msg.push realtime.push group.cache"
         for topic in $$topics; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1
         done

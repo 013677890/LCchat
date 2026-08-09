@@ -6,6 +6,7 @@ dead-letter behavior, or idempotency.
 ## Topics
 - Auth Redis invalidation: `auth.redis.invalidate`, consumed only by auth.
 - User Redis invalidation: `user.redis.invalidate`, consumed only by user.
+- Relation Redis invalidation: `relation.redis.invalidate`, consumed only by relation.
 - User created: `user_created`.
 - Profile display changed: `profile_display_changed`.
 - Account deleted: `account.deleted`.

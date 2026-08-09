@@ -6,11 +6,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultKafkaConfigSeparatesAuthAndUserRedisInvalidation(t *testing.T) {
+func TestDefaultKafkaConfigSeparatesRedisInvalidationByService(t *testing.T) {
 	t.Setenv("KAFKA_AUTH_REDIS_RETRY_TOPIC", "")
 	t.Setenv("KAFKA_AUTH_REDIS_RETRY_GROUP_ID", "")
 	t.Setenv("KAFKA_USER_REDIS_RETRY_TOPIC", "")
 	t.Setenv("KAFKA_USER_REDIS_RETRY_GROUP_ID", "")
+	t.Setenv("KAFKA_RELATION_REDIS_RETRY_TOPIC", "")
+	t.Setenv("KAFKA_RELATION_REDIS_RETRY_GROUP_ID", "")
 
 	cfg := DefaultKafkaConfig()
 
@@ -18,6 +20,16 @@ func TestDefaultKafkaConfigSeparatesAuthAndUserRedisInvalidation(t *testing.T) {
 	require.Equal(t, "auth-redis-invalidate-group", cfg.AuthRedisRetryGroupID)
 	require.Equal(t, "user.redis.invalidate", cfg.UserRedisRetryTopic)
 	require.Equal(t, "user-redis-invalidate-group", cfg.UserRedisRetryGroupID)
-	require.NotEqual(t, cfg.AuthRedisRetryTopic, cfg.UserRedisRetryTopic)
-	require.NotEqual(t, cfg.AuthRedisRetryGroupID, cfg.UserRedisRetryGroupID)
+	require.Equal(t, "relation.redis.invalidate", cfg.RelationRedisRetryTopic)
+	require.Equal(t, "relation-redis-invalidate-group", cfg.RelationRedisRetryGroupID)
+	require.Len(t, map[string]struct{}{
+		cfg.AuthRedisRetryTopic:     {},
+		cfg.UserRedisRetryTopic:     {},
+		cfg.RelationRedisRetryTopic: {},
+	}, 3)
+	require.Len(t, map[string]struct{}{
+		cfg.AuthRedisRetryGroupID:     {},
+		cfg.UserRedisRetryGroupID:     {},
+		cfg.RelationRedisRetryGroupID: {},
+	}, 3)
 }

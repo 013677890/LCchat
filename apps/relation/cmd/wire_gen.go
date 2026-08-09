@@ -64,8 +64,10 @@ func initializeRelationApp() (*RelationApp, error) {
 		return nil, err
 	}
 	mainRelationAsyncReleaseTimeout := provideRelationAsyncReleaseTimeout(asyncConfig)
+	redisRetryConsumer := provideRelationRedisRetryConsumer(client, kafkaConfig, logger, db)
 	accountDeletedConsumer := provideRelationAccountDeletedConsumer(kafkaConfig, iFriendRepository, iApplyRepository, db)
-	relationApp, err := NewRelationApp(logger, server, builtServer, listener, mainRelationGRPCShutdownTimeout, pool, mainRelationAsyncReleaseTimeout, accountDeletedConsumer, producer, mainRelationAuthGRPCConn, db, client)
+	kafkaProducer := provideRelationRedisRetryProducer(client, kafkaConfig)
+	relationApp, err := NewRelationApp(logger, server, builtServer, listener, mainRelationGRPCShutdownTimeout, pool, mainRelationAsyncReleaseTimeout, redisRetryConsumer, accountDeletedConsumer, kafkaProducer, producer, mainRelationAuthGRPCConn, db, client)
 	if err != nil {
 		return nil, err
 	}

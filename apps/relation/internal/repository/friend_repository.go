@@ -643,13 +643,17 @@ func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, u
 		return
 	}
 
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	keys := []string{
+		rediskey.FriendRelationKey(userUUID),
+		rediskey.FriendRelationKey(friendUUID),
+	}
+	runRedisCacheTask(ctx, "FriendRepository.invalidateFriendCache", keys, async.AsyncRedisTimeout, func(runCtx context.Context) {
 		pairs := []struct {
 			userKey   string
 			newFriend string
 		}{
-			{userKey: rediskey.FriendRelationKey(userUUID), newFriend: friendUUID},
-			{userKey: rediskey.FriendRelationKey(friendUUID), newFriend: userUUID},
+			{userKey: keys[0], newFriend: friendUUID},
+			{userKey: keys[1], newFriend: userUUID},
 		}
 
 		metaJSON := buildFriendMetaJSON("", "", "", time.Now().UnixMilli())
@@ -673,7 +677,7 @@ func (r *friendRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, u
 				repoerr.LogRedisError(runCtx, err)
 			}
 		}
-	}, async.AsyncRedisTimeout)
+	})
 }
 
 // removeFriendCacheAsync 异步删除单向好友缓存。
@@ -685,7 +689,7 @@ func (r *friendRepositoryImpl) removeFriendCacheAsync(ctx context.Context, userU
 	}
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "FriendRepository.removeFriendCache", []string{cacheKey}, async.AsyncRedisTimeout, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaRemoveFriendMetaIfExists)
 		placeholderJSON := buildFriendMetaJSON("", "", "", 0)
 		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
@@ -703,7 +707,7 @@ func (r *friendRepositoryImpl) removeFriendCacheAsync(ctx context.Context, userU
 			}
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisTimeout)
+	})
 }
 
 // rebuildFriendCacheAsync 异步重建某个用户的好友 Hash。
@@ -716,7 +720,7 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 	}
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "FriendRepository.rebuildFriendCache", []string{cacheKey}, async.AsyncRedisPipelineTimeout, func(runCtx context.Context) {
 		pipe := r.redisClient.Pipeline()
 		pipe.Del(runCtx, cacheKey)
 
@@ -752,7 +756,7 @@ func (r *friendRepositoryImpl) rebuildFriendCacheAsync(ctx context.Context, user
 			}
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisPipelineTimeout)
+	})
 }
 
 func (r *friendRepositoryImpl) invalidateRelationCachesAsync(ctx context.Context, userUUIDs []string) {
@@ -760,25 +764,35 @@ func (r *friendRepositoryImpl) invalidateRelationCachesAsync(ctx context.Context
 		return
 	}
 
-	async.RunSafe(ctx, func(runCtx context.Context) {
-		seen := make(map[string]struct{}, len(userUUIDs))
+	seen := make(map[string]struct{}, len(userUUIDs))
+	keys := make([]string, 0, len(userUUIDs)*2)
+	for _, userUUID := range userUUIDs {
+		if userUUID == "" {
+			continue
+		}
+		if _, ok := seen[userUUID]; ok {
+			continue
+		}
+		seen[userUUID] = struct{}{}
+		keys = append(keys,
+			rediskey.FriendRelationKey(userUUID),
+			rediskey.BlacklistRelationKey(userUUID),
+		)
+	}
+	if len(keys) == 0 {
+		return
+	}
+
+	runRedisCacheTask(ctx, "FriendRepository.invalidateRelationCaches", keys, async.AsyncRedisPipelineTimeout, func(runCtx context.Context) {
 		pipe := r.redisClient.Pipeline()
-		for _, userUUID := range userUUIDs {
-			if userUUID == "" {
-				continue
-			}
-			if _, ok := seen[userUUID]; ok {
-				continue
-			}
-			seen[userUUID] = struct{}{}
-			pipe.Del(runCtx, rediskey.FriendRelationKey(userUUID))
-			pipe.Del(runCtx, rediskey.BlacklistRelationKey(userUUID))
+		for _, key := range keys {
+			pipe.Del(runCtx, key)
 		}
 
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisPipelineTimeout)
+	})
 }
 
 // updateFriendMetaCacheAsync 异步更新单个好友的元数据缓存。
@@ -791,7 +805,7 @@ func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, u
 	}
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "FriendRepository.updateFriendMetaCache", []string{cacheKey}, async.AsyncRedisTimeout, func(runCtx context.Context) {
 		metaJSON := buildFriendMetaJSON(
 			relation.Remark,
 			relation.GroupTag,
@@ -814,7 +828,7 @@ func (r *friendRepositoryImpl) updateFriendMetaCacheAsync(ctx context.Context, u
 			}
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisTimeout)
+	})
 }
 
 // updateFriendRemarkCacheAsync 异步更新单个好友的备注缓存。
@@ -827,7 +841,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 	}
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "FriendRepository.updateFriendRemarkCache", []string{cacheKey}, async.AsyncRedisPipelineTimeout, func(runCtx context.Context) {
 		pipe := r.redisClient.Pipeline()
 		existsCmd := pipe.Exists(runCtx, cacheKey)
 		metaCmd := pipe.HGet(runCtx, cacheKey, friendUUID)
@@ -891,7 +905,7 @@ func (r *friendRepositoryImpl) updateFriendRemarkCacheAsync(ctx context.Context,
 		}
 
 		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
-	}, async.AsyncRedisPipelineTimeout)
+	})
 }
 
 // updateFriendTagCacheAsync 异步更新单个好友的标签缓存。
@@ -904,7 +918,7 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 	}
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "FriendRepository.updateFriendTagCache", []string{cacheKey}, async.AsyncRedisPipelineTimeout, func(runCtx context.Context) {
 		pipe := r.redisClient.Pipeline()
 		existsCmd := pipe.Exists(runCtx, cacheKey)
 		metaCmd := pipe.HGet(runCtx, cacheKey, friendUUID)
@@ -968,5 +982,5 @@ func (r *friendRepositoryImpl) updateFriendTagCacheAsync(ctx context.Context, us
 		}
 
 		r.updateFriendMetaCacheAsync(runCtx, userUUID, &relation)
-	}, async.AsyncRedisPipelineTimeout)
+	})
 }

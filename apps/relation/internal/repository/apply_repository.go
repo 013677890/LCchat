@@ -350,25 +350,35 @@ func (r *applyRepositoryImpl) invalidateApplyCachesAsync(ctx context.Context, ta
 		return
 	}
 
-	async.RunSafe(ctx, func(runCtx context.Context) {
-		seen := make(map[string]struct{}, len(targetUUIDs))
+	seen := make(map[string]struct{}, len(targetUUIDs))
+	keys := make([]string, 0, len(targetUUIDs)*2)
+	for _, targetUUID := range targetUUIDs {
+		if targetUUID == "" {
+			continue
+		}
+		if _, ok := seen[targetUUID]; ok {
+			continue
+		}
+		seen[targetUUID] = struct{}{}
+		keys = append(keys,
+			rediskey.ApplyPendingKey(targetUUID),
+			rediskey.ApplyUnreadNotifyKey(targetUUID),
+		)
+	}
+	if len(keys) == 0 {
+		return
+	}
+
+	runRedisCacheTask(ctx, "ApplyRepository.invalidateApplyCaches", keys, async.AsyncRedisPipelineTimeout, func(runCtx context.Context) {
 		pipe := r.redisClient.Pipeline()
-		for _, targetUUID := range targetUUIDs {
-			if targetUUID == "" {
-				continue
-			}
-			if _, ok := seen[targetUUID]; ok {
-				continue
-			}
-			seen[targetUUID] = struct{}{}
-			pipe.Del(runCtx, rediskey.ApplyPendingKey(targetUUID))
-			pipe.Del(runCtx, rediskey.ApplyUnreadNotifyKey(targetUUID))
+		for _, key := range keys {
+			pipe.Del(runCtx, key)
 		}
 
 		if _, err := pipe.Exec(runCtx); err != nil && err != goredis.Nil {
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisPipelineTimeout)
+	})
 }
 
 // UpdateStatus 更新申请状态。
@@ -490,7 +500,11 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 		return
 	}
 
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	keys := []string{
+		rediskey.FriendRelationKey(userUUID),
+		rediskey.FriendRelationKey(friendUUID),
+	}
+	runRedisCacheTask(ctx, "ApplyRepository.invalidateFriendCache", keys, async.AsyncRedisTimeout, func(runCtx context.Context) {
 		// A->B 方向允许写入 remark；B->A 方向只恢复好友存在性，不覆盖对方自己的备注。
 		pairs := []struct {
 			userKey   string
@@ -499,13 +513,13 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 			upsert    bool
 		}{
 			{
-				userKey:   rediskey.FriendRelationKey(userUUID),
+				userKey:   keys[0],
 				newFriend: friendUUID,
 				metaJSON:  buildFriendMetaJSON(remark, "", "", time.Now().UnixMilli()),
 				upsert:    true,
 			},
 			{
-				userKey:   rediskey.FriendRelationKey(friendUUID),
+				userKey:   keys[1],
 				newFriend: userUUID,
 				metaJSON:  buildFriendMetaJSON("", "", "", time.Now().UnixMilli()),
 				upsert:    false,
@@ -537,7 +551,7 @@ func (r *applyRepositoryImpl) invalidateFriendCacheAsync(ctx context.Context, us
 				repoerr.LogRedisError(runCtx, err)
 			}
 		}
-	}, async.AsyncRedisTimeout)
+	})
 }
 
 // removePendingApplyCache 在好友申请进入终态后同步移除待处理列表中的申请人。
@@ -629,10 +643,10 @@ func (r *applyRepositoryImpl) GetUnreadCount(ctx context.Context, targetUUID str
 	val, err := r.redisClient.Get(ctx, notifyKey).Result()
 
 	if err != nil {
-		if err == goredis.Nil {
-			return 0, nil
+		if err != goredis.Nil {
+			repoerr.LogRedisError(ctx, err)
 		}
-		return 0, repoerr.WrapRedisError(err)
+		return r.loadUnreadCountFromDB(ctx, notifyKey, targetUUID)
 	}
 
 	count, convErr := strconv.ParseInt(val, 10, 64)
@@ -641,7 +655,10 @@ func (r *applyRepositoryImpl) GetUnreadCount(ctx context.Context, targetUUID str
 			logger.String("value", val),
 			logger.ErrorField("error", convErr),
 		)
-		return 0, nil
+		if err := r.redisClient.Del(ctx, notifyKey).Err(); err != nil && err != goredis.Nil {
+			repoerr.LogRedisError(ctx, err)
+		}
+		return r.loadUnreadCountFromDB(ctx, notifyKey, targetUUID)
 	}
 
 	if count < 0 {
@@ -652,6 +669,17 @@ func (r *applyRepositoryImpl) GetUnreadCount(ctx context.Context, targetUUID str
 		repoerr.LogRedisError(ctx, err)
 	}
 
+	return count, nil
+}
+
+func (r *applyRepositoryImpl) loadUnreadCountFromDB(ctx context.Context, notifyKey, targetUUID string) (int64, error) {
+	count, err := r.countUnreadFromDB(ctx, targetUUID)
+	if err != nil {
+		return 0, err
+	}
+	if err := r.redisClient.Set(ctx, notifyKey, count, rediskey.ApplyUnreadNotifyTTL).Err(); err != nil {
+		repoerr.LogRedisError(ctx, err)
+	}
 	return count, nil
 }
 

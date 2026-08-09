@@ -303,10 +303,16 @@ func (g *Group) setError(err error) {
 	})
 }
 
-// RunSafe 安全的异步任务
+// RunSafe 安全提交 fire-and-forget 异步任务。
 func RunSafe(ctx context.Context, task func(ctx context.Context), timeout time.Duration) {
+	_ = TryRunSafe(ctx, task, timeout)
+}
+
+// TryRunSafe 安全提交异步任务；返回值仅表示任务是否成功进入协程池，不代表任务执行结果。
+// 需要在提交失败时安排持久化补偿的调用方应使用此方法。
+func TryRunSafe(ctx context.Context, task func(ctx context.Context), timeout time.Duration) error {
 	if task == nil {
-		return
+		return ErrNilTask
 	}
 
 	if timeout <= 0 {
@@ -349,7 +355,9 @@ func RunSafe(ctx context.Context, task func(ctx context.Context), timeout time.D
 		cancel()
 		rejected := submitRejected.Add(1)
 		logSubmitFailed(baseCtx, err, timeout, rejected)
+		return err
 	}
+	return nil
 }
 
 func getContextPropagator() func(context.Context) context.Context {

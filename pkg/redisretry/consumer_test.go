@@ -50,6 +50,26 @@ func TestRedisRetryConsumerTreatsInvalidPayloadAsPermanent(t *testing.T) {
 	require.True(t, kafka.IsPermanent(err))
 }
 
+func TestRedisRetryConsumerRejectsUnknownFields(t *testing.T) {
+	consumer := &RedisRetryConsumer{logger: testLogger{}}
+	message := []byte(`{"keys":["cache:1"],"future_field":"unsupported"}`)
+
+	err := consumer.processMessage(context.Background(), message)
+
+	require.Error(t, err)
+	require.True(t, kafka.IsPermanent(err))
+}
+
+func TestRedisRetryConsumerRejectsTrailingJSON(t *testing.T) {
+	consumer := &RedisRetryConsumer{logger: testLogger{}}
+	message := []byte(`{"keys":["cache:1"]} {}`)
+
+	err := consumer.processMessage(context.Background(), message)
+
+	require.Error(t, err)
+	require.True(t, kafka.IsPermanent(err))
+}
+
 func TestRedisRetryConsumerLeavesRedisFailureRetryable(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{

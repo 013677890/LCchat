@@ -341,7 +341,7 @@ func (r *blacklistRepositoryImpl) rebuildBlacklistCacheAsync(ctx context.Context
 	}
 
 	cacheKey := rediskey.BlacklistRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "BlacklistRepository.rebuildBlacklistCache", []string{cacheKey}, async.AsyncRedisPipelineTimeout, func(runCtx context.Context) {
 		pipe := r.redisClient.Pipeline()
 		pipe.Del(runCtx, cacheKey)
 
@@ -379,7 +379,7 @@ func (r *blacklistRepositoryImpl) rebuildBlacklistCacheAsync(ctx context.Context
 			}
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisPipelineTimeout)
+	})
 }
 
 // updateBlacklistCacheAsync 异步把单个用户增量加入黑名单缓存。
@@ -392,7 +392,7 @@ func (r *blacklistRepositoryImpl) updateBlacklistCacheAsync(ctx context.Context,
 	}
 
 	cacheKey := rediskey.BlacklistRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "BlacklistRepository.updateBlacklistCache", []string{cacheKey}, async.AsyncRedisTimeout, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaAddBlacklistIfExists)
 		expireSeconds := int(cachex.JitterTTL(rediskey.BlacklistTTL).Seconds())
 		// 仅在 key 已存在时做补丁写入；缓存整体缺失时交给后续读路径统一全量重建。
@@ -410,7 +410,7 @@ func (r *blacklistRepositoryImpl) updateBlacklistCacheAsync(ctx context.Context,
 			}
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisTimeout)
+	})
 }
 
 // removeBlacklistCacheAsync 异步移除黑名单缓存中的单个成员。
@@ -422,7 +422,7 @@ func (r *blacklistRepositoryImpl) removeBlacklistCacheAsync(ctx context.Context,
 	}
 
 	cacheKey := rediskey.BlacklistRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "BlacklistRepository.removeBlacklistCache", []string{cacheKey}, async.AsyncRedisTimeout, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaRemoveBlacklistIfExists)
 		expireSeconds := int(cachex.JitterTTL(rediskey.BlacklistTTL).Seconds())
 		_, err := luaScript.Run(runCtx, r.redisClient,
@@ -438,7 +438,7 @@ func (r *blacklistRepositoryImpl) removeBlacklistCacheAsync(ctx context.Context,
 			}
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisTimeout)
+	})
 }
 
 // removeFriendCacheAsync 异步删除当前用户侧的好友缓存 field。
@@ -450,7 +450,7 @@ func (r *blacklistRepositoryImpl) removeFriendCacheAsync(ctx context.Context, us
 	}
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "BlacklistRepository.removeFriendCache", []string{cacheKey}, async.AsyncRedisTimeout, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaRemoveFriendMetaIfExists)
 		placeholderJSON := buildFriendMetaJSON("", "", "", 0)
 		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
@@ -468,7 +468,7 @@ func (r *blacklistRepositoryImpl) removeFriendCacheAsync(ctx context.Context, us
 			}
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisTimeout)
+	})
 }
 
 // restoreFriendCacheAsync 在“取消拉黑并恢复好友”时补回当前用户侧的好友缓存。
@@ -480,7 +480,7 @@ func (r *blacklistRepositoryImpl) restoreFriendCacheAsync(ctx context.Context, u
 	}
 
 	cacheKey := rediskey.FriendRelationKey(userUUID)
-	async.RunSafe(ctx, func(runCtx context.Context) {
+	runRedisCacheTask(ctx, "BlacklistRepository.restoreFriendCache", []string{cacheKey}, async.AsyncRedisTimeout, func(runCtx context.Context) {
 		luaScript := goredis.NewScript(luaInsertFriendMetaIfExists)
 		metaJSON := buildFriendMetaJSON("", "", "", time.Now().UnixMilli())
 		expireSeconds := int(cachex.JitterTTL(rediskey.FriendRelationTTL).Seconds())
@@ -498,5 +498,5 @@ func (r *blacklistRepositoryImpl) restoreFriendCacheAsync(ctx context.Context, u
 			}
 			repoerr.LogRedisError(runCtx, err)
 		}
-	}, async.AsyncRedisTimeout)
+	})
 }

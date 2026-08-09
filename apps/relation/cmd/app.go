@@ -12,10 +12,12 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
+	"github.com/013677890/LCchat-Backend/pkg/redisretry"
 	"github.com/panjf2000/ants/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -32,7 +34,9 @@ type RelationApp struct {
 	grpcShutdownTimeout    time.Duration
 	asyncPool              *ants.Pool
 	asyncReleaseTimeout    relationAsyncReleaseTimeout
+	redisRetryConsumer     *redisretry.RedisRetryConsumer
 	accountDeletedConsumer *consumer.AccountDeletedConsumer
+	redisRetryProducer     *kafka.Producer
 	realtimeProducer       *realtimepush.Producer
 	authConn               *grpc.ClientConn
 	db                     *gorm.DB
@@ -48,7 +52,9 @@ func NewRelationApp(
 	grpcShutdownTimeout relationGRPCShutdownTimeout,
 	asyncPool *ants.Pool,
 	asyncReleaseTimeout relationAsyncReleaseTimeout,
+	redisRetryConsumer *redisretry.RedisRetryConsumer,
 	accountDeletedConsumer *consumer.AccountDeletedConsumer,
+	redisRetryProducer *kafka.Producer,
 	realtimeProducer *realtimepush.Producer,
 	authConn relationAuthGRPCConn,
 	db *gorm.DB,
@@ -68,7 +74,9 @@ func NewRelationApp(
 		grpcShutdownTimeout:    time.Duration(grpcShutdownTimeout),
 		asyncPool:              asyncPool,
 		asyncReleaseTimeout:    asyncReleaseTimeout,
+		redisRetryConsumer:     redisRetryConsumer,
 		accountDeletedConsumer: accountDeletedConsumer,
+		redisRetryProducer:     redisRetryProducer,
 		realtimeProducer:       realtimeProducer,
 		authConn:               authConn.ClientConn,
 		db:                     db,
@@ -85,6 +93,14 @@ func (a *RelationApp) Run(ctx context.Context) error {
 			logger.Info(ctx, "Metrics HTTP Server 启动中", logger.String("address", a.metricsServer.Addr))
 			if err := a.metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error(ctx, "Metrics HTTP Server 启动失败", logger.ErrorField("error", err))
+			}
+		}()
+	}
+
+	if a.redisRetryConsumer != nil {
+		go func() {
+			if err := a.redisRetryConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error(ctx, "Relation Redis 补偿消费者运行错误", logger.ErrorField("error", err))
 			}
 		}()
 	}
@@ -126,6 +142,18 @@ func (a *RelationApp) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	if a.redisRetryConsumer != nil {
+		if err := a.redisRetryConsumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Relation Redis 补偿消费者失败: %w", err))
+		}
+	}
+
+	if a.accountDeletedConsumer != nil {
+		if err := a.accountDeletedConsumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Relation account.deleted 消费者失败: %w", err))
+		}
+	}
+
 	if a.asyncPool != nil {
 		var err error
 		if async.Pool() == a.asyncPool {
@@ -138,15 +166,15 @@ func (a *RelationApp) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	if a.accountDeletedConsumer != nil {
-		if err := a.accountDeletedConsumer.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("关闭 Relation account.deleted 消费者失败: %w", err))
-		}
-	}
-
 	if a.realtimeProducer != nil {
 		if err := a.realtimeProducer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("关闭 Relation realtime.push 生产者失败: %w", err))
+		}
+	}
+
+	if a.redisRetryProducer != nil {
+		if err := a.redisRetryProducer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("关闭 Relation Redis 补偿 Producer 失败: %w", err))
 		}
 	}
 
@@ -191,5 +219,8 @@ func (a *RelationApp) installProcessGlobals(ctx context.Context) {
 		return ctxmeta.ChildContextFromParent(parent)
 	})
 	async.ReplaceGlobalWithReleaseTimeout(a.asyncPool, time.Duration(a.asyncReleaseTimeout))
+	if a.redisRetryProducer != nil {
+		redisretry.SetGlobalProducer(a.redisRetryProducer)
+	}
 	_ = ctx
 }
