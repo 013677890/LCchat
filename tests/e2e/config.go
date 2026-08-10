@@ -22,7 +22,7 @@ import (
 )
 
 // Config 集中保存 Docker 本地联调入口和测试超时。
-// 所有地址都支持环境变量覆盖，便于切换到 k3s port-forward 或 CI 服务。
+// 所有地址都支持环境变量覆盖，便于切换到 CI 或其他联调入口。
 type Config struct {
 	GatewayBase      string
 	ConnectBase      string

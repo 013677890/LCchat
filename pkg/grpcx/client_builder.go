@@ -35,7 +35,7 @@ type ClientOptions struct {
 	Observers      []ClientCallObserver
 
 	// LoadBalancingPolicy 写入 gRPC service config。
-	// 默认使用 round_robin，让 Docker/Kubernetes DNS 返回多个后端地址时能分摊请求。
+	// 默认使用 round_robin，让 Docker Compose DNS 返回多个后端地址时能分摊请求。
 	LoadBalancingPolicy string
 
 	ExtraUnaryInterceptors []grpc.UnaryClientInterceptor
