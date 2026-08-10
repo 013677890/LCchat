@@ -1,73 +1,58 @@
-# Outbox And Consumers
+# Outbox、Kafka 与补偿消费者
 
-Use this when changing account/profile/group events, manual Kafka consumers,
-dead-letter behavior, or idempotency.
+涉及账号/资料/群事件、Redis 补偿、死信或幂等时先读本文件和对应 consumer。
 
-## Topics
-- Auth Redis invalidation: `auth.redis.invalidate`, consumed only by auth.
-- User Redis invalidation: `user.redis.invalidate`, consumed only by user.
-- Relation Redis invalidation: `relation.redis.invalidate`, consumed only by relation.
-- User created: `user_created`.
-- Profile display changed: `profile_display_changed`.
-- Account deleted: `account.deleted`.
-- Message push: `msg.push`.
-- Group projections: `group.cache` is consumed independently by the group Redis
-  projector and the msg membership projector.
-- `group.cache` is created with a fixed **3 partitions**. Kafka key is
-  `group_uuid` (`outbox.entity_id`). Same group is always ordered; different
-  groups may run in parallel across partitions.
-- Each of group/msg starts N independent manual-commit Readers in the same
-  consumer group (`pkg/kafka.ManualConsumerPool`). Defaults:
-  `KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY=3`,
-  `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY=3`.
-  Explicit values must be integers in 1..64 or startup fails.
-  Worker count above partition count only yields idle workers.
-  Do not alter partitions online from the app.
+## 本地 Topic 拓扑
 
-## Outbox Contract
-- Business transactions insert `outbox_events`.
-- Debezium/Kafka Connect routes records by `event_type`.
-- Event key is `entity_id`; for group cache this is `group_uuid`.
-- Current Outbox JSON events are delivered as a top-level JSON object via
-  `table.expand.json.payload=true`. `group.cache` and `msg.push` deliberately
-  reject JSON strings, Debezium-style wrappers, unknown fields, and old schemas.
+Docker Compose 的 kafka-topics-init 用固定 3 分区创建以下业务 Topic：
 
-## Manual Consumer Contract
-- `pkg/kafka.NewManualCommitConsumer` commits offset only after handler success.
-- Decode/invalid-payload errors use `kafka.Permanent`; with a configured sink they
-  are written to `dead_events` before the offset is committed.
-- Processing errors return non-nil so the same message is retried.
-- A configured `DeadLetterSink` lets the consumer park a message after retry budget
-  exhaustion and then commit offset.
-- If dead-letter parking fails, offset is not committed and the partition remains blocked.
-- Redis invalidation payloads contain keys only. Never add SET/HSET/Pipeline/Lua replay;
-  stale writes can overwrite newer state.
+- auth.redis.invalidate、user.redis.invalidate、relation.redis.invalidate
+- user_created、profile_display_changed、account.deleted
+- msg.push、realtime.push、group.cache
 
-## Current Dead-Letter Behavior
-- Table/model: `dead_events` / `pkg/outbox.DeadEvent`.
-- Status values: `pending`, `replayed`, `discarded`.
-- Schema lives in `config/mysql/001_schema.sql` and `scripts/migration/004_dead_events.sql`.
-- Sources currently configured:
-  - `auth-service:profile_display_changed`
-  - `auth-service:redis-invalidation`
-  - `user-service:user_created`
-  - `user-service:account.deleted`
-  - `user-service:redis-invalidation`
-  - `relation-service:account.deleted`
-  - `group-service:group.cache`
-  - `msg-service:group-membership`
+应用不得在线扩展业务 Topic 分区。特别是 group.cache 按 group_uuid 作为 key，分区改变会改变同 key 的哈希落点和既有顺序假设。
 
-## Retry/Timeout Defaults
-- Manual consumer per-attempt timeout default: 10s.
-- Manual consumer retry budget default: 2m when a sink is configured.
-- Error backoff remains per consumer config, commonly 1s.
-- MySQL driver socket timeout defaults are added by `pkg/mysql` if DSN omits them:
-  `timeout=5s`, `readTimeout=10s`, `writeTimeout=10s`.
+## 生产和消费关系
 
-## Idempotency Caveat
-- `idempotent_events` unique `(event_type,event_id)` prevents many duplicates.
-- The common pattern is still `Check -> business -> Mark`.
-- That pattern is not true exactly-once for non-idempotent business side effects unless
-  the business write and `MarkIdempotent` happen in one transaction.
-- Msg's `group.cache` membership projector does put its business updates,
-  per-group version advancement, and `MarkIdempotent` in one MySQL transaction.
+| Topic | 生产者 | 消费者 | 目的 |
+| --- | --- | --- | --- |
+| user_created | Auth Outbox | User | 注册后创建资料 |
+| profile_display_changed | User Outbox | Auth | 回写登录展示昵称/头像 |
+| account.deleted | Auth Outbox | User、Relation | 异步清理各自数据 |
+| group.cache | Group Outbox | Group、Msg | Redis 群缓存与 Msg 群成员资格投影 |
+| msg.push | Msg Outbox | Message-push | 消息、撤回、已读等下行 |
+| realtime.push | Relation、Group 直接 Producer | Message-push | 关系/群变化的尽力实时提醒 |
+| 各服务 redis.invalidate | Auth、User、Relation 的补偿 Producer | 对应服务 | Redis 最终写失败后的整键 DEL |
+
+Outbox 的业务表写入与 outbox_events 插入必须在同一个 MySQL 事务中完成。Debezium/Kafka Connect 按 event_type 路由，entity_id 作为 Kafka key。group.cache 与 msg.push 只接受当前顶层 JSON 对象；不要向消费者加入旧 schema、包装对象或字符串负载的向前兼容。
+
+## 手动提交与死信
+
+- pkg/kafka.NewManualCommitConsumer 仅在 handler 成功或死信成功落地后提交 offset。
+- 有 DeadLetterSink 时，每次处理默认 10 秒超时；可重试失败默认在同一消息上重试最多 2 分钟，再落 dead_events。
+- 永久错误和 handler panic 会首轮尝试落 dead_events；死信写失败则保持 offset 不提交，继续阻塞。
+- idempotent_events 通常采用 Check -> 业务操作 -> Mark。除非业务写和 Mark 在同一事务，否则它不是严格 exactly-once。
+- Msg 的 group.cache 成员资格投影会把业务更新、群版本推进和 MarkIdempotent 放在同一 MySQL 事务。
+
+当前已配置的 dead_events source：
+
+- auth-service:profile_display_changed、auth-service:redis-invalidation
+- user-service:user_created、user-service:account.deleted、user-service:redis-invalidation
+- relation-service:account.deleted、relation-service:redis-invalidation
+- group-service:group.cache
+- msg-service:group-membership
+
+重要例外：Auth 的 profile_display_changed、User 的 user_created/account.deleted、Relation 的 account.deleted 对解码失败会记录日志后返回成功。因此该条消息会提交，不会进入 dead_events；上述 source 只覆盖解码成功后的处理失败或重试耗尽。新增消费者时不要复制这一语义，除非明确接受坏事件不可追溯地跳过。
+
+## Redis 整键 DEL 补偿
+
+- 适用服务为 Auth、User、Relation。go-redis 的最终写失败发生在其内置短重试之后。
+- WriteFailureHook 仅为当前明确支持的写命令提取键：DEL、EVAL/EVALSHA、SET、INCR、EXPIRE、HSET、ZADD；读取或未知命令不生成任务。
+- Relation 的异步缓存任务被协程池拒绝时也会生成整键 DEL 任务。
+- 任务以第一个 Redis key 作为 Kafka key；消费者只调用 DEL，绝不重放 SET、HSET、Pipeline 或 Lua 写。
+- RedisTask 严格解码：未知字段、尾随 JSON、校验失败都是永久错误，进入对应 redis-invalidation dead_events。这里禁止向前兼容。
+- Redis 或 Kafka 均失败时，补偿 Producer 只记录日志并放弃；主业务 API 不会因这条后台补偿再向上失败。
+
+## Message-push 例外
+
+Message-push 使用自定义有限本地重试消费者，而非手动提交死信消费者。msg.push 和 realtime.push 的处理在重试耗尽后记录告警/指标并让出 offset，不写 dead_events。它避免单条消息永久卡住分区，但实时下行不保证至少一次；客户端应通过消息拉取、批量同步或权威业务查询修复。
