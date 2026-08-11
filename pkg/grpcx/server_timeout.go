@@ -30,7 +30,7 @@ func TimeoutUnaryInterceptor(cfg TimeoutConfig) grpc.UnaryServerInterceptor {
 			return handler(ctx, req)
 		}
 
-		ctx, cancel, effectiveTimeout := newGRPCTimeoutContext(ctx, timeout)
+		ctx, cancel, effectiveTimeout := withEarlierDeadline(ctx, timeout)
 		defer cancel()
 
 		resp, err := handler(ctx, req)
@@ -64,22 +64,6 @@ func resolveGRPCTimeout(fullMethod string, cfg TimeoutConfig) time.Duration {
 		}
 	}
 	return cfg.DefaultTimeout
-}
-
-func newGRPCTimeoutContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc, time.Duration) {
-	if deadline, ok := parent.Deadline(); ok {
-		remaining := time.Until(deadline)
-		if remaining < 0 {
-			remaining = 0
-		}
-		if remaining <= timeout {
-			ctx, cancel := context.WithCancel(parent)
-			return ctx, cancel, remaining
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	return ctx, cancel, timeout
 }
 
 func isDeadlineExceeded(err error) bool {

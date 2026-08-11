@@ -48,7 +48,7 @@ func initializeRelationApp() (*RelationApp, error) {
 	blacklistHandler := handler.NewBlacklistHandler(iBlacklistService)
 	registrationFunc := provideRelationRegistration(friendHandler, blacklistHandler)
 	mainRelationGRPCAddress := provideRelationGRPCAddress()
-	builtServer, err := provideRelationGRPCServer(registrationFunc, mainRelationGRPCAddress)
+	builtServer, err := provideRelationGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}

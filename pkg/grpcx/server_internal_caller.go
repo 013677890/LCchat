@@ -9,12 +9,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	// MetadataInternalCaller 是内部服务调用时必须携带的 metadata key。
-	// value 为调用方服务名（如 "gateway"、"relation-service"）。
-	MetadataInternalCaller = "x-internal-caller"
-)
-
 // InternalCallerInterceptor 返回一个 gRPC 一元拦截器，用于区分内部接口和对外接口的鉴权：
 //
 //   - 对 internalMethods 中的方法：要求 metadata 中携带 x-internal-caller 且值在白名单内；

@@ -213,9 +213,8 @@ func provideMsgRegistration(msgHandler *handler.MsgHandler) grpcx.RegistrationFu
 	}
 }
 
-func provideMsgGRPCServer(register grpcx.RegistrationFunc, addr msgGRPCAddress) (*grpcx.BuiltServer, error) {
+func provideMsgGRPCServer(register grpcx.RegistrationFunc) (*grpcx.BuiltServer, error) {
 	opts := grpcx.ServerOptions{
-		Address:   string(addr),
 		Namespace: "msg",
 		Timeout: &grpcx.TimeoutConfig{
 			DefaultTimeout: msgGRPCDefaultTimeout,

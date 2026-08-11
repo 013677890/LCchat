@@ -205,9 +205,8 @@ func provideGroupRegistration(groupHandler *handler.GroupHandler) grpcx.Registra
 	}
 }
 
-func provideGroupGRPCServer(register grpcx.RegistrationFunc, addr groupGRPCAddress) (*grpcx.BuiltServer, error) {
+func provideGroupGRPCServer(register grpcx.RegistrationFunc) (*grpcx.BuiltServer, error) {
 	return grpcx.NewServer(grpcx.ServerOptions{
-		Address:          string(addr),
 		Namespace:        "group",
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: groupGRPCDefaultTimeout},
 		EnableHealth:     true,

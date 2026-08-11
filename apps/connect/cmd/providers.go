@@ -148,9 +148,8 @@ func provideConnectRegistration(handler *connectgrpc.Server) grpcx.RegistrationF
 	}
 }
 
-func provideConnectGRPCServer(register grpcx.RegistrationFunc, addr connectGRPCAddress) (*grpcx.BuiltServer, error) {
+func provideConnectGRPCServer(register grpcx.RegistrationFunc) (*grpcx.BuiltServer, error) {
 	return grpcx.NewServer(grpcx.ServerOptions{
-		Address:   string(addr),
 		Namespace: "connect",
 		RateLimit: &grpcx.RateLimitConfig{
 			RequestsPerSecond: 5000,

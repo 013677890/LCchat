@@ -94,7 +94,7 @@ func (a *ConnectApp) Run(ctx context.Context) error {
 
 	go func() {
 		logger.Info(ctx, "Connect gRPC 服务启动中", logger.String("addr", a.grpcListener.Addr().String()))
-		if err := grpcx.Run(ctx, a.grpcServer, a.grpcListener); err != nil {
+		if err := grpcx.Serve(a.grpcServer, a.grpcListener); err != nil {
 			errCh <- fmt.Errorf("运行 gRPC 服务失败: %w", err)
 		}
 	}()

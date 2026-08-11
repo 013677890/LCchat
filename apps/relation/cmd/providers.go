@@ -203,9 +203,8 @@ func provideRelationRegistration(
 	}
 }
 
-func provideRelationGRPCServer(register grpcx.RegistrationFunc, addr relationGRPCAddress) (*grpcx.BuiltServer, error) {
+func provideRelationGRPCServer(register grpcx.RegistrationFunc) (*grpcx.BuiltServer, error) {
 	return grpcx.NewServer(grpcx.ServerOptions{
-		Address:          string(addr),
 		Namespace:        "relation",
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: relationGRPCDefaultTimeout},
 		EnableHealth:     true,

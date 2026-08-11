@@ -14,7 +14,7 @@ import (
 // Server 只保留 ConnectService 的 RPC 处理逻辑。
 //
 // 第二波改造后，gRPC 运行时的拦截器链、监听器与停机流程
-// 统一由 pkg/grpcx.NewServer / Run / GracefulStop 负责，
+// 统一由 pkg/grpcx.NewServer / Serve / GracefulStop 负责，
 // 这里不再重复包一层自定义 runtime。
 type Server struct {
 	pb.UnimplementedConnectServiceServer

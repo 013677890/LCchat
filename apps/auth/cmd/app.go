@@ -104,7 +104,7 @@ func (a *AuthApp) Run(ctx context.Context) error {
 	}
 
 	logger.Info(ctx, "Auth 服务启动中", logger.String("grpc_address", a.grpcListener.Addr().String()))
-	if err := grpcx.Run(ctx, a.grpcServer, a.grpcListener); err != nil {
+	if err := grpcx.Serve(a.grpcServer, a.grpcListener); err != nil {
 		return fmt.Errorf("运行 gRPC 服务失败: %w", err)
 	}
 	return nil

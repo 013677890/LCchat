@@ -179,9 +179,8 @@ func provideAuthRegistration(
 }
 
 // provideAuthGRPCServer 构建 auth-service 的 gRPC Server。
-func provideAuthGRPCServer(register grpcx.RegistrationFunc, addr authGRPCAddress) (*grpcx.BuiltServer, error) {
+func provideAuthGRPCServer(register grpcx.RegistrationFunc) (*grpcx.BuiltServer, error) {
 	return grpcx.NewServer(grpcx.ServerOptions{
-		Address:          string(addr),
 		Namespace:        "auth",
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: authGRPCDefaultTimeout},
 		EnableHealth:     true,

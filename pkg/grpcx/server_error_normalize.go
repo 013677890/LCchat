@@ -7,7 +7,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-// ErrorNormalizeUnaryInterceptor 统一兜底服务端错误日志，并返回干净 gRPC 错误。
+// ErrorNormalizeUnaryInterceptor 把 handler 返回的错误统一转换为脱敏后的 gRPC status。
+// 日志由内层 LoggingUnaryInterceptor 记录，这里只负责传输边界，避免原始错误泄漏。
 func ErrorNormalizeUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		resp, err := handler(ctx, req)

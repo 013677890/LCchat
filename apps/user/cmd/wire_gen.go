@@ -38,7 +38,7 @@ func initializeUserApp() (*UserApp, error) {
 	internalProfileHandler := handler.NewInternalProfileHandler(internalProfileService)
 	registrationFunc := provideUserRegistration(userHandler, internalProfileHandler)
 	mainUserGRPCAddress := provideUserGRPCAddress()
-	builtServer, err := provideUserGRPCServer(registrationFunc, mainUserGRPCAddress)
+	builtServer, err := provideUserGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}

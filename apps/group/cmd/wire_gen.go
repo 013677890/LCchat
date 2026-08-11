@@ -43,7 +43,7 @@ func initializeGroupApp() (*GroupApp, error) {
 	groupHandler := handler.NewGroupHandler(iGroupService)
 	registrationFunc := provideGroupRegistration(groupHandler)
 	mainGroupGRPCAddress := provideGroupGRPCAddress()
-	builtServer, err := provideGroupGRPCServer(registrationFunc, mainGroupGRPCAddress)
+	builtServer, err := provideGroupGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}

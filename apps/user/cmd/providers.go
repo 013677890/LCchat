@@ -170,9 +170,8 @@ func provideUserRegistration(
 	}
 }
 
-func provideUserGRPCServer(register grpcx.RegistrationFunc, addr userGRPCAddress) (*grpcx.BuiltServer, error) {
+func provideUserGRPCServer(register grpcx.RegistrationFunc) (*grpcx.BuiltServer, error) {
 	return grpcx.NewServer(grpcx.ServerOptions{
-		Address:          string(addr),
 		Namespace:        "user",
 		Timeout:          &grpcx.TimeoutConfig{DefaultTimeout: userGRPCDefaultTimeout, MethodTimeouts: provideUserGRPCMethodTimeouts()},
 		EnableHealth:     true,

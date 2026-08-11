@@ -56,7 +56,7 @@ func initializeMsgApp() (*MsgApp, error) {
 	msgHandler := handler.NewMsgHandler(service, messageReadWorkflow, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)
 	registrationFunc := provideMsgRegistration(msgHandler)
 	mainMsgGRPCAddress := provideMsgGRPCAddress()
-	builtServer, err := provideMsgGRPCServer(registrationFunc, mainMsgGRPCAddress)
+	builtServer, err := provideMsgGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}

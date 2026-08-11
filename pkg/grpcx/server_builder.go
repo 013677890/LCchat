@@ -1,13 +1,8 @@
 package grpcx
 
 import (
-	"context"
 	"errors"
-	"fmt"
-	"net"
-	"time"
 
-	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
@@ -16,8 +11,6 @@ import (
 
 // ServerOptions 定义 gRPC Server 的启动参数。
 type ServerOptions struct {
-	// Address 监听地址，例如 ":9090"。
-	Address string
 	// Namespace 服务名前缀，用于 Prometheus 指标命名空间。
 	Namespace string
 
@@ -51,7 +44,9 @@ type RegistrationFunc func(s *grpc.Server)
 
 // BuiltServer 表示已构建但尚未运行的 gRPC 运行时对象。
 type BuiltServer struct {
-	Server  *grpc.Server
+	// Server 由上层 App 保存并交给 Serve、GracefulStop 管理。
+	Server *grpc.Server
+	// Metrics 与 Server 使用同一个采集实例，供独立的 metrics HTTP 端点暴露。
 	Metrics *Metrics
 }
 
@@ -62,6 +57,7 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 		return nil, errors.New("grpc register func is nil")
 	}
 
+	// 每个服务创建独立 Registry；Namespace 默认跟随 ServerOptions，避免指标冲突。
 	metricsCfg := DefaultMetricsConfig()
 	metricsCfg.Namespace = opts.Namespace
 	if opts.MetricsConfig != nil {
@@ -73,41 +69,10 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 
 	metrics := NewMetrics(metricsCfg)
 
-	var rateLimitCfg RateLimitConfig
-	if opts.RateLimit != nil {
-		rateLimitCfg = *opts.RateLimit
-	} else {
-		rateLimitCfg = DefaultRateLimitConfig()
-	}
+	// Unary 治理链在 server_chain.go 集中装配，builder 只消费最终结果。
+	unaryInters := buildServerUnaryInterceptors(opts, metrics)
 
-	var loggingCfg LoggingConfig
-	if opts.Logging != nil {
-		loggingCfg = *opts.Logging
-	} else {
-		loggingCfg = DefaultLoggingConfig()
-	}
-
-	var timeoutCfg TimeoutConfig
-	if opts.Timeout != nil {
-		timeoutCfg = *opts.Timeout
-	}
-
-	unaryInters := []grpc.UnaryServerInterceptor{
-		RecoveryUnaryInterceptor(),
-		MetadataUnaryInterceptor(),
-
-		// timeout 要尽早生效，这样后续 validate / rate-limit / metrics / 业务处理
-		// 看到的都是同一个被收紧后的请求级 deadline。
-		TimeoutUnaryInterceptor(timeoutCfg),
-		ValidateUnaryInterceptor(),
-		RateLimitUnaryInterceptor(rateLimitCfg),
-		metrics.UnaryInterceptor(),
-		ErrorNormalizeUnaryInterceptor(),
-		LoggingUnaryInterceptor(loggingCfg),
-	}
-
-	unaryInters = append(unaryInters, opts.ExtraUnaryInterceptors...)
-
+	// 消息大小属于传输层能力；业务治理拦截器不应感知这些限制。
 	var serverOpts []grpc.ServerOption
 	if opts.MaxRecvMsgSize > 0 {
 		serverOpts = append(serverOpts, grpc.MaxRecvMsgSize(opts.MaxRecvMsgSize))
@@ -122,6 +87,7 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 
 	s := grpc.NewServer(serverOpts...)
 
+	// 基础设施服务先注册，随后注册业务服务；反射最后开启，确保能看到完整描述。
 	if opts.EnableHealth {
 		healthgrpc.RegisterHealthServer(s, newHealthServer())
 	}
@@ -137,78 +103,7 @@ func NewServer(opts ServerOptions, register RegistrationFunc) (*BuiltServer, err
 	}, nil
 }
 
-// NewListener 创建 gRPC TCP 监听器。
-func NewListener(address string) (net.Listener, error) {
-	if address == "" {
-		return nil, errors.New("grpc listen address is empty")
-	}
-	return net.Listen("tcp", address)
-}
-
-// Run 使用已构建的 gRPC Server 在指定监听器上阻塞运行。
-// 它同时监听 ctx.Done()，把“服务停止时机”从旧版 Start 中解耦出来，
-// 交由上层 App 或 main 统一控制。
-func Run(ctx context.Context, server *grpc.Server, listener net.Listener) error {
-	if server == nil {
-		return errors.New("grpc server is nil")
-	}
-	if listener == nil {
-		return errors.New("grpc listener is nil")
-	}
-
-	stopCtx, stopCancel := context.WithCancel(context.Background())
-	defer stopCancel()
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := GracefulStop(shutdownCtx, server, 10*time.Second); err != nil && !errors.Is(err, context.DeadlineExceeded) {
-				logger.Warn(ctx, "gRPC 服务停止时发生异常", logger.ErrorField("error", err))
-			}
-		case <-stopCtx.Done():
-		}
-	}()
-
-	logger.Info(ctx, "gRPC 服务启动", logger.String("addr", listener.Addr().String()))
-	if err := server.Serve(listener); err != nil {
-		if errors.Is(err, grpc.ErrServerStopped) {
-			return nil
-		}
-		return fmt.Errorf("grpc serve failed: %w", err)
-	}
-
-	return nil
-}
-
-// GracefulStop 负责优雅停止 gRPC Server。
-// 超时后会退化为强制 Stop，避免关闭流程被永久卡住。
-func GracefulStop(ctx context.Context, server *grpc.Server, timeout time.Duration) error {
-	if server == nil {
-		return nil
-	}
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-
-	stopDone := make(chan struct{})
-	go func() {
-		server.GracefulStop()
-		close(stopDone)
-	}()
-
-	select {
-	case <-stopDone:
-		logger.Info(ctx, "gRPC 服务已优雅停止")
-		return nil
-	case <-time.After(timeout):
-		logger.Warn(ctx, "gRPC 优雅停机超时，执行强制停止", logger.Duration("timeout", timeout))
-		server.Stop()
-		return context.DeadlineExceeded
-	}
-}
-
+// newHealthServer 返回默认处于 SERVING 状态的标准 gRPC 健康检查实现。
 func newHealthServer() healthgrpc.HealthServer {
 	hs := health.NewServer()
 	hs.SetServingStatus("", healthgrpc.HealthCheckResponse_SERVING)

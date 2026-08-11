@@ -44,7 +44,7 @@ func initializeAuthApp() (*AuthApp, error) {
 	internalAuthHandler := handler.NewInternalAuthHandler(iInternalAuthService)
 	registrationFunc := provideAuthRegistration(authHandler, deviceHandler, accountHandler, internalAuthHandler)
 	mainAuthGRPCAddress := provideAuthGRPCAddress()
-	builtServer, err := provideAuthGRPCServer(registrationFunc, mainAuthGRPCAddress)
+	builtServer, err := provideAuthGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}

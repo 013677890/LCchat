@@ -37,7 +37,7 @@ func initializeConnectApp() (*ConnectApp, error) {
 	grpcServer := provideConnectGRPCHandler(connectionManager)
 	registrationFunc := provideConnectRegistration(grpcServer)
 	mainConnectGRPCAddress := provideConnectGRPCAddress()
-	builtServer, err := provideConnectGRPCServer(registrationFunc, mainConnectGRPCAddress)
+	builtServer, err := provideConnectGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}
