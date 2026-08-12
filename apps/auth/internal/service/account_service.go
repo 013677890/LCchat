@@ -39,7 +39,7 @@ func NewAccountService(authRepo repository.IAuthRepository, deviceRepo repositor
 //  2. 查询账号并校验旧密码是否正确；
 //  3. 拒绝把新密码设置成与旧密码相同；
 //  4. 生成新的密码哈希并更新 user_account；
-//  5. 保持与旧逻辑一致，暂不扩展“踢出其他设备”的后续动作。
+//  5. 撤销全部设备的 RefreshToken，阻止旧凭据继续签发 AccessToken。
 //
 // 错误码映射：
 //   - codes.Unauthenticated: 未登录
@@ -83,7 +83,13 @@ func (s *accountServiceImpl) ChangePassword(ctx context.Context, req *authpb.Cha
 		return apperr.Wrap(err, consts.CodeInternalError, "更新密码失败")
 	}
 
-	// 保持与旧逻辑一致：暂不扩展“踢出其他设备”的历史 TODO。
+	// AccessToken 是无状态 JWT，修改密码后仍会在自身 exp 前有效；这是明确接受的短期窗口。
+	// RefreshToken 则必须全部撤销，否则掌握旧长期凭据的客户端能够持续获得新 AccessToken，
+	// 使短期窗口退化成 RefreshToken 的完整生命周期。
+	if err := s.deviceRepo.DeleteByUserUUID(ctx, userUUID); err != nil {
+		return apperr.Wrap(err, consts.CodeInternalError, "密码已修改，但撤销设备续期凭据失败")
+	}
+
 	return nil
 }
 
@@ -211,7 +217,8 @@ func (s *accountServiceImpl) DeleteAccount(ctx context.Context, req *authpb.Dele
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "注销账号失败")
 	}
 
-	// 第二步：清理所有设备登录态，避免已注销账号继续带着旧 token 访问系统。
+	// 第二步：撤销所有设备的 RefreshToken，阻止已注销账号继续续期。AccessToken 不维护
+	// Redis 黑名单，仍按自身 exp 自然失效。
 	if err := s.deviceRepo.DeleteByUserUUID(ctx, userUUID); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "清理用户设备登录态失败")
 	}

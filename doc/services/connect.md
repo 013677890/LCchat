@@ -44,8 +44,9 @@ GET /ws?token=<access_token>&device_id=<device_id>
 1. `token` 和 `device_id` 必填。
 2. 解析 JWT，要求 claims 中有 `user_uuid` 和 `device_id`。
 3. claims 的 `device_id` 必须等于 query `device_id`。
-4. Redis 存在时校验 `auth:at:{user_uuid}:{device_id}` 中的 token MD5。
-5. Redis 异常时 Fail-Close，拒绝连接。
+
+AccessToken 是无状态 JWT，握手不读取 Redis。登出、踢设备或注销撤销的是 RefreshToken，
+已经签发的 AccessToken 在自身 `exp` 前仍可重新握手。
 
 ## WebSocket 帧
 
@@ -107,12 +108,12 @@ ACK 校验：
 | `PushToDevice` | message-push、内部服务 | 向指定用户指定设备投递。 |
 | `PushToUser` | message-push | 向本节点上指定用户所有在线设备投递。 |
 | `BroadcastToUsers` | 管理后台/运维 | 向多个用户广播相同消息。 |
-| `KickConnection` | auth/user-service 或管理能力 | 精确踢掉指定设备连接。 |
+| `KickConnection` | 当前无 auth 调用方 | RPC 能力已经存在，但现有登出/踢设备链路不会调用它。 |
 
 ## 降级策略
 
 - auth device gRPC 客户端为 nil 时，在线/离线状态同步会降级跳过，但 WebSocket 连接仍可工作。
-- Redis 不可用时，WebSocket 鉴权 Fail-Close；连接建立后路由/ACK 写入失败会影响实时投递可靠性。
+- Redis 不可用不影响 JWT 握手鉴权；路由/ACK 写入失败会影响在线状态与实时投递可靠性。
 - 下行写队列入队失败通常说明连接不可写，connect 会主动关闭连接。
 
 ## 不变量

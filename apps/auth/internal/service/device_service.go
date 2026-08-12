@@ -184,8 +184,8 @@ func (s *deviceServiceImpl) GetDeviceList(ctx context.Context, req *authpb.GetDe
 //  1. 从上下文中提取当前用户 UUID；
 //  2. 校验目标 device_id 合法且不是当前设备；
 //  3. 查询目标设备会话并确认其存在；
-//  4. 删除该设备的 AccessToken / RefreshToken；
-//  5. 将设备状态更新为 kicked，完成远端登录态失效。
+//  4. 删除该设备的 RefreshToken，阻止后续续期；
+//  5. 将设备状态更新为 kicked，记录设备管理结果。
 //
 // 错误码映射：
 //   - codes.Unauthenticated: 未登录
@@ -218,8 +218,10 @@ func (s *deviceServiceImpl) KickDevice(ctx context.Context, req *authpb.KickDevi
 		return apperr.New(consts.CodeDeviceNotFound)
 	}
 
-	if err := s.deviceRepo.DeleteTokens(ctx, userUUID, req.DeviceId); err != nil {
-		return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：删除设备 Token 失败")
+	// AccessToken 是无状态 JWT，不维护 Redis 黑名单；被踢设备的旧 AccessToken 仍会
+	// 在自身 exp 前有效。撤销 RefreshToken 可以保证它无法越过该窗口继续续期。
+	if err := s.deviceRepo.DeleteRefreshToken(ctx, userUUID, req.DeviceId); err != nil {
+		return apperr.Wrap(err, consts.CodeInternalError, "踢出设备失败：撤销 RefreshToken 失败")
 	}
 	if session.Status == model.DeviceStatusOnline || session.Status == model.DeviceStatusOffline {
 		if err := s.deviceRepo.UpdateOnlineStatus(ctx, userUUID, req.DeviceId, model.DeviceStatusKicked); err != nil {

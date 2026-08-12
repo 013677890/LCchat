@@ -86,11 +86,6 @@ func VerifyCodeIPKey(ip string) string {
 	return fmt.Sprintf("user:verify_code:1h:%s", ip)
 }
 
-// AccessTokenKey 生成 AccessToken Key: auth:at:{user_uuid}:{device_id}
-func AccessTokenKey(userUUID, deviceID string) string {
-	return fmt.Sprintf("auth:at:%s:%s", userUUID, deviceID)
-}
-
 // RefreshTokenKey 生成 RefreshToken Key: auth:rt:{user_uuid}:{device_id}
 func RefreshTokenKey(userUUID, deviceID string) string {
 	return fmt.Sprintf("auth:rt:%s:%s", userUUID, deviceID)

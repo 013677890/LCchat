@@ -9,7 +9,7 @@
 | gateway | HTTP 入站、DTO 校验、JWT 中间件、统一响应。 |
 | auth | 账号校验、Token 签发、验证码管理、设备会话写入。 |
 | user | 注册完成后初始化资料。 |
-| Redis | 验证码、Token 哈希、设备在线状态、限流。 |
+| Redis | RefreshToken、验证码、设备在线状态、限流；AccessToken 不落 Redis。 |
 | Kafka / Debezium | `user_created`、`account.deleted` 等最终一致事件。 |
 
 ## 2. 注册链路
@@ -81,9 +81,7 @@
 3. auth 校验密码哈希。
 4. auth 检查账号状态，已注销账号禁止登录。
 5. auth 生成 AccessToken 和 RefreshToken。
-6. auth 将 Token 哈希写入 Redis：
-   - `auth:at:{user_uuid}:{device_id}`
-   - `auth:rt:{user_uuid}:{device_id}`
+6. auth 只将 RefreshToken 写入 Redis `auth:rt:{user_uuid}:{device_id}`；AccessToken 是无状态 JWT。
 7. auth 更新或创建 `device_sessions` 记录，写入 `deviceInfo`、IP、平台、版本等。
 8. auth 返回 `accessToken`、`refreshToken`、`tokenType`、`expiresIn`、`userInfo`。
 
@@ -112,15 +110,12 @@
 - HTTP `Authorization: Bearer <access_token>`。
 - WebSocket 握手 `GET /ws?token=<access_token>&device_id=<device_id>`。
 
-服务端依赖：
-
-1. JWT 解析 claims。
-2. Redis 中 AccessToken 哈希存在且匹配。
+服务端依赖只有 JWT 签名、有效期和 claims 校验，不查询 Redis 中的 AccessToken 状态。
 
 这意味着：
 
-- 单靠 JWT 未过期并不足以保证连接合法；
-- 登出、踢设备、注销后，只要 Redis 哈希被清理，后续握手就会失败。
+- 未过期且 claims 合法的 AccessToken 可以访问 HTTP，也可以建立 WebSocket；
+- 登出、踢设备和注销只撤销续期能力，旧 AccessToken 会自然使用到 `exp`。
 
 ### 5.2 RefreshToken
 
@@ -144,9 +139,9 @@
 
 1. gateway 通过 JWT 中间件识别当前用户。
 2. auth 根据请求中的 `deviceId` 找到目标设备会话。
-3. auth 删除 Redis 中对应的 AccessToken / RefreshToken 哈希。
+3. auth 删除 Redis 中对应的 RefreshToken。
 4. auth 更新设备会话状态。
-5. 若目标设备存在 WebSocket 连接，后续心跳或重连会失效；若配合踢线能力，可立即断开。
+5. 已有 WebSocket 不会主动断开，未过期 AccessToken 仍可重连；Token 到期后设备因无法续期而失效。
 
 ## 7. WebSocket 与 Token 的关系
 
@@ -159,14 +154,14 @@ GET /ws?token=<access_token>&device_id=<device_id>
 服务端校验规则：
 
 1. query `device_id` 必须与 JWT claims 中的 `device_id` 一致。
-2. Redis `auth:at:{user_uuid}:{device_id}` 中必须能读到当前 token 的 MD5。
-3. Redis 异常时 Fail-Close，直接拒绝连接。
+2. JWT 必须签名有效且未过期，claims 必须包含 `user_uuid`、`device_id`。
+3. 握手不读取 Redis，Redis 故障不影响 JWT 鉴权。
 
 因此前端要点是：
 
 - 同一设备登录、刷新 Token、建立 WS 时必须使用同一个 `device_id`；
-- Token 刷新后若重连 WS，必须使用新的 AccessToken；
-- 被踢、登出、注销后，不应尝试继续复用旧 Token。
+- Token 刷新后新旧 AccessToken 在各自 `exp` 前都可用于重连；
+- 被踢、登出、注销后，客户端应主动清理本地凭据，但服务端接受旧 AccessToken 到期前的有限窗口。
 
 ## 8. 常见失败与处理
 

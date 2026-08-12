@@ -34,7 +34,6 @@ type passwordLoginCostSnapshot struct {
 	comparePasswordCost   time.Duration
 	getDeviceIDCost       time.Duration
 	generateTokenCost     time.Duration
-	storeAccessTokenCost  time.Duration
 	storeRefreshTokenCost time.Duration
 	upsertSessionCost     time.Duration
 }
@@ -66,7 +65,6 @@ func logPasswordLoginFlow(ctx context.Context, stage string, err error, snapshot
 			logger.Duration("compare_password_cost", snapshot.comparePasswordCost),
 			logger.Duration("get_device_id_cost", snapshot.getDeviceIDCost),
 			logger.Duration("generate_token_cost", snapshot.generateTokenCost),
-			logger.Duration("store_access_token_cost", snapshot.storeAccessTokenCost),
 			logger.Duration("store_refresh_token_cost", snapshot.storeRefreshTokenCost),
 			logger.Duration("upsert_session_cost", snapshot.upsertSessionCost),
 			logger.ErrorField("error", err),
@@ -81,7 +79,6 @@ func logPasswordLoginFlow(ctx context.Context, stage string, err error, snapshot
 		logger.Duration("compare_password_cost", snapshot.comparePasswordCost),
 		logger.Duration("get_device_id_cost", snapshot.getDeviceIDCost),
 		logger.Duration("generate_token_cost", snapshot.generateTokenCost),
-		logger.Duration("store_access_token_cost", snapshot.storeAccessTokenCost),
 		logger.Duration("store_refresh_token_cost", snapshot.storeRefreshTokenCost),
 		logger.Duration("upsert_session_cost", snapshot.upsertSessionCost),
 	)
@@ -160,7 +157,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 //  1. 为缺失的设备信息补默认值，避免后续空指针；
 //  2. 按账号查询 user_account 并校验账号状态；
 //  3. 校验密码、提取 device_id 与客户端 IP；
-//  4. 生成 AccessToken / RefreshToken 并写入 Redis；
+//  4. 生成 AccessToken / RefreshToken，只把承担续期职责的 RefreshToken 写入 Redis；
 //  5. 尽力更新设备会话，最后返回登录响应。
 //
 // 错误码映射：
@@ -216,7 +213,8 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 	// IP 仅用于设备会话落库展示，不参与 token 生成。
 	clientIP := util.GetClientIPFromContext(ctx)
 
-	// AccessToken 用于短期访问授权；RefreshToken 作为设备级长期续期凭据。
+	// AccessToken 是短期、自包含的 JWT，只返回给客户端，不在 Redis 保留副本；
+	// RefreshToken 是设备级长期续期凭据，服务端必须持有其状态以支持主动撤销。
 	generateTokenStartedAt := time.Now()
 	accessToken, err := util.GenerateToken(user.UserUuid, deviceID)
 	if err != nil {
@@ -234,19 +232,8 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成 RefreshToken 失败")
 	}
 
-	// 登录成功后优先写入 token，再尽力补充设备会话与在线态信息。
-	// AccessToken 写失败时不能放行，因为客户端将无法继续访问接口。
-	storeAccessTokenStartedAt := time.Now()
-	if err := s.deviceRepo.StoreAccessToken(ctx, user.UserUuid, deviceID, accessToken, util.AccessExpire); err != nil {
-		snapshot.storeAccessTokenCost = time.Since(storeAccessTokenStartedAt)
-		snapshot.totalCost = time.Since(loginStartedAt)
-		logPasswordLoginFlow(ctx, "store_access_token", err, snapshot)
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 AccessToken 失败")
-	}
-
-	snapshot.storeAccessTokenCost = time.Since(storeAccessTokenStartedAt)
-
-	// RefreshToken 与 AccessToken 一样属于主链路数据，失败时同样直接返回错误。
+	// RefreshToken 是服务端唯一持久化的 Token 状态。即使 AccessToken 已经在内存中生成，
+	// 写入失败时也不能把任何 Token 返回客户端，否则会形成无法续期的不完整登录态。
 	storeRefreshTokenStartedAt := time.Now()
 	if err := s.deviceRepo.StoreRefreshToken(ctx, user.UserUuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
 		snapshot.storeRefreshTokenCost = time.Since(storeRefreshTokenStartedAt)
@@ -288,7 +275,7 @@ func (s *authServiceImpl) Login(ctx context.Context, req *authpb.LoginRequest) (
 //  1. 为缺失的设备信息补默认值；
 //  2. 按邮箱查询账号并校验账号状态；
 //  3. 校验登录验证码并在成功后尽力删除验证码；
-//  4. 生成并保存设备级 Token；
+//  4. 生成两类 Token，只保存设备级 RefreshToken；
 //  5. 尽力回写设备会话和活跃时间，再返回登录结果。
 //
 // 错误码映射：
@@ -351,10 +338,7 @@ func (s *authServiceImpl) LoginByCode(ctx context.Context, req *authpb.LoginByCo
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成 RefreshToken 失败")
 	}
 
-	// 两类 token 都是验证码登录主链路的必要结果，任何一项失败都直接返回错误。
-	if err := s.deviceRepo.StoreAccessToken(ctx, user.UserUuid, deviceID, accessToken, util.AccessExpire); err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 AccessToken 失败")
-	}
+	// AccessToken 不落 Redis；RefreshToken 写入成功才表示设备获得了完整、可续期的登录态。
 	if err := s.deviceRepo.StoreRefreshToken(ctx, user.UserUuid, deviceID, refreshToken, util.RefreshExpire); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "写入 RefreshToken 失败")
 	}
@@ -449,9 +433,9 @@ func (s *authServiceImpl) VerifyCode(ctx context.Context, req *authpb.VerifyCode
 // 业务流程：
 //  1. 从上下文中提取 user_uuid 与 device_id；
 //  2. 校验当前设备保存的 RefreshToken；
-//  3. 重新生成 AccessToken 并覆盖 Redis 中的旧值；
-//  4. 尽力续期设备信息缓存 TTL；
-//  5. 返回新的访问令牌信息。
+//  3. 重新查询账号，阻止已注销或禁用账号通过旧 RefreshToken 延长登录态；
+//  4. 生成无状态 AccessToken；
+//  5. 尽力续期设备信息缓存 TTL，并返回新的访问令牌信息。
 //
 // 错误码映射：
 //   - codes.Unauthenticated: Token 非法或设备不存在
@@ -480,15 +464,43 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *authpb.RefreshT
 		return nil, apperr.New(consts.CodeInvalidToken)
 	}
 
-	// 通过校验后重新签发 AccessToken；RefreshToken 本身保持不变。
+	// RefreshToken 只能证明客户端持有某台设备的续期凭据，不能证明账号当前仍允许登录。
+	// 账号状态必须在每次续期时重新读取，否则注销或禁用只能阻止新登录，旧 RefreshToken
+	// 仍可持续签发新的 AccessToken，突破 AccessToken 原本有限的过期窗口。
+	user, err := s.authRepo.GetByUserUUID(ctx, userUUID)
+	if err != nil {
+		if errors.Is(err, repoerr.ErrRecordNotFound) {
+			// 账号已经不存在时，该续期凭据不应保留。撤销失败只记录告警，因为当前请求已经
+			// 被拒绝，不会签发 AccessToken；后续请求仍会重复执行同一账号状态校验。
+			if revokeErr := s.deviceRepo.DeleteRefreshToken(ctx, userUUID, deviceID); revokeErr != nil {
+				logger.Warn(ctx, "账号不存在且撤销 RefreshToken 失败",
+					logger.String("user_uuid", userUUID),
+					logger.String("device_id", deviceID),
+					logger.ErrorField("error", revokeErr),
+				)
+			}
+			return nil, apperr.New(consts.CodeInvalidToken)
+		}
+		return nil, apperr.Wrap(err, consts.CodeInternalError, "刷新 Token 时查询账号失败")
+	}
+	if user.Status == 1 {
+		// 禁用/注销状态不允许保留可在未来复用的续期凭据。这里不影响已签发 AccessToken
+		// 的有限窗口，只切断后续续期能力。
+		if revokeErr := s.deviceRepo.DeleteRefreshToken(ctx, userUUID, deviceID); revokeErr != nil {
+			logger.Warn(ctx, "账号不可用且撤销 RefreshToken 失败",
+				logger.String("user_uuid", userUUID),
+				logger.String("device_id", deviceID),
+				logger.ErrorField("error", revokeErr),
+			)
+		}
+		return nil, apperr.New(consts.CodeUserDisabled)
+	}
+
+	// 通过设备凭据和账号状态双重校验后重新签发 AccessToken。AccessToken 是自包含 JWT，
+	// 不写 Redis；同一设备先前签发的 AccessToken 按设计继续有效到各自的 exp。
 	newAccessToken, err := util.GenerateToken(userUUID, deviceID)
 	if err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "生成 Access Token 失败")
-	}
-
-	// 新 AccessToken 会直接覆盖旧值，保证同设备后续访问统一走最新令牌。
-	if err := s.deviceRepo.StoreAccessToken(ctx, userUUID, deviceID, newAccessToken, util.AccessExpire); err != nil {
-		return nil, apperr.Wrap(err, consts.CodeInternalError, "更新 Access Token 失败")
 	}
 
 	// 设备信息 TTL 续期只影响设备列表缓存命中率，不影响 Refresh 主流程成功与否。
@@ -510,7 +522,7 @@ func (s *authServiceImpl) RefreshToken(ctx context.Context, req *authpb.RefreshT
 // 业务流程：
 //  1. 校验请求中的 device_id；
 //  2. 从上下文中获取当前登录用户；
-//  3. 删除该设备的 AccessToken / RefreshToken；
+//  3. 删除该设备的 RefreshToken，阻止后续续期；
 //  4. 将设备会话更新为已登出状态（该迁移时刻即设备的 last_seen）。
 //
 // 错误码映射：
@@ -528,9 +540,10 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *authpb.LogoutRequest)
 		return apperr.New(consts.CodeInternalError)
 	}
 
-	// 先删 Token，确保该设备马上失去继续访问接口的能力。
-	if err := s.deviceRepo.DeleteTokens(ctx, userUUID, req.DeviceId); err != nil {
-		return apperr.Wrap(err, consts.CodeInternalError, "删除 Token 失败")
+	// AccessToken 是无状态 JWT，登出不会建立黑名单；它会在自身 exp 到达后自然失效。
+	// 此处撤销 RefreshToken，保证设备不能跨过这个有限窗口继续签发新的 AccessToken。
+	if err := s.deviceRepo.DeleteRefreshToken(ctx, userUUID, req.DeviceId); err != nil {
+		return apperr.Wrap(err, consts.CodeInternalError, "撤销 RefreshToken 失败")
 	}
 
 	// 再把设备会话标记为 logged_out；如果会话本身不存在，则按幂等成功处理。
@@ -553,7 +566,7 @@ func (s *authServiceImpl) Logout(ctx context.Context, req *authpb.LogoutRequest)
 //  2. 校验重置密码验证码；
 //  3. 拒绝把新密码设置成旧密码；
 //  4. 生成新的密码哈希并更新数据库；
-//  5. 尽力删除已消费的验证码。
+//  5. 撤销全部设备的 RefreshToken，并尽力删除已消费的验证码。
 //
 // 错误码映射：
 //   - codes.NotFound: 用户不存在
@@ -593,10 +606,17 @@ func (s *authServiceImpl) ResetPassword(ctx context.Context, req *authpb.ResetPa
 		return apperr.Wrap(err, consts.CodeInternalError, "生成密码哈希失败")
 	}
 
-	// 密码更新成功即视为重置完成；验证码删除失败只记录降级日志。
+	// 密码重置通常意味着旧凭据可能已经泄漏。AccessToken 按无状态设计保留到 exp，
+	// 但所有 RefreshToken 必须撤销，避免旧设备在过期窗口之后继续续期。
 	if err := s.authRepo.UpdatePassword(ctx, user.UserUuid, string(hashedPassword)); err != nil {
 		return apperr.Wrap(err, consts.CodeInternalError, "更新密码失败")
 	}
+	if err := s.deviceRepo.DeleteByUserUUID(ctx, user.UserUuid); err != nil {
+		return apperr.Wrap(err, consts.CodeInternalError, "密码已重置，但撤销设备续期凭据失败")
+	}
+
+	// 验证码是一次性凭据。删除失败只影响重复提交防护，不应回滚已经完成的密码更新
+	// 和设备续期凭据撤销，因此沿用 best-effort 处理。
 	if err := s.authRepo.DeleteVerifyCode(ctx, req.Email, 3); err != nil {
 		logger.Warn(ctx, "删除验证码失败", logger.ErrorField("error", err))
 	}

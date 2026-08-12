@@ -64,14 +64,12 @@ type IDeviceRepository interface {
 	// BatchGetOnlineStatus 批量获取用户设备会话。
 	BatchGetOnlineStatus(ctx context.Context, userUUIDs []string) (map[string][]*model.DeviceSession, error)
 
-	// StoreAccessToken 存储 AccessToken。
-	StoreAccessToken(ctx context.Context, userUUID, deviceID, accessToken string, expireDuration time.Duration) error
 	// StoreRefreshToken 存储 RefreshToken。
 	StoreRefreshToken(ctx context.Context, userUUID, deviceID, refreshToken string, expireDuration time.Duration) error
 	// GetRefreshToken 获取 RefreshToken。
 	GetRefreshToken(ctx context.Context, userUUID, deviceID string) (string, error)
-	// DeleteTokens 删除指定设备的 Token。
-	DeleteTokens(ctx context.Context, userUUID, deviceID string) error
+	// DeleteRefreshToken 撤销指定设备的续期凭据。
+	DeleteRefreshToken(ctx context.Context, userUUID, deviceID string) error
 	// DeleteByUserUUID 删除用户的全部设备登录态。
 	DeleteByUserUUID(ctx context.Context, userUUID string) error
 	// UpdateOnlineStatus 更新设备在线状态。

@@ -69,7 +69,7 @@ connect 在连接建立和心跳时写入 Redis：
 
 | 阶段 | 行为 |
 | --- | --- |
-| 握手 | 校验 token、`device_id`、JWT claims，并从 Redis 校验 AccessToken 哈希。 |
+| 握手 | 校验 token、`device_id`、JWT 签名与 claims；AccessToken 不落 Redis。 |
 | OnConnect | 无条件写入在线路由，异步通知 auth 设备在线。 |
 | OnHeartbeat | 无条件刷新在线路由 `lastActiveMs` 与 TTL（presence 契约，不做任何本地节流）。 |
 | OnDisconnect | CAS 删除在线路由，异步通知 auth 设备离线。 |

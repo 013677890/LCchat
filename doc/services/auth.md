@@ -25,7 +25,7 @@ auth 服务拥有账号、认证、Token 和设备会话事实，是登录态和
 | --- | --- |
 | 账号凭证和状态 | MySQL `user_account`。 |
 | 设备会话 | MySQL `device_sessions`。 |
-| AccessToken / RefreshToken 哈希 | Redis `auth:at:*`、`auth:rt:*`。 |
+| RefreshToken | Redis `auth:rt:*`；AccessToken 是无状态 JWT，不落 Redis。 |
 | 验证码和限流 | Redis `user:verify_code:*`。 |
 
 ## 暴露的 gRPC 服务
@@ -47,12 +47,13 @@ auth 服务拥有账号、认证、Token 和设备会话事实，是登录态和
 
 ## 降级策略
 
-- 登录成功后设备会话写入失败按降级处理；Token 写入失败必须阻断登录态成立。
-- 注销账号同步阶段只保证账号标删和 Token 清理，下游清理通过 `account.deleted` 最终一致。
+- 登录成功后设备会话写入失败按降级处理；RefreshToken 写入失败必须阻断登录态成立。
+- 注销账号同步阶段只保证账号标删和 RefreshToken 清理，下游清理通过 `account.deleted` 最终一致。
 - connect 上报在线/离线状态失败时，不影响 WebSocket 连接本身，后续查询可自愈。
 
 ## 不变量
 
 - auth 不维护 `user_profile` 的权威资料。
-- WebSocket 鉴权依赖 auth 写入 Redis 的 AccessToken 哈希。
+- HTTP 与 WebSocket 都直接校验 AccessToken JWT，不依赖 Redis 中的 AccessToken 状态。
+- RefreshToken 是服务端控制续期能力的唯一 Token 状态；刷新时必须重新校验账号状态。
 - 修改账号安全信息时不能记录密码、验证码、完整 Token。

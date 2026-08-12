@@ -9,7 +9,7 @@
 | auth | 设备会话事实、设备列表、踢设备、在线状态查询。 |
 | connect | WebSocket 建连、在线路由、ACK、心跳。 |
 | gateway | 设备列表和在线状态 HTTP 入站。 |
-| Redis | `user:routing:*`、设备活跃、Token 哈希。 |
+| Redis | `user:routing:*`、设备活跃、RefreshToken；AccessToken 不落 Redis。 |
 | message-push | 查询在线路由并向 connect 精确投递。 |
 
 ## 2. 设备会话与在线连接的区别
@@ -27,7 +27,7 @@
 
 ## 3. 建连前置条件
 
-前提：用户已通过登录接口拿到 `accessToken`，并且该 Token 哈希已经写入 Redis。
+前提：用户已通过登录接口拿到尚未过期的 `accessToken`。
 
 前端握手 URL：
 
@@ -39,17 +39,15 @@ GET /ws?token=<access_token>&device_id=<device_id>
 
 1. `device_id` 与登录时保持一致；
 2. `accessToken` 未过期；
-3. Redis 中 `auth:at:{user_uuid}:{device_id}` 仍存在且匹配当前 token；
-4. connect `Origin` 白名单允许当前前端域名。
+3. connect `Origin` 白名单允许当前前端域名。
 
 ## 4. 建连成功链路
 
 1. connect 从 query 读取 `token` 和 `device_id`。
 2. connect 解析 JWT，校验 claims 中的 `user_uuid`、`device_id`。
-3. connect 读取 Redis `auth:at:{user_uuid}:{device_id}` 校验 token MD5。
-4. connect 完成 WebSocket 升级。
-5. connect 将连接注册到本节点连接管理器。
-6. 若同一 `user_uuid + device_id` 已有旧连接，则关闭旧连接，仅保留最新连接。
+3. connect 完成 WebSocket 升级。
+4. connect 将连接注册到本节点连接管理器。
+5. 若同一 `user_uuid + device_id` 已有旧连接，则关闭旧连接，仅保留最新连接。
 7. connect 调用 `OnConnect`：
    - 无条件写入在线路由 `user:routing:{user_uuid}`；
    - 异步上报 auth 设备状态为在线。
@@ -102,7 +100,7 @@ TTL   = CONNECT_ROUTE_TTL_SECONDS（默认 360s）
 - 网络断开；
 - connect 主动关闭不可写连接；
 - 同设备新连接替换旧连接；
-- 后台踢线。
+- 外部能力显式调用 connect `KickConnection`（当前 auth 登出/踢设备链路未接入）。
 
 断开时处理：
 
@@ -145,20 +143,21 @@ HTTP 接口：
 
 1. gateway 识别当前登录用户。
 2. auth 校验目标设备存在且不是当前设备。
-3. auth 清理该设备 Token 哈希。
-4. 若能定位 connect 节点，则调用 connect `KickConnection` 精确断开。
-5. 设备会话状态更新为被踢或离线。
+3. auth 删除该设备 RefreshToken，阻止后续续期。
+4. auth 将设备会话状态更新为被踢。
+5. 当前链路不调用 connect `KickConnection`。
 
 结果：
 
-- 目标设备当前连接会被立即踢掉；
-- 即使没踢掉，后续重连也会因为 Token 哈希已删除而失败。
+- 目标设备已有连接不会被主动断开；
+- 旧 AccessToken 在 `exp` 前仍可重新握手；
+- AccessToken 到期后，因为 RefreshToken 已撤销，设备无法继续续期。
 
 ## 10. 常见异常与自愈
 
 | 场景 | 结果 | 自愈方式 |
 | --- | --- | --- |
-| Redis 短暂异常 | 新握手失败（Fail-Close） | 前端稍后重连。 |
+| Redis 短暂异常 | JWT 握手仍可完成，在线路由或 ACK 可能失败 | 前端重连并补拉消息。 |
 | connect 进程异常退出 | 路由短暂残留 | 等待 TTL 过期或节点启动清理。 |
 | 路由 Key 被外部删除/淘汰 | 该用户短暂显示离线、推送寻址落空 | 下一个心跳无条件重建路由。 |
 | auth 设备状态上报失败 | WS 仍可工作 | 下次重连或状态同步修正。 |

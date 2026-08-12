@@ -2,8 +2,6 @@ package repository
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"time"
 
@@ -60,11 +58,6 @@ func parseCacheTransitionAt(raw string) time.Time {
 	return parsed
 }
 
-// accessTokenKey 构造某个用户单设备 AccessToken 的 Redis Key。
-func (r *deviceRepositoryImpl) accessTokenKey(userUUID, deviceID string) string {
-	return rediskey.AccessTokenKey(userUUID, deviceID)
-}
-
 // refreshTokenKey 构造某个用户单设备 RefreshToken 的 Redis Key。
 func (r *deviceRepositoryImpl) refreshTokenKey(userUUID, deviceID string) string {
 	return rediskey.RefreshTokenKey(userUUID, deviceID)
@@ -73,13 +66,6 @@ func (r *deviceRepositoryImpl) refreshTokenKey(userUUID, deviceID string) string
 // deviceInfoKey 构造用户设备信息 Hash 的 Redis Key。
 func (r *deviceRepositoryImpl) deviceInfoKey(userUUID string) string {
 	return rediskey.DeviceInfoKey(userUUID)
-}
-
-// md5Hash 计算 Token 摘要，避免把原始 AccessToken 明文直接写入 Redis。
-func md5Hash(s string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(s))
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // GetByUserUUID 获取用户的全部设备会话。
@@ -374,22 +360,6 @@ func (r *deviceRepositoryImpl) BatchGetOnlineStatus(ctx context.Context, userUUI
 	return result, nil
 }
 
-// StoreAccessToken 存储 AccessToken。
-func (r *deviceRepositoryImpl) StoreAccessToken(ctx context.Context, userUUID, deviceID, accessToken string, expireDuration time.Duration) error {
-	if r.redisClient == nil {
-		return repoerr.ErrRedis
-	}
-	key := r.accessTokenKey(userUUID, deviceID)
-	// AccessToken 落 Redis 前先做 md5 摘要，避免明文 token 直接驻留缓存。
-	value := md5Hash(accessToken)
-	err := r.redisClient.Set(ctx, key, value, expireDuration).Err()
-	if err != nil {
-		// 登录态写入失败必须让登录链路失败，禁止稍后写入已经失效的 token。
-		return repoerr.WrapRedisError(err)
-	}
-	return nil
-}
-
 // StoreRefreshToken 存储 RefreshToken。
 func (r *deviceRepositoryImpl) StoreRefreshToken(ctx context.Context, userUUID, deviceID, refreshToken string, expireDuration time.Duration) error {
 	if r.redisClient == nil {
@@ -418,20 +388,18 @@ func (r *deviceRepositoryImpl) GetRefreshToken(ctx context.Context, userUUID, de
 	return value, nil
 }
 
-// DeleteTokens 删除指定设备的全部 Token。
-func (r *deviceRepositoryImpl) DeleteTokens(ctx context.Context, userUUID, deviceID string) error {
+// DeleteRefreshToken 撤销指定设备的 RefreshToken。
+//
+// AccessToken 是自包含 JWT，不进入 Redis，也不在这里尝试维护黑名单。删除这个 Key
+// 只负责阻止客户端继续续期；已经签发的 AccessToken 按设计使用到自身 exp 为止。
+func (r *deviceRepositoryImpl) DeleteRefreshToken(ctx context.Context, userUUID, deviceID string) error {
 	if r.redisClient == nil {
-		return nil
+		// RefreshToken 是续期能力的权威状态。没有 Redis 客户端时不能把“未执行撤销”伪装成成功，
+		// 否则修改密码、登出等安全操作会对上游返回成功，但旧设备仍可能继续续期。
+		return repoerr.ErrRedis
 	}
-	// 同一设备的访问令牌和刷新令牌必须一起删除，避免残留半失效登录态。
-	accessKey := r.accessTokenKey(userUUID, deviceID)
-	refreshKey := r.refreshTokenKey(userUUID, deviceID)
-	pipe := r.redisClient.Pipeline()
-	// 两个 DEL 合并进一次 pipeline，减少退出登录时的网络往返。
-	pipe.Del(ctx, accessKey)
-	pipe.Del(ctx, refreshKey)
-	if _, err := pipe.Exec(ctx); err != nil {
-		// 设备重新登录会复用这些 key，延迟 DEL 可能误删新 token。
+	if err := r.redisClient.Del(ctx, r.refreshTokenKey(userUUID, deviceID)).Err(); err != nil {
+		// 设备重新登录会复用同一个 Key，不能异步补发 DEL，否则可能误删新登录写入的凭据。
 		return repoerr.WrapRedisError(err)
 	}
 	return nil
@@ -440,11 +408,11 @@ func (r *deviceRepositoryImpl) DeleteTokens(ctx context.Context, userUUID, devic
 // DeleteByUserUUID 删除用户的全部设备登录态。
 //
 // 该方法用于注销账号、主动退出全端登录等场景：
-//  1. 先枚举该用户历史设备并删除 Redis Token；
+//  1. 先枚举该用户历史设备并撤销 Redis RefreshToken；
 //  2. 再把数据库中的会话状态统一标记为 logged_out；
 //  3. 最后清理设备信息与活跃时间缓存，避免旧在线态继续被读到。
 func (r *deviceRepositoryImpl) DeleteByUserUUID(ctx context.Context, userUUID string) error {
-	// 先拉出该用户历史设备列表，后续要逐设备清除 Redis Token。
+	// 先拉出该用户历史设备列表，后续要逐设备撤销续期凭据。
 	sessions, err := r.GetByUserUUID(ctx, userUUID)
 	if err != nil {
 		return err
@@ -456,13 +424,13 @@ func (r *deviceRepositoryImpl) DeleteByUserUUID(ctx context.Context, userUUID st
 			continue
 		}
 
-		// 逐设备删除 Token；任一失败都直接上抛，保证注销主语义可靠。
-		if err := r.DeleteTokens(ctx, userUUID, session.DeviceId); err != nil {
+		// 逐设备删除 RefreshToken；任一失败都直接上抛，避免部分设备仍可续期。
+		if err := r.DeleteRefreshToken(ctx, userUUID, session.DeviceId); err != nil {
 			return err
 		}
 	}
 
-	// Token 清完后，再统一把数据库里的设备会话状态改成 logged_out。
+	// 续期凭据清完后，再统一把数据库里的设备会话状态改成 logged_out。
 	err = r.db.WithContext(ctx).Model(&model.DeviceSession{}).
 		Where("user_uuid = ? AND deleted_at IS NULL", userUUID).
 		Updates(map[string]interface{}{

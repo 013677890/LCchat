@@ -55,8 +55,10 @@ Connect 会按环境变量 `CONNECT_ALLOWED_ORIGINS` 校验浏览器 `Origin`：
 2. `device_id` 不能为空。
 3. 解析 JWT（JSON Web Token，访问令牌），要求 claims 中存在 `user_uuid` 和 `device_id`。
 4. JWT claims 中的 `device_id` 必须与 query `device_id` 完全一致。
-5. Redis 存在时，校验 `auth:at:{user_uuid}:{device_id}` 中保存的 AccessToken MD5 与当前 token 一致。
-6. Redis 读取异常时 Fail-Close（失败关闭），直接拒绝连接，保证踢线、登出等安全操作立即生效。
+
+握手不读取 Redis。AccessToken 在有效期内是自包含凭据，因此登出、踢设备和账号注销不会让
+旧 Token 立即失效；这些动作会撤销 RefreshToken，使设备在 AccessToken 到期后无法续期。
+当前实现也不会因为这些动作主动断开已经建立的 WebSocket。
 
 ### 2.2 握手失败响应
 

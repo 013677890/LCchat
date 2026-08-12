@@ -155,7 +155,7 @@ HTTP 返回的 `GroupInfoDTO` 与 proto 群资料响应字段对应：`group_uui
 | `PushToDevice` | message-push | 投递到指定设备。 |
 | `PushToUser` | message-push | 投递到本节点某用户所有设备。 |
 | `BroadcastToUsers` | 管理能力 | 批量广播。 |
-| `KickConnection` | auth/管理能力 | 踢掉指定连接。 |
+| `KickConnection` | 当前未接入 auth | 踢掉指定连接的预留 RPC；现有登出/踢设备流程不调用。 |
 
 ### 8.2 WebSocket Protobuf
 

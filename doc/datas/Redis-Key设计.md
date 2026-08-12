@@ -6,8 +6,8 @@
 
 | 约定 | 说明 |
 | --- | --- |
-| Key 命名 | 使用模块前缀和业务实体分段，例如 `auth:at:{user_uuid}:{device_id}`。 |
-| Redis 定位 | 缓存、Token、验证码、限流、在线路由、幂等和短期 ACK 位点。 |
+| Key 命名 | 使用模块前缀和业务实体分段，例如 `auth:rt:{user_uuid}:{device_id}`。 |
+| Redis 定位 | 缓存、RefreshToken、验证码、限流、在线路由、幂等和短期 ACK 位点。AccessToken 不落 Redis。 |
 | 权威事实 | 除 Token、验证码、在线路由等短期状态外，业务事实仍以 MySQL 为准。 |
 | 空值缓存 | 资料、关系、群等读侧使用短 TTL 空值缓存防穿透。 |
 
@@ -45,8 +45,7 @@
 | `user:verify_code:1m:{email}` | String/计数 | 1 分钟 | auth | 邮箱维度短期限流。 |
 | `user:verify_code:24h:{email}` | String/计数 | 24 小时 | auth | 邮箱维度日限流。 |
 | `user:verify_code:1h:{ip}` | String/计数 | 1 小时 | auth | IP 维度验证码限流。 |
-| `auth:at:{user_uuid}:{device_id}` | String | Token 生命周期 | auth/connect | AccessToken MD5。WebSocket 握手强校验该值。 |
-| `auth:rt:{user_uuid}:{device_id}` | String | Token 生命周期 | auth | RefreshToken MD5。 |
+| `auth:rt:{user_uuid}:{device_id}` | String | 7 天 | auth | 当前设备 RefreshToken；用于续期与主动撤销。 |
 | `user:devices:{user_uuid}` | Hash/String | 60 天 | auth | 设备信息缓存；field 内 `loginAt` 为最后一次状态迁移时刻（登录/上线/下线），是离线设备 last_seen 的缓存来源。 |
 
 ## 4. user 资料 Key
