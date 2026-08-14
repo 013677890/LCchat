@@ -180,36 +180,61 @@ func (r *repositoryImpl) ListGroup(ctx context.Context, ownerUuid string, update
 
 // Upsert 创建或更新个人会话
 //
-// 【Bug1 修复】
-// - 只更新核心字段 (max_seq, last_msg_*, status)
-// - 绝不碰 mute / pin / read_seq / clear_seq（这些由专门的方法维护）
-// - 接收方 unread_count 在 DB 层面 +1，而非 Go 层覆盖
-// - 发送方 read_seq = max_seq，unread_count 不变
+// - 只更新发消息相关的核心字段；绝不碰 mute / pin / clear_seq
+// - last_msg_* / max_seq / status / updated_at 以 seq 为栅栏整组单调推进，
+//   与 UpsertGroupConv 一致，避免迟到的旧发送 workflow 覆盖更新预览
+// - 接收方 unread_count 在 DB 层面每条成功路径 +1（不按 seq 栅栏跳过，漏写靠 Repair 重算）
+// - 发送方 read_seq 单调追平到当前消息 seq
 func (r *repositoryImpl) Upsert(ctx context.Context, conv *model.Conversation, isSender bool) error {
-	// 构造更新 map，只更新发消息时需要变更的字段
-	updates := map[string]interface{}{
-		// max_seq 必须单调递增：即使异常 seq 或乱序 workflow 到达，也不能把会话清空位点的基准写小。
-		// 使用 CASE 而非 GREATEST 是为了兼容 SQLite 单元测试，同时 MySQL 语义等价。
-		"max_seq":          gorm.Expr("CASE WHEN max_seq > ? THEN max_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq),
-		"last_msg_id":      conv.LastMsgId,
-		"last_msg_at":      conv.LastMsgAt,
-		"last_msg_preview": conv.LastMsgPrev,
-		"status":           0,          // 重新激活已删除会话
-		"updated_at":       time.Now(), // 强制更新，用于增量拉取排序
+	updatedAt := time.Now()
+	// MySQL 单表 UPDATE 赋值从左到右求值：last_msg_* / status / updated_at 必须先于
+	// max_seq 比较“冲突行原 max_seq”；SQLite 基于旧行同时求值，同一顺序语义等价。
+	assignments := clause.Set{
+		{
+			Column: clause.Column{Name: "last_msg_id"},
+			Value:  gorm.Expr("CASE WHEN max_seq < ? THEN ? ELSE last_msg_id END", conv.MaxSeq, conv.LastMsgId),
+		},
+		{
+			Column: clause.Column{Name: "last_msg_preview"},
+			Value:  gorm.Expr("CASE WHEN max_seq < ? THEN ? ELSE last_msg_preview END", conv.MaxSeq, conv.LastMsgPrev),
+		},
+		{
+			Column: clause.Column{Name: "last_msg_at"},
+			Value:  gorm.Expr("CASE WHEN max_seq < ? THEN ? ELSE last_msg_at END", conv.MaxSeq, conv.LastMsgAt),
+		},
+		{
+			// 仅当本条消息真正推进会话水位时才重新激活；迟到旧消息不能把用户已删除的会话刷回可见。
+			Column: clause.Column{Name: "status"},
+			Value:  gorm.Expr("CASE WHEN max_seq < ? THEN 0 ELSE status END", conv.MaxSeq),
+		},
+		{
+			Column: clause.Column{Name: "updated_at"},
+			Value:  gorm.Expr("CASE WHEN max_seq < ? THEN ? ELSE updated_at END", conv.MaxSeq, updatedAt),
+		},
+		{
+			Column: clause.Column{Name: "max_seq"},
+			Value:  gorm.Expr("CASE WHEN max_seq < ? THEN ? ELSE max_seq END", conv.MaxSeq, conv.MaxSeq),
+		},
 	}
 
 	if isSender {
-		// 发送方：read_seq 只能向前追平到当前消息，避免旧设备/旧 workflow 把已读位点写小。
-		updates["read_seq"] = gorm.Expr("CASE WHEN read_seq > ? THEN read_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq)
+		// 发送方：read_seq 只能向前追平，避免旧 workflow 把已读位点写小。
+		assignments = append(assignments, clause.Assignment{
+			Column: clause.Column{Name: "read_seq"},
+			Value:  gorm.Expr("CASE WHEN read_seq > ? THEN read_seq ELSE ? END", conv.MaxSeq, conv.MaxSeq),
+		})
 	} else {
-		// 接收方：在数据库层面 unread_count + 1（极端并发下也安全）
-		updates["unread_count"] = gorm.Expr("unread_count + 1")
+		// 接收方：每条消息的 Upsert 仍 +1；幂等重试走 RepairForMessage，不会再进这条路径重复加。
+		assignments = append(assignments, clause.Assignment{
+			Column: clause.Column{Name: "unread_count"},
+			Value:  gorm.Expr("unread_count + 1"),
+		})
 	}
 
 	err := r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "owner_uuid"}, {Name: "target_uuid"}},
-			DoUpdates: clause.Assignments(updates),
+			DoUpdates: assignments,
 		}).Create(conv).Error
 
 	if err != nil {

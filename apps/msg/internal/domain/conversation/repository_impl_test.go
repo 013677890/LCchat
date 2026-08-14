@@ -319,6 +319,98 @@ func TestRepositoryListGroupIncrementalObservesSharedGroupActivity(t *testing.T)
 	assert.Equal(t, newTime.UnixMilli(), got[0].UpdatedAt.UnixMilli())
 }
 
+func TestRepositoryUpsertAdvancesLastMsgOnlyWithHigherSeq(t *testing.T) {
+	db := newConversationRepoTestDB(t)
+	repo := NewRepository(db)
+	initialUpdatedAt := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
+	seq2Time := initialUpdatedAt.Add(time.Minute)
+	require.NoError(t, db.Create(&model.Conversation{
+		ConvId:      "p2p-a-b",
+		Type:        1,
+		OwnerUuid:   "a",
+		TargetUuid:  "b",
+		LastMsgId:   "msg-2",
+		LastMsgPrev: "preview-2",
+		LastMsgAt:   &seq2Time,
+		MaxSeq:      2,
+		ReadSeq:     2,
+		UnreadCount: 0,
+		Status:      0,
+		UpdatedAt:   initialUpdatedAt,
+	}).Error)
+
+	// 模拟 seq=1 的发送 workflow 比 seq=2 更晚执行到会话投影。
+	seq1Time := seq2Time.Add(-time.Minute)
+	require.NoError(t, repo.Upsert(context.Background(), &model.Conversation{
+		ConvId:      "p2p-a-b",
+		Type:        1,
+		OwnerUuid:   "a",
+		TargetUuid:  "b",
+		LastMsgId:   "msg-1",
+		LastMsgPrev: "preview-1",
+		LastMsgAt:   &seq1Time,
+		MaxSeq:      1,
+		ReadSeq:     1,
+		Status:      0,
+	}, true))
+
+	var stored model.Conversation
+	require.NoError(t, db.Where("owner_uuid = ? AND conv_id = ?", "a", "p2p-a-b").First(&stored).Error)
+	assert.Equal(t, int64(2), stored.MaxSeq)
+	assert.Equal(t, "msg-2", stored.LastMsgId)
+	assert.Equal(t, "preview-2", stored.LastMsgPrev)
+	require.NotNil(t, stored.LastMsgAt)
+	assert.Equal(t, seq2Time.UnixMilli(), stored.LastMsgAt.UnixMilli())
+	assert.Equal(t, int64(2), stored.ReadSeq)
+	assert.Equal(t, initialUpdatedAt.UnixMilli(), stored.UpdatedAt.UnixMilli())
+
+	// 接收方迟到的旧消息仍应 +1 未读，但不能把预览写回旧 seq。
+	require.NoError(t, db.Model(&model.Conversation{}).
+		Where("owner_uuid = ? AND conv_id = ?", "a", "p2p-a-b").
+		Updates(map[string]interface{}{"unread_count": 0, "read_seq": 2}).Error)
+	require.NoError(t, repo.Upsert(context.Background(), &model.Conversation{
+		ConvId:      "p2p-a-b",
+		Type:        1,
+		OwnerUuid:   "a",
+		TargetUuid:  "b",
+		LastMsgId:   "msg-1",
+		LastMsgPrev: "preview-1",
+		LastMsgAt:   &seq1Time,
+		MaxSeq:      1,
+		Status:      0,
+	}, false))
+
+	stored = model.Conversation{}
+	require.NoError(t, db.Where("owner_uuid = ? AND conv_id = ?", "a", "p2p-a-b").First(&stored).Error)
+	assert.Equal(t, int64(2), stored.MaxSeq)
+	assert.Equal(t, "msg-2", stored.LastMsgId)
+	assert.Equal(t, 1, stored.UnreadCount)
+
+	seq3Time := time.Now().Truncate(time.Millisecond)
+	require.NoError(t, repo.Upsert(context.Background(), &model.Conversation{
+		ConvId:      "p2p-a-b",
+		Type:        1,
+		OwnerUuid:   "a",
+		TargetUuid:  "b",
+		LastMsgId:   "msg-3",
+		LastMsgPrev: "preview-3",
+		LastMsgAt:   &seq3Time,
+		MaxSeq:      3,
+		ReadSeq:     3,
+		Status:      0,
+	}, true))
+
+	stored = model.Conversation{}
+	require.NoError(t, db.Where("owner_uuid = ? AND conv_id = ?", "a", "p2p-a-b").First(&stored).Error)
+	assert.Equal(t, int64(3), stored.MaxSeq)
+	assert.Equal(t, "msg-3", stored.LastMsgId)
+	assert.Equal(t, "preview-3", stored.LastMsgPrev)
+	require.NotNil(t, stored.LastMsgAt)
+	assert.Equal(t, seq3Time.UnixMilli(), stored.LastMsgAt.UnixMilli())
+	assert.Equal(t, int64(3), stored.ReadSeq)
+	assert.Greater(t, stored.UpdatedAt.UnixMilli(), initialUpdatedAt.UnixMilli())
+}
+
 func TestRepositoryUpsertGroupConvAdvancesLatestTupleOnlyWithHigherSeq(t *testing.T) {
 	db := newConversationRepoTestDB(t)
 	repo := NewRepository(db)

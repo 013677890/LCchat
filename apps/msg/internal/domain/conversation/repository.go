@@ -30,8 +30,9 @@ type Repository interface {
 
 	// Upsert 创建或更新个人会话（发消息时调用）
 	//   - 按 (owner_uuid, target_uuid) 唯一键 upsert
-	//   - isSender: 发送方不增加未读数；接收方在 DB 层面 unread_count + 1
-	//   - 只更新核心字段 (max_seq, last_msg_*, status)，绝不碰 mute/pin/read_seq/clear_seq
+	//   - isSender: 发送方不增加未读数，read_seq 单调追平；接收方 unread_count + 1
+	//   - last_msg_* / max_seq / status / updated_at 仅在 incoming seq 更大时整组推进
+	//   - 绝不碰 mute/pin/clear_seq
 	Upsert(ctx context.Context, conv *model.Conversation, isSender bool) error
 
 	// RepairForMessage 幂等修复个人会话投影（幂等命中/补偿路径使用）
