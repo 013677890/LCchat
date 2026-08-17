@@ -39,3 +39,13 @@ func TestNewMetricsHTTPServerHandlesNilMetrics(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, resp.Code)
 }
+
+func TestNewMetricsHTTPServerRegistersPprofRoutes(t *testing.T) {
+	server := NewMetricsHTTPServer(":9190", nil)
+	resp := httptest.NewRecorder()
+
+	server.Handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Contains(t, resp.Body.String(), "Types of profiles available")
+}

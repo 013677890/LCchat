@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/pkg/httpprof"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -29,7 +30,7 @@ func DefaultConfig() Config {
 		Addr:              addr,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		WriteTimeout:      35 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
 }
@@ -39,7 +40,7 @@ type Server struct {
 	httpServer *http.Server
 }
 
-// New 构建只暴露 health/metrics 的轻量 HTTP server。
+// New 构建暴露 health、metrics 和 pprof 的轻量 HTTP server。
 func New(cfg Config) *Server {
 	ginMode := os.Getenv("GIN_MODE")
 	if ginMode == "" {
@@ -52,6 +53,9 @@ func New(cfg Config) *Server {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	profilerHandler := httpprof.Handler()
+	r.Any("/debug/pprof", gin.WrapH(profilerHandler))
+	r.Any("/debug/pprof/*path", gin.WrapH(profilerHandler))
 
 	return &Server{
 		httpServer: &http.Server{

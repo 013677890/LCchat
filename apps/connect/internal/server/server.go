@@ -6,6 +6,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/manager"
 	"github.com/013677890/LCchat-Backend/apps/connect/internal/middleware"
+	"github.com/013677890/LCchat-Backend/pkg/httpprof"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"net/http"
 	"os"
@@ -35,7 +36,7 @@ func DefaultConfig() Config {
 		Addr:              addr,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      35 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 }
@@ -51,6 +52,7 @@ type Server struct {
 // - GET /health:   健康检查，返回在线连接数，供容器/探针调用。
 // - GET /metrics:  暴露 Prometheus 文本格式指标（online_connections gauge）。
 // - GET /ws:       WebSocket 接入入口。
+// - GET /debug/pprof/: Go 运行时性能分析端点。
 func New(cfg Config, wsHandler *handler.WSHandler, connManager *manager.ConnectionManager) *Server {
 	ginMode := os.Getenv("GIN_MODE")
 	if ginMode == "" {
@@ -81,6 +83,9 @@ func New(cfg Config, wsHandler *handler.WSHandler, connManager *manager.Connecti
 				"# TYPE connect_online_connections gauge\n"+
 				"connect_online_connections %d\n", connManager.Count()))
 	})
+	profilerHandler := httpprof.Handler()
+	r.Any("/debug/pprof", gin.WrapH(profilerHandler))
+	r.Any("/debug/pprof/*path", gin.WrapH(profilerHandler))
 
 	r.GET("/ws", middleware.WSHandshakeRateLimitMiddleware(wsRateLimitCfg), wsHandler.ServeWS)
 

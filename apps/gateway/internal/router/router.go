@@ -4,6 +4,7 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/gateway/internal/middleware"
 	v1 "github.com/013677890/LCchat-Backend/apps/gateway/internal/router/v1"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
+	"github.com/013677890/LCchat-Backend/pkg/httpprof"
 	"github.com/013677890/LCchat-Backend/pkg/util"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -20,8 +21,10 @@ const gatewayDefaultRequestTimeout = 2 * time.Second
 //
 // 未命中的新接口仍会回退到 gatewayDefaultRequestTimeout，避免漏配后完全失去保护。
 var gatewayRequestTimeouts = map[string]time.Duration{
-	"/health":  0,
-	"/metrics": 0,
+	"/health":            0,
+	"/metrics":           0,
+	"/debug/pprof":       0,
+	"/debug/pprof/*path": 0,
 	// public user
 	// 认证链路依赖 bcrypt、邮件发送和数据库事务，预算需要比普通读接口更宽松。
 	"/api/v1/public/user/login":            3 * time.Second,
@@ -159,6 +162,9 @@ func InitRouter(authHandler *v1.AuthHandler, userHandler *v1.UserHandler, friend
 	})
 	// Prometheus 指标暴露接口
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	profilerHandler := httpprof.Handler()
+	r.Any("/debug/pprof", gin.WrapH(profilerHandler))
+	r.Any("/debug/pprof/*path", gin.WrapH(profilerHandler))
 	// API 路由组
 	api := r.Group("/api/v1")
 	{

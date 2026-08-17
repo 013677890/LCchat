@@ -60,7 +60,6 @@ func provideGatewayAsyncConfig() config.AsyncConfig { return config.DefaultAsync
 // provideGatewayMinIOConfig 提供对象存储默认配置。
 func provideGatewayMinIOConfig() config.MinIOConfig { return config.DefaultMinIOConfig() }
 
-
 // provideGatewayLogger 构建 logger（不注册全局，全局注册在 GatewayApp.Run）。
 func provideGatewayLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
 	return logger.Build(cfg)
@@ -322,12 +321,13 @@ func provideGatewayRouter(
 
 // provideGatewayHTTPServer 构造 HTTP Server。
 // 注意这里只构造 server，不真正启动监听，保持“构造”和“运行”解耦。
+// WriteTimeout 要覆盖标准 CPU pprof 默认的 30 秒采样时间。
 func provideGatewayHTTPServer(addr gatewayHTTPAddr, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:           string(addr),
 		Handler:        handler,
 		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
+		WriteTimeout:   35 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 }
