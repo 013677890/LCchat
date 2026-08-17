@@ -45,6 +45,13 @@ auth 服务拥有账号、认证、Token 和设备会话事实，是登录态和
 | `account.deleted` | 生产 | 注销账号后写 Outbox，驱动下游异步清理。 |
 | `profile_display_changed` | 消费 | user 资料展示字段变化后，回写登录冗余字段。 |
 
+## Kafka 消费编排
+
+- `profile_display_changed` 与 `auth.redis.invalidate` 各使用一个独立 `ManualConsumerPool` 和独立 consumer group。
+- `KAFKA_AUTH_PROFILE_DISPLAY_CHANGED_CONSUMER_CONCURRENCY`、`KAFKA_AUTH_REDIS_RETRY_CONSUMER_CONCURRENCY` 分别配置本进程 Reader 数；默认 3，显式值必须为 `1～64`。
+- workers 由 Kafka rebalance 分配 partition，不接受 partition 绑定。领域事件解码失败与 Redis 补偿毒消息先写 `dead_events`，成功后才提交 offset。
+- 消费是 API 旁路：Pool 内 worker 致命退出会先取消兄弟，AuthApp 随后记录指标与 Error 日志并退避重启该 Pool，不中断 gRPC。
+
 ## 降级策略
 
 - 登录成功后设备会话写入失败按降级处理；RefreshToken 写入失败必须阻断登录态成立。

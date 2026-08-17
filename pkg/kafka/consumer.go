@@ -2,44 +2,50 @@ package kafka
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	segmentkafka "github.com/segmentio/kafka-go"
 )
 
-// ==================== Consumer 定义 ====================
-
-// CommitMode 定义消费者提交 offset 的策略。
-type CommitMode int8
-
-const (
-	// CommitAlways 表示无论 handler 是否报错都提交 offset。
-	CommitAlways CommitMode = iota
-	// CommitOnSuccess 表示只有 handler 成功后才提交 offset。
-	CommitOnSuccess
-)
-
-// ManualConsumerConfig 定义手动提交型消费者的 Reader 参数。
+// ManualConsumerConfig 定义手动提交型消费者的 Reader 与可靠性参数。
+// 服务层通过 ManualConsumerPoolConfig.Config 注入；非法 worker 数在 Pool 构造阶段拒绝，
+// 本结构只负责单 Reader 循环内的超时、退避与死信策略，不参与 partition 分配。
 type ManualConsumerConfig struct {
+	// MinBytes / MaxBytes / MaxWait 透传给 segmentio/kafka-go Reader。
+	// MinBytes=1 优先降低端到端延迟；MaxWait 限制 broker 端空等，避免 IM 下行长尾。
 	MinBytes     int
 	MaxBytes     int
 	MaxWait      time.Duration
+	// ErrorBackoff 是 Fetch 临时失败、Commit 临时失败、业务可重试失败后的统一退避。
+	// 该退避发生在 Reader 循环内，目的是吸收 broker 抖动，而不是把临时错误升级成进程退出。
 	ErrorBackoff time.Duration
 	// HandleTimeout 为单条消息的每次处理尝试施加超时预算。
-	// 防止某条消息的下游(DB/Redis/gRPC)挂死导致 handle 永不返回、进而冻结整个分区。
-	// <=0 时回退到 defaultHandleTimeout；如需关闭可显式传负值由调用方自担风险。
+	// 防止某条消息的下游（DB/Redis/gRPC）挂死导致 handle 永不返回，进而冻结整个分区。
+	// 零值回退到 defaultHandleTimeout；显式负值表示关闭超时（仅当上层已自管预算时使用，
+	// 例如 message-push 业务侧已有 30s 扇出超时）。
 	HandleTimeout time.Duration
 
 	// RetryBudget 为单条消息「原地重试」的墙钟预算：超出后判定为毒/持久失败消息，
 	// 旁路到 DeadLetterSink 并提交 offset，从而解除队头阻塞。<=0 时回退到 defaultRetryBudget。
-	// 仅在同时配置了 DeadLetterSink 时才生效；否则保持「无界原地重试」旧行为。
+	// 仅在同时配置了 DeadLetterSink 时才生效；未配置死信时对可重试错误做无界原地重试
+	// （分区会阻塞到恢复或 ctx 取消），永久错误则返回致命错误给 Pool。
 	RetryBudget time.Duration
 
-	// DeadLetterSink 为死信落地实现。nil 时瞬时错误保持原地重试；永久错误会让
-	// consumer 明确失败，禁止在没有可追查落点时提交并静默跳过坏消息。
+	// DeadLetterSink 为死信落地实现。
+	// nil 时：瞬时错误原地重试；永久错误使 consumer 明确失败，禁止无落点地提交并静默跳过坏消息。
+	// 非 nil 时：永久错误首轮即可 Park；可重试错误在预算耗尽后 Park；Park 成功才允许 commit。
 	DeadLetterSink DeadLetterSink
+
+	// ObserveFetch 观测每次 FetchMessage 的耗时；实现必须支持多个 worker 并发调用。
+	// 该钩子只负责指标，不得改变 Fetch 错误的退避重试语义。
+	ObserveFetch func(time.Duration)
+	// ObserveCommitError 观测 offset 提交失败；实现必须支持多个 worker 并发调用。
+	// Consumer 仍会停留在当前消息重试提交，钩子不得自行推进 offset。
+	ObserveCommitError func()
 }
 
 // defaultHandleTimeout 是手动提交消费者单次处理尝试的默认超时。
@@ -51,6 +57,8 @@ const defaultHandleTimeout = 10 * time.Second
 // 因此 worst-case 队头阻塞被钉死在该时长内。
 const defaultRetryBudget = 2 * time.Minute
 
+// defaults 补齐 Reader、处理超时与失败退避的默认参数。
+// 调用方显式传入非法 worker 数由 Pool 构造阶段拒绝；这里不做静默并发回退。
 func (c *ManualConsumerConfig) defaults() {
 	if c.MinBytes <= 0 {
 		c.MinBytes = 1
@@ -72,14 +80,17 @@ func (c *ManualConsumerConfig) defaults() {
 	}
 }
 
-// Consumer Kafka 消费者（通用）
+// Consumer 是单个 kafka.Reader 的串行消费循环实现。
+// 它不负责多分区并行；并行由 ManualConsumerPool 创建 N 个独立 Consumer 完成。
+// 同一时刻一个 Consumer 只处理一条消息：当前消息提交前不会 Fetch 下一条。
 type Consumer struct {
-	reader         messageReader
-	commitMode     CommitMode
-	errorBackoff   time.Duration
-	handleTimeout  time.Duration
-	retryBudget    time.Duration
-	deadLetterSink DeadLetterSink
+	reader             messageReader
+	errorBackoff       time.Duration
+	handleTimeout      time.Duration
+	retryBudget        time.Duration
+	deadLetterSink     DeadLetterSink
+	observeFetch       func(time.Duration)
+	observeCommitError func()
 }
 
 // messageReader 抽出 Consumer 真正依赖的 kafka-go 最小接口。
@@ -92,20 +103,13 @@ type messageReader interface {
 	Close() error
 }
 
-// NewConsumer 创建 Kafka 消费者
-func NewConsumer(brokers []string, topic, groupID string) *Consumer {
-	return &Consumer{
-		reader: segmentkafka.NewReader(segmentkafka.ReaderConfig{
-			Brokers: brokers,
-			Topic:   topic,
-			GroupID: groupID,
-		}),
-		commitMode: CommitAlways,
-	}
-}
-
-// NewManualCommitConsumer 创建“仅成功后提交”的 Kafka 消费者。
-func NewManualCommitConsumer(brokers []string, topic, groupID string, cfg ManualConsumerConfig) *Consumer {
+// newManualCommitConsumer 创建 Pool 内部使用的单 Reader 手动提交消费者。
+// 故意不导出：服务层只能通过 NewManualConsumerPool 获得消费编排，禁止再出现
+// 「单 Reader 公开入口 + Pool 入口」双路径。
+//
+// CommitInterval=0 表示同步 commit：当前消息处理/旁路完成并提交成功后，才允许
+// 进入下一次 Fetch，保证同 partition 上的 offset 推进与处理顺序一致。
+func newManualCommitConsumer(brokers []string, topic, groupID string, cfg ManualConsumerConfig) *Consumer {
 	cfg.defaults()
 
 	return &Consumer{
@@ -116,51 +120,94 @@ func NewManualCommitConsumer(brokers []string, topic, groupID string, cfg Manual
 			MinBytes:       cfg.MinBytes,
 			MaxBytes:       cfg.MaxBytes,
 			MaxWait:        cfg.MaxWait,
+			// 同步提交：异步 commit 会放大“已处理但 offset 未推进/推进过快”的窗口。
 			CommitInterval: 0,
 		}),
-		commitMode:     CommitOnSuccess,
-		errorBackoff:   cfg.ErrorBackoff,
-		handleTimeout:  cfg.HandleTimeout,
-		retryBudget:    cfg.RetryBudget,
-		deadLetterSink: cfg.DeadLetterSink,
+		errorBackoff:       cfg.ErrorBackoff,
+		handleTimeout:      cfg.HandleTimeout,
+		retryBudget:        cfg.RetryBudget,
+		deadLetterSink:     cfg.DeadLetterSink,
+		observeFetch:       cfg.ObserveFetch,
+		observeCommitError: cfg.ObserveCommitError,
 	}
 }
 
-// MessageHandler 消息处理函数类型
+// MessageHandler 处理单条 Kafka value。
+// 返回约定：
+//   - nil：本条可提交 offset；
+//   - Permanent(err)：契约/解码等确定性失败，由死信或组件失败路径处理；
+//   - 其它 error：可重试（DB/Redis/下游抖动），同一条消息原地重试，不得跳过。
+// 禁止用 nil 表示“坏消息但想跳过”；跳过必须经死信或上层明确的 best-effort 适配层。
 type MessageHandler func(ctx context.Context, message []byte) error
 
-// Start 启动消费者（阻塞式运行）
+// Start 阻塞运行单个 Reader 的 Fetch→Handle→Commit 串行循环。
+//
+// 错误分层（调用方 ManualConsumerPool / RunIsolatedPool 依赖此约定）：
+//  1. Kafka/broker 临时 Fetch 失败：ErrorBackoff 后继续，不返回、不退出进程；
+//  2. 本 Reader 暂未分到 partition：kafka-go 在 Fetch 内阻塞等待 rebalance，属正常 idle；
+//  3. ctx 取消：尽快返回 context 错误，供关停与 Pool cancel 使用；
+//  4. Reader 已关闭（如 Close 竞态）：返回致命错误，由 Pool 取消兄弟 worker；
+//  5. 业务处理不可恢复且无法旁路：返回致命错误。
+//
+// 本方法返回后，该 Reader 不再消费；Pool 会把非 Canceled 错误视为组件级致命失败。
 func (c *Consumer) Start(ctx context.Context, handler MessageHandler) error {
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			// 读取消息
-			msg, err := c.reader.FetchMessage(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				continue
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		fetchStartedAt := time.Now()
+		msg, err := c.reader.FetchMessage(ctx)
+		if c.observeFetch != nil {
+			c.observeFetch(time.Since(fetchStartedAt))
+		}
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			// Reader 已关闭通常来自进程关停时 Close 与循环的竞态，或上层错误地重复 Close。
+			// 继续退避无意义，必须作为致命错误让 Pool 收敛。
+			if errors.Is(err, io.ErrClosedPipe) {
+				return fmt.Errorf("kafka reader 已关闭，无法继续消费: %w", err)
 			}
 
-			// CommitAlways：处理一次后无论成败都提交（兼容旧行为）。
-			if c.commitMode == CommitAlways {
-				_, _ = c.invokeHandler(ctx, handler, msg.Value)
-				_ = c.reader.CommitMessages(ctx, msg)
-				continue
-			}
-
-			// CommitOnSuccess：成功才提交，失败就地重试同一条。
-			if err := c.consumeOnSuccess(ctx, handler, msg); err != nil {
+			// broker 抖动、断网和 rebalance 期间都可能暂时 Fetch 失败。
+			// 统一在 Reader 循环内退避，避免 API 进程因 Kafka 短暂不可用而雪崩重启。
+			// 注意：未分到 partition 时 kafka-go 会阻塞在 Fetch 内部等待分配，
+			// 不会进入本分支，因此“分到 0 个 partition”不是错误。
+			logger.Warn(ctx, "kafka 拉取消息失败，退避后继续等待",
+				logger.ErrorField("error", err),
+			)
+			if err := c.waitBackoff(ctx); err != nil {
 				return err
 			}
+			continue
+		}
+
+		// 成功 Fetch 后必须先处理完并提交，才进入下一次 Fetch，保证同 partition 串行有序。
+		if err := c.consumeOnSuccess(ctx, handler, msg); err != nil {
+			return err
 		}
 	}
 }
 
-// consumeOnSuccess 在 CommitOnSuccess 模式下处理单条消息：
+// waitBackoff 等待统一错误退避，并在 ctx 取消时立即返回。
+// 非正退避仅用于确定性测试，生产构造会通过 defaults 补为安全值。
+func (c *Consumer) waitBackoff(ctx context.Context) error {
+	if c.errorBackoff <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(c.errorBackoff)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// consumeOnSuccess 按“成功或可靠旁路后才提交”模式处理单条消息：
 //   - handler 返回 nil：提交 offset，处理下一条；
 //   - handler 返回非 nil（可重试错误）：退避后就地重试**同一条**，绝不跳到下一条。
 //     原因：segmentio/kafka-go 的 FetchMessage 不会重投未提交消息，而 Kafka 的 offset 提交是累积的，
@@ -169,10 +216,12 @@ func (c *Consumer) Start(ctx context.Context, handler MessageHandler) error {
 //
 // 队头阻塞旁路：当配置了 DeadLetterSink 且原地重试的墙钟时长超过 retryBudget 时，
 // 判定该消息为毒/持久失败消息，写入死信后提交 offset 让分区前进。死信写入失败则绝不提交、
-// 继续阻塞重试，保证「不丢消息」优先于「分区前进」。未配置死信时退化为旧的无界原地重试。
+// 继续阻塞重试，保证「不丢消息」优先于「分区前进」。
+// 未配置死信时：可重试错误做无界原地重试（分区阻塞到恢复或 ctx 取消）；
+// 永久错误直接返回致命错误给 Pool，禁止无落点地提交跳过。
 //
 // 约定：handler 对永久错误（解码/payload 非法）返回 Permanent(err)，
-// 对可重试错误（DB/Redis 抖动等）返回普通 error。禁止再用 nil 静默跳过坏消息。
+// 对可重试错误（DB/Redis 抖动等）返回普通 error。禁止用 nil 静默跳过坏消息。
 // ctx 取消时不提交 offset 直接返回，留待重启后从未提交位点重新消费。
 func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler, msg segmentkafka.Message) error {
 	var firstFailedAt time.Time
@@ -202,8 +251,8 @@ func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler,
 		}
 
 		// 解码/契约错误是确定性的，再等待重试预算只会无意义阻塞分区。
-		// 没有配置死信时直接返回错误让组件失败并报警，绝不恢复旧的“返回 nil 后提交”
-		// 行为；配置死信时只有 Park 成功才允许提交 offset。
+		// 未配置死信时直接返回致命错误让组件失败并报警，禁止“返回 nil 后提交”静默跳过；
+		// 配置死信时只有 Park 成功才允许提交 offset。
 		if IsPermanent(handleErr) {
 			if c.deadLetterSink == nil {
 				return fmt.Errorf("kafka 永久消息错误但未配置 DeadLetterSink: %w", handleErr)
@@ -254,13 +303,8 @@ func (c *Consumer) consumeOnSuccess(ctx context.Context, handler MessageHandler,
 		}
 
 		// 失败：退避后重试同一条消息。
-		if c.errorBackoff <= 0 {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(c.errorBackoff):
+		if err := c.waitBackoff(ctx); err != nil {
+			return err
 		}
 	}
 }
@@ -278,6 +322,12 @@ func (c *Consumer) commitMessage(ctx context.Context, msg segmentkafka.Message) 
 		if err := c.reader.CommitMessages(ctx, msg); err == nil {
 			return nil
 		} else {
+			if c.observeCommitError != nil {
+				c.observeCommitError()
+			}
+			if errors.Is(err, io.ErrClosedPipe) {
+				return fmt.Errorf("kafka reader 已关闭，无法提交 offset: %w", err)
+			}
 			logger.Error(ctx, "kafka offset 提交失败，保持当前消息并重试提交",
 				logger.ErrorField("error", err),
 				logger.String("topic", msg.Topic),
@@ -286,13 +336,8 @@ func (c *Consumer) commitMessage(ctx context.Context, msg segmentkafka.Message) 
 			)
 		}
 
-		if c.errorBackoff <= 0 {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(c.errorBackoff):
+		if err := c.waitBackoff(ctx); err != nil {
+			return err
 		}
 	}
 }
@@ -322,7 +367,7 @@ func (c *Consumer) parkDeadLetter(
 // invokeHandler 调用 handler，并在配置了 handleTimeout 时为单次处理尝试施加超时。
 // 超时只约束这一次尝试：到点后派生 ctx 取消，handler 内的 DB/Redis/gRPC 调用应及时返回错误，
 // 再由 consumeOnSuccess 按可重试错误就地退避重试，从而避免某条消息因下游挂死而永久占住分区。
-// handleTimeout <= 0 时不包裹（保持旧行为），供 CommitAlways 等无需该约束的场景使用。
+// handleTimeout <= 0 时不包裹，供明确接受无超时风险的测试或特殊调用方使用。
 func (c *Consumer) invokeHandler(ctx context.Context, handler MessageHandler, value []byte) (error, bool) {
 	if c.handleTimeout <= 0 {
 		return safeHandle(ctx, handler, value)
@@ -344,7 +389,7 @@ func safeHandle(ctx context.Context, handler MessageHandler, value []byte) (err 
 	return handler(ctx, value), false
 }
 
-// Close 关闭消费者
+// Close 关闭单个 Reader；服务层应调用 ManualConsumerPool.Close 聚合全部 worker 的关闭结果。
 func (c *Consumer) Close() error {
 	return c.reader.Close()
 }

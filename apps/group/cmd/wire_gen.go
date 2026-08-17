@@ -42,12 +42,15 @@ func initializeGroupApp() (*GroupApp, error) {
 	iGroupService := provideGroupService(iGroupRepository, producer)
 	groupHandler := handler.NewGroupHandler(iGroupService)
 	registrationFunc := provideGroupRegistration(groupHandler)
-	mainGroupGRPCAddress := provideGroupGRPCAddress()
 	builtServer, err := provideGroupGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}
-	server := provideGroupMetricsServer(mainGroupMetricsAddress, builtServer)
+	server, err := provideGroupMetricsServer(mainGroupMetricsAddress, builtServer)
+	if err != nil {
+		return nil, err
+	}
+	mainGroupGRPCAddress := provideGroupGRPCAddress()
 	listener, err := provideGroupGRPCListener(mainGroupGRPCAddress)
 	if err != nil {
 		return nil, err

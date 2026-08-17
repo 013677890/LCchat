@@ -53,6 +53,8 @@ msg-service 还会用另一个 consumer group 完整消费同一 topic，维护�
 
 `group.cache` 固定 3 partitions；本服务默认启动 3 个独立 Reader（`KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY`），
 不同 partition 并行、同 partition 串行；同群因 Kafka key=`group_uuid` 严格有序。
+显式 workers 必须为 `1～64`；Kafka rebalance 自动分配 partition，多余 Reader 正常 idle。
+projector 作为 API 旁路，Pool 致命失败会整池收敛并在 GroupApp 内持续告警、退避重启，不中断 gRPC。
 常见 `group.cache` action：
 | action | 触发场景 | 影响缓存 |
 | --- | --- | --- |

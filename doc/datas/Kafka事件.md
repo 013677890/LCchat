@@ -28,8 +28,35 @@
 | Consumer `MinBytes` | 1 | 最小读取字节。 |
 | Consumer `MaxBytes` | 10MB | 最大读取字节。 |
 | Consumer `MaxWait` | 500ms | 最大等待。 |
-| Consumer `CommitInterval` | 1s | Offset 提交间隔。 |
-| Consumer `StartOffset` | -1 | 从最新开始消费。 |
+| ManualConsumerPool `CommitInterval` | 0 | 同步提交；当前消息成功或按业务策略完成旁路后才 Fetch 下一条。 |
+| ManualConsumerPool `ErrorBackoff` | 500ms（业务可覆盖） | Fetch/Commit 临时失败在消费循环内退避，不退出进程。 |
+
+所有服务侧 Kafka 消费统一通过 `pkg/kafka.ManualConsumerPool` 启动。每个 worker 都是独立
+`kafka.Reader`，共享同一 topic 和 consumer group；Kafka rebalance 自动决定 partition
+归属，配置中不接受 partition 编号或绑定列表。单个 Reader 严格执行
+`Fetch → Handle → Commit`，因此同 partition 串行，不同 Reader 可以并行。
+
+| 并发环境变量 | 默认值 | 对应消费者 |
+| --- | --- | --- |
+| `KAFKA_AUTH_PROFILE_DISPLAY_CHANGED_CONSUMER_CONCURRENCY` | `3` | auth `profile_display_changed`。 |
+| `KAFKA_AUTH_REDIS_RETRY_CONSUMER_CONCURRENCY` | `3` | auth Redis DEL 补偿。 |
+| `KAFKA_USER_CREATED_CONSUMER_CONCURRENCY` | `3` | user `user_created`。 |
+| `KAFKA_USER_ACCOUNT_DELETED_CONSUMER_CONCURRENCY` | `3` | user `account.deleted`。 |
+| `KAFKA_USER_REDIS_RETRY_CONSUMER_CONCURRENCY` | `3` | user Redis DEL 补偿。 |
+| `KAFKA_RELATION_ACCOUNT_DELETED_CONSUMER_CONCURRENCY` | `3` | relation `account.deleted`。 |
+| `KAFKA_RELATION_REDIS_RETRY_CONSUMER_CONCURRENCY` | `3` | relation Redis DEL 补偿。 |
+| `KAFKA_MSG_PUSH_CONSUMER_CONCURRENCY` | `3` | message-push `msg.push`。 |
+| `KAFKA_REALTIME_PUSH_CONSUMER_CONCURRENCY` | `3` | message-push `realtime.push`。 |
+| `KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY` | `3` | group Redis projector。 |
+| `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY` | `3` | msg membership projector。 |
+
+并发配置规则：未配置默认 `3`；显式值必须是 `1～64` 正整数；零、负数或非法文本导致服务启动失败，禁止静默回退。workers 大于 partition 数，或多副本竞争后某个 Reader 暂时分不到 partition，均是正常 idle：Reader 阻塞等待下一次 rebalance，不退出也不重启。
+
+错误分层如下：Kafka 断连、broker 抖动、rebalance 等 Fetch 临时错误在 Reader 循环内退避；
+单个 worker 因不可恢复错误退出时，Pool 立即取消兄弟 worker 并整体失败，禁止半残运行。
+message-push 以消费为主业，Pool 致命失败会使进程非零退出；auth/user/relation/group/msg
+把消费视为 API 旁路，Pool 失败后记录 `lcchat_kafka_isolated_pool_failures_total`、持续 Error
+日志并退避重启该 Pool，不中断 gRPC。
 
 `group.cache` 的两个 projector 必须使用不同 consumer group：
 
@@ -37,14 +64,10 @@
 | --- | --- | --- |
 | `KAFKA_GROUP_CACHE_GROUP_ID` | `group-cache-projector-group` | group-service Redis 投影。 |
 | `KAFKA_MSG_GROUP_MEMBERSHIP_GROUP_ID` | `msg-group-membership-projector-group` | msg-service `conversation` 成员投影。 |
-| `KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY` | `3` | group Redis projector 每进程独立 Reader 数。 |
-| `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY` | `3` | msg membership projector 每进程独立 Reader 数。 |
-
-并发配置规则：未配置默认 `3`；显式值必须是 `1～64` 正整数；零、负数或非法文本导致服务启动失败，禁止静默回退。
 
 ### Redis 缓存失效补偿
 
-auth、user 和 relation 使用不同 Topic 与 consumer group，任务不会跨服务竞争，也不会因不同 group 广播到其他服务。payload 只包含当前 `RedisTask` 契约声明的待删除 key 和追踪元数据，不接受未知字段、尾随 JSON、`SET`、`HSET`、Pipeline 或 Lua 等可写回旧值的命令。relation 在 go-redis 完成最多 2 次短重试（共 3 次尝试）后投递补偿；消费者对 Redis DEL 原地重试最多约 2 分钟，之后写 relation 数据库的 `dead_events`。
+auth、user 和 relation 使用不同 Topic 与 consumer group，任务不会跨服务竞争，也不会因不同 group 广播到其他服务。payload 只包含当前 `RedisTask` 契约声明的待删除 key 和追踪元数据，不接受未知字段、尾随 JSON、`SET`、`HSET`、Pipeline 或 Lua 等可写回旧值的命令。relation 在 go-redis 完成最多 2 次短重试（共 3 次尝试）后投递补偿；消费者对 Redis DEL 原地重试最多约 2 分钟，之后写入当前服务数据库的 `dead_events`。
 
 消费者使用手动提交：`DEL` 成功后提交 offset；Redis 暂时失败时原地重试同一条消息；payload 非法或重试预算耗尽时，只有写入当前服务数据库的 `dead_events` 成功后才提交。初次投递使用第一个 key 作为 Kafka key。
 
@@ -62,8 +85,9 @@ auth、user 和 relation 使用不同 Topic 与 consumer group，任务不会跨
 | worker > partition | 多余 worker 只会空闲，不会共享 Reader 并发 Fetch。 |
 | 禁止在线扩分区 | 应用不得 `alter --partitions`；扩容会改变 key 哈希落点。有积压时需停写、排空后重建或换新 topic 迁移。 |
 
-msg membership projector 使用手动提交 consumer；新消费组没有已提交 offset 时从可见的
-最早事件开始，不能从最新 offset 推断当前成员全集。事件幂等、死信、重试预算语义与单 Reader 时代相同，**不会**采用 message-push 的“重试耗尽后直接丢弃”。
+msg membership projector 使用手动提交 Pool；新消费组没有已提交 offset 时从可见的
+最早事件开始，不能从最新 offset 推断当前成员全集。事件幂等、死信、重试预算语义在各 Reader
+内保持一致，**不会**采用 message-push 的“重试耗尽后直接丢弃”。
 
 ## 3. Outbox CDC 路由
 
@@ -224,7 +248,8 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | 场景 | 策略 |
 | --- | --- |
 | Outbox 重复投递 | 消费者通过 `idempotent_events` 去重。 |
-| payload 解析失败 | 视为永久错误，记录并跳过，避免毒消息阻塞。 |
+| 投影、领域事件、Redis 补偿 payload 解析失败 | 视为永久错误；先写 `dead_events`，成功后才提交。 |
+| `msg.push` / `realtime.push` 永久业务错误 | 记录告警并提交跳过；客户端通过 seq 补拉。 |
 | Redis 临时失败 | 返回可重试错误，由消费者重试。 |
 | msg 成员投影 DB 临时失败 | 不提交 offset，在预算内原地重试。 |
 | msg 单群投影版本缺口 | 视为永久错误并写死信，禁止跨过缺口继续构造不完整成员视图。 |

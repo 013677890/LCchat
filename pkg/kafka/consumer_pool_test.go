@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -73,14 +74,16 @@ func TestNewManualConsumerPoolCreatesNDistinctConsumers(t *testing.T) {
 }
 
 func TestNewManualConsumerPoolRejectsInvalidWorkers(t *testing.T) {
-	_, err := NewManualConsumerPool(ManualConsumerPoolConfig{
-		Name:    "x",
-		Brokers: []string{"127.0.0.1:9092"},
-		Topic:   "t",
-		GroupID: "g",
-		Workers: 0,
-	})
-	require.Error(t, err)
+	for _, workers := range []int{-1, 0, 65} {
+		_, err := NewManualConsumerPool(ManualConsumerPoolConfig{
+			Name:    "x",
+			Brokers: []string{"127.0.0.1:9092"},
+			Topic:   "t",
+			GroupID: "g",
+			Workers: workers,
+		})
+		require.Error(t, err, "workers=%d", workers)
+	}
 }
 
 // blockingReader 可控的假 Reader：按脚本返回消息，并记录 commit/close。
@@ -160,8 +163,8 @@ func TestManualConsumerPool_TwoWorkersEnterHandlerConcurrently(t *testing.T) {
 	}
 	r0 := mkReader("a")
 	r1 := mkReader("b")
-	c0 := &Consumer{reader: r0, commitMode: CommitOnSuccess, handleTimeout: -1}
-	c1 := &Consumer{reader: r1, commitMode: CommitOnSuccess, handleTimeout: -1}
+	c0 := &Consumer{reader: r0, handleTimeout: -1}
+	c1 := &Consumer{reader: r1, handleTimeout: -1}
 
 	pool, err := newManualConsumerPoolForTest("test-projector", "group.cache", "g1", []*Consumer{c0, c1})
 	require.NoError(t, err)
@@ -229,7 +232,7 @@ func TestManualConsumerPool_SameWorkerSerialUntilCommit(t *testing.T) {
 		return nil
 	}
 
-	c := &Consumer{reader: reader, commitMode: CommitOnSuccess, handleTimeout: -1, errorBackoff: time.Millisecond}
+	c := &Consumer{reader: reader, handleTimeout: -1, errorBackoff: time.Millisecond}
 	pool, err := newManualConsumerPoolForTest("serial", "t", "g", []*Consumer{c})
 	require.NoError(t, err)
 
@@ -281,8 +284,8 @@ func TestManualConsumerPool_WorkerFatalCancelsOthers(t *testing.T) {
 		},
 	}
 
-	c0 := &Consumer{reader: r0, commitMode: CommitOnSuccess, handleTimeout: -1, errorBackoff: time.Millisecond}
-	c1 := &Consumer{reader: r1, commitMode: CommitOnSuccess, handleTimeout: -1, errorBackoff: time.Millisecond}
+	c0 := &Consumer{reader: r0, handleTimeout: -1, errorBackoff: time.Millisecond}
+	c1 := &Consumer{reader: r1, handleTimeout: -1, errorBackoff: time.Millisecond}
 	pool, err := newManualConsumerPoolForTest("fatal-test", "t", "g", []*Consumer{c0, c1})
 	require.NoError(t, err)
 
@@ -346,7 +349,6 @@ func TestManualConsumerPool_ContextCancelDoesNotCommitFailedMessage(t *testing.T
 	}
 	c := &Consumer{
 		reader:         reader,
-		commitMode:     CommitOnSuccess,
 		handleTimeout:  -1,
 		errorBackoff:   50 * time.Millisecond,
 		retryBudget:    time.Hour,
@@ -372,6 +374,72 @@ func TestManualConsumerPool_ContextCancelDoesNotCommitFailedMessage(t *testing.T
 	assert.True(t, errors.Is(err, context.Canceled))
 	assert.Empty(t, reader.committed, "context 取消不得提交当前失败消息的 offset")
 	assert.GreaterOrEqual(t, handleCalls.Load(), int32(1))
+}
+
+func TestManualConsumerPool_FetchErrorBacksOffAndKeepsRunning(t *testing.T) {
+	var firstFetchAt time.Time
+	var secondFetchAt time.Time
+	var observedFetches atomic.Int32
+	handled := make(chan struct{})
+	reader := &blockingReader{
+		fetchScript: []func(context.Context, int) (segmentkafka.Message, error){
+			func(context.Context, int) (segmentkafka.Message, error) {
+				firstFetchAt = time.Now()
+				return segmentkafka.Message{}, errors.New("broker temporarily unavailable")
+			},
+			func(context.Context, int) (segmentkafka.Message, error) {
+				secondFetchAt = time.Now()
+				return segmentkafka.Message{Topic: "t", Offset: 1, Value: []byte("ok")}, nil
+			},
+		},
+	}
+	consumer := &Consumer{
+		reader:        reader,
+		errorBackoff:  30 * time.Millisecond,
+		handleTimeout: -1,
+		observeFetch: func(time.Duration) {
+			observedFetches.Add(1)
+		},
+	}
+	pool, err := newManualConsumerPoolForTest("fetch-retry", "t", "g", []*Consumer{consumer})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- pool.Start(ctx, func(context.Context, []byte) error {
+			close(handled)
+			return nil
+		})
+	}()
+
+	select {
+	case <-handled:
+		cancel()
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("临时 Fetch 错误后未继续消费")
+	}
+	require.Error(t, <-errCh)
+	assert.GreaterOrEqual(t, secondFetchAt.Sub(firstFetchAt), 20*time.Millisecond)
+	assert.GreaterOrEqual(t, observedFetches.Load(), int32(2))
+}
+
+func TestManualConsumerPool_ClosedReaderIsFatal(t *testing.T) {
+	reader := &blockingReader{
+		fetchScript: []func(context.Context, int) (segmentkafka.Message, error){
+			func(context.Context, int) (segmentkafka.Message, error) {
+				return segmentkafka.Message{}, io.ErrClosedPipe
+			},
+		},
+	}
+	consumer := &Consumer{reader: reader, errorBackoff: time.Hour, handleTimeout: -1}
+	pool, err := newManualConsumerPoolForTest("closed-reader", "t", "g", []*Consumer{consumer})
+	require.NoError(t, err)
+
+	err = pool.Start(context.Background(), func(context.Context, []byte) error { return nil })
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reader 已关闭")
 }
 
 func TestManualConsumerPool_NilSafeClose(t *testing.T) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -102,15 +103,30 @@ func provideAuthKafkaProducer(redisClient *goredis.Client, cfg config.KafkaConfi
 	return kafka.NewProducer(cfg.Brokers, cfg.AuthRedisRetryTopic)
 }
 
+// parseAuthPoolWorkers 严格解析 auth-service 旁路消费 Pool 的 Reader 数。
+// 空值统一默认 3；显式非法值带环境变量名返回，阻止错误配置进入运行态。
+func parseAuthPoolWorkers(envName string) (int, error) {
+	workers, err := kafka.ParsePoolWorkers(os.Getenv(envName))
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", envName, err)
+	}
+	return workers, nil
+}
+
 // Consumer 只在这里构造，真正启动放到 AuthApp.Run，避免 provider 隐式拉起后台 goroutine。
-func provideAuthRedisRetryConsumer(redisClient *goredis.Client, cfg config.KafkaConfig, log *zap.Logger, db *gorm.DB) *redisretry.RedisRetryConsumer {
+func provideAuthRedisRetryConsumer(redisClient *goredis.Client, cfg config.KafkaConfig, log *zap.Logger, db *gorm.DB) (*redisretry.RedisRetryConsumer, error) {
+	workers, err := parseAuthPoolWorkers("KAFKA_AUTH_REDIS_RETRY_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return nil, err
+	}
 	if redisClient == nil {
-		return nil
+		return nil, nil
 	}
 	return redisretry.NewRedisRetryConsumer(
 		cfg.Brokers,
 		cfg.AuthRedisRetryTopic,
 		cfg.AuthRedisRetryGroupID,
+		workers,
 		redisClient,
 		outbox.NewDeadLetterSink(db, "auth-service:redis-invalidation"),
 		kafka.NewZapLoggerAdapter(log),
@@ -122,12 +138,16 @@ func provideAuthProfileDisplayChangedConsumer(
 	cfg config.KafkaConfig,
 	internalAuthSvc service.InternalAuthService,
 	db *gorm.DB,
-) *consumer.ProfileDisplayChangedConsumer {
+) (*consumer.ProfileDisplayChangedConsumer, error) {
+	workers, err := parseAuthPoolWorkers("KAFKA_AUTH_PROFILE_DISPLAY_CHANGED_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return nil, err
+	}
 	groupID := cfg.ConsumerConfig.GroupID + "-auth-profile-display-changed"
 	if cfg.ConsumerConfig.GroupID == "" {
 		groupID = "auth-profile-display-changed-group"
 	}
-	return consumer.NewProfileDisplayChangedConsumer(cfg.Brokers, cfg.ProfileDisplayChangedTopic, groupID, internalAuthSvc, db)
+	return consumer.NewProfileDisplayChangedConsumer(cfg.Brokers, cfg.ProfileDisplayChangedTopic, groupID, workers, internalAuthSvc, db)
 }
 
 func provideAuthGRPCAddress() authGRPCAddress {
@@ -150,8 +170,13 @@ func provideAuthGRPCShutdownTimeout() authGRPCShutdownTimeout {
 	return authGRPCShutdownTimeout(10 * time.Second)
 }
 
-func provideAuthMetricsServer(addr authMetricsAddress, built *grpcx.BuiltServer) *http.Server {
-	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
+// provideAuthMetricsServer 注册 auth 的 gRPC 与旁路 Kafka Pool 指标并创建 HTTP 服务。
+// 指标注册失败会中止初始化，避免 Pool 已隔离失败却无法从 /metrics 观测。
+func provideAuthMetricsServer(addr authMetricsAddress, built *grpcx.BuiltServer) (*http.Server, error) {
+	if err := built.Metrics.RegisterCollector(kafka.IsolatedPoolFailureCollector()); err != nil {
+		return nil, fmt.Errorf("注册 auth Kafka 旁路 Pool 指标失败: %w", err)
+	}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics), nil
 }
 
 func authInternalMethodWhitelist() map[string][]string {

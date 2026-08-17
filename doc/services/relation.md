@@ -43,6 +43,13 @@ relation 服务拥有好友和黑名单关系事实，负责关系写入、关�
 | --- | --- | --- |
 | `account.deleted` | 消费 | 账号注销后清理或标记相关关系。 |
 
+## Kafka 消费编排
+
+- `account.deleted` 与 `relation.redis.invalidate` 各使用独立 `ManualConsumerPool` 和 consumer group。
+- `KAFKA_RELATION_ACCOUNT_DELETED_CONSUMER_CONCURRENCY`、`KAFKA_RELATION_REDIS_RETRY_CONSUMER_CONCURRENCY` 分别配置本进程 Reader 数；默认 3，显式值必须为 `1～64`。
+- workers 由 Kafka rebalance 分配 partition；领域事件与安全 DEL 补偿只有成功或死信落地后才提交，未知字段和写回命令不会执行。
+- Pool 致命失败在 RelationApp 内隔离、计数并退避重启，不拖死 gRPC。
+
 ## 协作关系
 
 - Gateway 调用 relation 暴露好友和黑名单 HTTP API。

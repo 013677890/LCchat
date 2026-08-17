@@ -187,12 +187,13 @@ func provideGroupCacheProjector(
 	return consumer.NewCacheProjector(cfg.Brokers, cfg.GroupCacheTopic, groupID, workers, projectorRepo, db)
 }
 
-// provideGroupMetricsServer 复用 grpcx 的统一 metrics HTTP server。
-//
-// 当前和 relation/user/msg 一样，先只暴露 /metrics，
-// 后续如果 group-service 需要独立 /health，再按实际运行特征补充。
-func provideGroupMetricsServer(addr groupMetricsAddress, built *grpcx.BuiltServer) *http.Server {
-	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
+// provideGroupMetricsServer 注册 group 的 gRPC 与旁路 Kafka Pool 指标并创建 HTTP 服务。
+// 指标注册失败会中止初始化；当前端点只暴露 /metrics，独立 /health 按实际需要再补充。
+func provideGroupMetricsServer(addr groupMetricsAddress, built *grpcx.BuiltServer) (*http.Server, error) {
+	if err := built.Metrics.RegisterCollector(kafka.IsolatedPoolFailureCollector()); err != nil {
+		return nil, fmt.Errorf("注册 group Kafka 旁路 Pool 指标失败: %w", err)
+	}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics), nil
 }
 
 // provideGroupRegistration 负责把 proto service 注册到 gRPC Server。

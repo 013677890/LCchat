@@ -44,6 +44,13 @@ user 服务拥有用户公开资料事实，负责资料维护、搜索、头像
 | `profile_display_changed` | 生产 | 昵称或头像变化后通知 auth 回写登录展示冗余字段。 |
 | `account.deleted` | 消费 | 账号注销后资料域按当前策略清理或标记。 |
 
+## Kafka 消费编排
+
+- `user_created`、`account.deleted`、`user.redis.invalidate` 各使用独立 `ManualConsumerPool` 与 consumer group。
+- Reader 数分别由 `KAFKA_USER_CREATED_CONSUMER_CONCURRENCY`、`KAFKA_USER_ACCOUNT_DELETED_CONSUMER_CONCURRENCY`、`KAFKA_USER_REDIS_RETRY_CONSUMER_CONCURRENCY` 配置；默认 3，显式值必须为 `1～64`。
+- workers 不是 partition 绑定；Kafka rebalance 自动分配。同 Reader 串行处理，领域事件和 Redis 补偿只有成功或死信落地后才提交。
+- Pool 致命失败在 UserApp 内隔离、计数并退避重启，不拖死 gRPC。
+
 ## 协作关系
 
 - Gateway 通过 UserService 暴露 HTTP 资料接口。

@@ -99,17 +99,15 @@ func (a *RelationApp) Run(ctx context.Context) error {
 
 	if a.redisRetryConsumer != nil {
 		go func() {
-			if err := a.redisRetryConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "Relation Redis 补偿消费者运行错误", logger.ErrorField("error", err))
-			}
+			// 旁路 Redis 补偿：Pool 内 fail-fast 收敛，进程级 isolate，不拖死 relation gRPC。
+			kafka.RunIsolatedPool(ctx, "relation-redis-retry", a.redisRetryConsumer.Start)
 		}()
 	}
 
 	if a.accountDeletedConsumer != nil {
 		go func() {
-			if err := a.accountDeletedConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "Relation account.deleted 消费者运行错误", logger.ErrorField("error", err))
-			}
+			// 账号注销关系清理异步旁路；失败隔离，不中断好友/申请接口。
+			kafka.RunIsolatedPool(ctx, "relation-account-deleted", a.accountDeletedConsumer.Start)
 		}()
 	}
 

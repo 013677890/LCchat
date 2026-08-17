@@ -161,7 +161,7 @@ LCChat/
 
 通用结构：`cmd`（入口 + Wire 装配 + 生命周期）→ `handler`（薄层，参数转换与错误映射）→ `service` / `usecase` → `repository`（MySQL + Redis）。
 
-- Kafka 消费者一般在 `internal/consumer`
+- Kafka 业务 Handler 一般在 `internal/consumer`，服务侧消费统一由 `pkg/kafka.ManualConsumerPool` 编排
 - 下游 gRPC 客户端封装在 `internal/*cli`
 - **msg** 采用 DDD：`domain/message`、`domain/conversation` + `usecase` 编排；**domain 之间不互相依赖**，只有 usecase 可协调多 domain
 
@@ -327,11 +327,14 @@ LCCHAT_E2E=1 go test -tags=e2e -count=1 -v ./tests/e2e
 | 变量 | 说明 |
 | --- | --- |
 | `KAFKA_MSG_PUSH_TOPIC` / `KAFKA_MSG_PUSH_GROUP_ID` | 消息下行 Topic 与消费组 |
+| `KAFKA_MSG_PUSH_CONSUMER_CONCURRENCY` / `KAFKA_REALTIME_PUSH_CONSUMER_CONCURRENCY` | message-push 两个独立 Pool 的 Reader 数，默认 3 |
 | `KAFKA_GROUP_CACHE_TOPIC` | 群缓存事件 Topic（固定 3 partitions） |
 | `KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY` | group 侧投影并发 Reader 数，默认 3 |
 | `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY` | msg 侧成员资格投影并发，默认 3 |
 | `MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY` | message-push 节点间有界并发，默认 32 |
 | `GROUP_GRPC_ADDR` | msg / message-push 访问群服务 |
+
+其余领域事件与 Redis 补偿 Pool 的并发变量见 [`doc/ops/配置说明.md`](doc/ops/配置说明.md)。所有 Kafka `*_CONCURRENCY` 显式值必须为 `1～64`，表示本进程 Reader 数而非 partition 绑定。
 
 ---
 

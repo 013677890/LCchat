@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -47,7 +48,6 @@ func TestConsumeOnSuccessParksPermanentErrorOnceBeforeRetryingCommit(t *testing.
 	sink := &consumerTestDeadLetterSink{}
 	consumer := &Consumer{
 		reader:         reader,
-		commitMode:     CommitOnSuccess,
 		errorBackoff:   0,
 		deadLetterSink: sink,
 	}
@@ -81,7 +81,6 @@ func TestConsumeOnSuccessRejectsPermanentErrorWithoutDeadLetterSink(t *testing.T
 	reader := &consumerTestReader{}
 	consumer := &Consumer{
 		reader:       reader,
-		commitMode:   CommitOnSuccess,
 		errorBackoff: time.Millisecond,
 	}
 
@@ -95,4 +94,22 @@ func TestConsumeOnSuccessRejectsPermanentErrorWithoutDeadLetterSink(t *testing.T
 	require.Error(t, err)
 	assert.True(t, IsPermanent(err))
 	assert.Zero(t, reader.commitCalls)
+}
+
+func TestCommitMessageTreatsClosedReaderAsFatal(t *testing.T) {
+	reader := &consumerTestReader{commitErrors: []error{io.ErrClosedPipe}}
+	observedErrors := 0
+	consumer := &Consumer{
+		reader:       reader,
+		errorBackoff: time.Hour,
+		observeCommitError: func() {
+			observedErrors++
+		},
+	}
+
+	err := consumer.commitMessage(context.Background(), segmentkafka.Message{Topic: "t", Offset: 1})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reader 已关闭")
+	assert.Equal(t, 1, reader.commitCalls)
+	assert.Equal(t, 1, observedErrors)
 }

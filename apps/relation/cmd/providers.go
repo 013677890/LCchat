@@ -95,20 +95,35 @@ func provideRelationRedisRetryProducer(redisClient *goredis.Client, cfg config.K
 	return kafka.NewProducer(cfg.Brokers, cfg.RelationRedisRetryTopic)
 }
 
+// parseRelationPoolWorkers 严格解析 relation-service 旁路消费 Pool 的 Reader 数。
+// 空值统一默认 3；显式非法值带环境变量名返回，阻止错误配置进入运行态。
+func parseRelationPoolWorkers(envName string) (int, error) {
+	workers, err := kafka.ParsePoolWorkers(os.Getenv(envName))
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", envName, err)
+	}
+	return workers, nil
+}
+
 // Consumer 的失败重试由通用 Kafka 消费器负责，超过预算后写入 dead_events。
 func provideRelationRedisRetryConsumer(
 	redisClient *goredis.Client,
 	cfg config.KafkaConfig,
 	log *zap.Logger,
 	db *gorm.DB,
-) *redisretry.RedisRetryConsumer {
+) (*redisretry.RedisRetryConsumer, error) {
+	workers, err := parseRelationPoolWorkers("KAFKA_RELATION_REDIS_RETRY_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return nil, err
+	}
 	if redisClient == nil {
-		return nil
+		return nil, nil
 	}
 	return redisretry.NewRedisRetryConsumer(
 		cfg.Brokers,
 		cfg.RelationRedisRetryTopic,
 		cfg.RelationRedisRetryGroupID,
+		workers,
 		redisClient,
 		outbox.NewDeadLetterSink(db, "relation-service:redis-invalidation"),
 		kafka.NewZapLoggerAdapter(log),
@@ -181,16 +196,25 @@ func provideRelationAccountDeletedConsumer(
 	friendRepo repository.IFriendRepository,
 	applyRepo repository.IApplyRepository,
 	db *gorm.DB,
-) *consumer.AccountDeletedConsumer {
+) (*consumer.AccountDeletedConsumer, error) {
+	workers, err := parseRelationPoolWorkers("KAFKA_RELATION_ACCOUNT_DELETED_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return nil, err
+	}
 	groupID := cfg.ConsumerConfig.GroupID + "-relation-account-deleted"
 	if cfg.ConsumerConfig.GroupID == "" {
 		groupID = "relation-account-deleted-group"
 	}
-	return consumer.NewAccountDeletedConsumer(cfg.Brokers, cfg.AccountDeletedTopic, groupID, friendRepo, applyRepo, db)
+	return consumer.NewAccountDeletedConsumer(cfg.Brokers, cfg.AccountDeletedTopic, groupID, workers, friendRepo, applyRepo, db)
 }
 
-func provideRelationMetricsServer(addr relationMetricsAddress, built *grpcx.BuiltServer) *http.Server {
-	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
+// provideRelationMetricsServer 注册 relation 的 gRPC 与旁路 Kafka Pool 指标并创建 HTTP 服务。
+// 指标注册失败会中止初始化，避免 Pool 已隔离失败却无法从 /metrics 观测。
+func provideRelationMetricsServer(addr relationMetricsAddress, built *grpcx.BuiltServer) (*http.Server, error) {
+	if err := built.Metrics.RegisterCollector(kafka.IsolatedPoolFailureCollector()); err != nil {
+		return nil, fmt.Errorf("注册 relation Kafka 旁路 Pool 指标失败: %w", err)
+	}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics), nil
 }
 
 func provideRelationRegistration(

@@ -12,6 +12,7 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/mysql"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
@@ -89,9 +90,8 @@ func (a *MsgApp) Run(ctx context.Context) error {
 	}
 
 	go func() {
-		if err := a.groupProjector.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Error(ctx, "Msg group membership projector 运行错误", logger.ErrorField("error", err))
-		}
+		// 成员投影是 API 旁路；致命失败持续告警并独立重启，不中断 msg gRPC。
+		kafka.RunIsolatedPool(ctx, "msg-group-membership-projector", a.groupProjector.Start)
 	}()
 
 	logger.Info(ctx, "Msg 服务启动中",

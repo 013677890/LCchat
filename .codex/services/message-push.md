@@ -27,11 +27,13 @@
 
 ## 重试与可靠性边界
 
-- 本服务使用自定义消费循环，不使用 pkg/kafka.NewManualCommitConsumer。
+- msg.push 与 realtime.push 各自使用 pkg/kafka.ManualConsumerPool；每个 Pool 默认 3 个独立 Reader，由 Kafka rebalance 分配 partition。
+- 两个 Pool 的 workers 分别由 KAFKA_MSG_PUSH_CONSUMER_CONCURRENCY、KAFKA_REALTIME_PUSH_CONSUMER_CONCURRENCY 配置，显式值只接受 1～64。
 - 本地重试有限，默认 3 次并带短退避和单次处理预算。
 - 至少一个目标设备推送成功即可视为该事件已处理；全部失败或预算耗尽后会记录告警/指标并让出 offset。
 - 不写 dead_events。它优先避免单条消息阻塞分区，代价是实时下行不承诺至少一次。
 - MSG_PUSH 的客户端可按 seq 拉取补洞；撤回、已读和 realtime.push 必须有独立查询/刷新兜底。
+- Kafka 临时 Fetch 错误在 Reader 内退避；任一 worker 致命退出会取消同 Pool 兄弟，并让 message-push 进程非零退出。
 
 ## 修改陷阱
 

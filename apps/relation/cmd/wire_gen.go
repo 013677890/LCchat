@@ -47,12 +47,15 @@ func initializeRelationApp() (*RelationApp, error) {
 	iBlacklistService := service.NewBlacklistService(iBlacklistRepository, producer)
 	blacklistHandler := handler.NewBlacklistHandler(iBlacklistService)
 	registrationFunc := provideRelationRegistration(friendHandler, blacklistHandler)
-	mainRelationGRPCAddress := provideRelationGRPCAddress()
 	builtServer, err := provideRelationGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}
-	server := provideRelationMetricsServer(mainRelationMetricsAddress, builtServer)
+	server, err := provideRelationMetricsServer(mainRelationMetricsAddress, builtServer)
+	if err != nil {
+		return nil, err
+	}
+	mainRelationGRPCAddress := provideRelationGRPCAddress()
 	listener, err := provideRelationGRPCListener(mainRelationGRPCAddress)
 	if err != nil {
 		return nil, err
@@ -64,8 +67,14 @@ func initializeRelationApp() (*RelationApp, error) {
 		return nil, err
 	}
 	mainRelationAsyncReleaseTimeout := provideRelationAsyncReleaseTimeout(asyncConfig)
-	redisRetryConsumer := provideRelationRedisRetryConsumer(client, kafkaConfig, logger, db)
-	accountDeletedConsumer := provideRelationAccountDeletedConsumer(kafkaConfig, iFriendRepository, iApplyRepository, db)
+	redisRetryConsumer, err := provideRelationRedisRetryConsumer(client, kafkaConfig, logger, db)
+	if err != nil {
+		return nil, err
+	}
+	accountDeletedConsumer, err := provideRelationAccountDeletedConsumer(kafkaConfig, iFriendRepository, iApplyRepository, db)
+	if err != nil {
+		return nil, err
+	}
 	kafkaProducer := provideRelationRedisRetryProducer(client, kafkaConfig)
 	relationApp, err := NewRelationApp(logger, server, builtServer, listener, mainRelationGRPCShutdownTimeout, pool, mainRelationAsyncReleaseTimeout, redisRetryConsumer, accountDeletedConsumer, kafkaProducer, producer, mainRelationAuthGRPCConn, db, client)
 	if err != nil {

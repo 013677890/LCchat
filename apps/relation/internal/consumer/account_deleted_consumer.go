@@ -15,55 +15,70 @@ import (
 
 const relationAccountDeletedIdempotentEventType = accountevent.EventTypeAccountDeleted + ":relation-service"
 
-// AccountDeletedConsumer 负责消费 account.deleted 事件并执行 relation-service 侧清理。
+// AccountDeletedConsumer 消费 account.deleted 并执行 relation-service 侧关系清理。
+// 使用 ManualConsumerPool；group 与其它服务隔离，由 RelationApp 经 RunIsolatedPool 旁路运行。
 type AccountDeletedConsumer struct {
-	consumer   *kafka.Consumer
+	pool       *kafka.ManualConsumerPool
 	friendRepo repository.IFriendRepository
 	applyRepo  repository.IApplyRepository
 	db         *gorm.DB
 }
 
-// NewAccountDeletedConsumer 创建 relation-service 的 account.deleted 消费者。
+// NewAccountDeletedConsumer 创建 relation-service 的 account.deleted 消费 Pool。
+// workers 非法或 Pool 参数不完整时直接返回错误，禁止回退为单 Reader。
 func NewAccountDeletedConsumer(
 	brokers []string,
 	topic, groupID string,
+	workers int,
 	friendRepo repository.IFriendRepository,
 	applyRepo repository.IApplyRepository,
 	db *gorm.DB,
-) *AccountDeletedConsumer {
-	return &AccountDeletedConsumer{
-		consumer: kafka.NewManualCommitConsumer(brokers, topic, groupID, kafka.ManualConsumerConfig{
-			MinBytes:     1,
-			MaxBytes:     10 << 20,
-			MaxWait:      500 * time.Millisecond,
+) (*AccountDeletedConsumer, error) {
+	pool, err := kafka.NewManualConsumerPool(kafka.ManualConsumerPoolConfig{
+		Name:    "relation-account-deleted",
+		Brokers: brokers,
+		Topic:   topic,
+		GroupID: groupID,
+		Workers: workers,
+		Config: kafka.ManualConsumerConfig{
+			MinBytes:       1,
+			MaxBytes:       10 << 20,
+			MaxWait:        500 * time.Millisecond,
 			ErrorBackoff:   time.Second,
 			DeadLetterSink: outbox.NewDeadLetterSink(db, "relation-service:account.deleted"),
-		}),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &AccountDeletedConsumer{
+		pool:       pool,
 		friendRepo: friendRepo,
 		applyRepo:  applyRepo,
 		db:         db,
-	}
+	}, nil
 }
 
-// Start 启动 relation-service 的 account.deleted 消费循环。
+// Start 启动 account.deleted 消费循环；致命错误由 RelationApp 的 RunIsolatedPool 隔离。
 func (c *AccountDeletedConsumer) Start(ctx context.Context) error {
 	logger.Info(ctx, "Relation account.deleted 消费者启动中")
-	return c.consumer.Start(ctx, c.handle)
+	return c.pool.Start(ctx, c.handle)
 }
 
-// Close 关闭消费者。
+// Close 关闭 Pool 内全部 Reader；应在取消 Start 的 ctx 之后调用。
 func (c *AccountDeletedConsumer) Close() error {
-	if c.consumer == nil {
+	if c == nil || c.pool == nil {
 		return nil
 	}
-	return c.consumer.Close()
+	return c.pool.Close()
 }
 
+// handle 解码并幂等清理 relation 域账号关系。
+// 契约错误进入 dead_events；数据库错误可重试；成功后才推进 offset。
 func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) error {
 	payload, err := accountevent.DecodeAccountDeleted(message)
 	if err != nil {
-		logger.Warn(ctx, "解析 relation account.deleted 事件失败，按不可重试消息跳过", logger.ErrorField("error", err))
-		return nil
+		return kafka.Permanent(fmt.Errorf("解析 relation account.deleted 事件失败: %w", err))
 	}
 
 	processed, err := outbox.CheckIdempotent(c.db, relationAccountDeletedIdempotentEventType, payload.EventID)

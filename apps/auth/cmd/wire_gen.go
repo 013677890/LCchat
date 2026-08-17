@@ -43,20 +43,29 @@ func initializeAuthApp() (*AuthApp, error) {
 	iInternalAuthService := service.NewInternalAuthService(iAuthRepository)
 	internalAuthHandler := handler.NewInternalAuthHandler(iInternalAuthService)
 	registrationFunc := provideAuthRegistration(authHandler, deviceHandler, accountHandler, internalAuthHandler)
-	mainAuthGRPCAddress := provideAuthGRPCAddress()
 	builtServer, err := provideAuthGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}
-	server := provideAuthMetricsServer(mainAuthMetricsAddress, builtServer)
+	server, err := provideAuthMetricsServer(mainAuthMetricsAddress, builtServer)
+	if err != nil {
+		return nil, err
+	}
+	mainAuthGRPCAddress := provideAuthGRPCAddress()
 	listener, err := provideAuthGRPCListener(mainAuthGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
 	mainAuthGRPCShutdownTimeout := provideAuthGRPCShutdownTimeout()
 	kafkaConfig := provideAuthKafkaConfig()
-	redisRetryConsumer := provideAuthRedisRetryConsumer(client, kafkaConfig, logger, db)
-	profileDisplayChangedConsumer := provideAuthProfileDisplayChangedConsumer(kafkaConfig, iInternalAuthService, db)
+	redisRetryConsumer, err := provideAuthRedisRetryConsumer(client, kafkaConfig, logger, db)
+	if err != nil {
+		return nil, err
+	}
+	profileDisplayChangedConsumer, err := provideAuthProfileDisplayChangedConsumer(kafkaConfig, iInternalAuthService, db)
+	if err != nil {
+		return nil, err
+	}
 	producer := provideAuthKafkaProducer(client, kafkaConfig)
 	authApp, err := NewAuthApp(logger, server, builtServer, listener, mainAuthGRPCShutdownTimeout, redisRetryConsumer, profileDisplayChangedConsumer, producer, db, client)
 	if err != nil {

@@ -28,7 +28,8 @@ Outbox 的业务表写入与 outbox_events 插入必须在同一个 MySQL 事务
 
 ## 手动提交与死信
 
-- pkg/kafka.NewManualCommitConsumer 仅在 handler 成功或死信成功落地后提交 offset。
+- 所有服务侧消费者统一经 pkg/kafka.ManualConsumerPool 启动；每个 worker 持有独立 Reader，并只在 handler 成功或死信成功落地后提交 offset。
+- workers 默认 3，显式值只接受 1～64；它不是 partition 绑定，Kafka rebalance 自动分配，多余 Reader 正常 idle。
 - 有 DeadLetterSink 时，每次处理默认 10 秒超时；可重试失败默认在同一消息上重试最多 2 分钟，再落 dead_events。
 - 永久错误和 handler panic 会首轮尝试落 dead_events；死信写失败则保持 offset 不提交，继续阻塞。
 - idempotent_events 通常采用 Check -> 业务操作 -> Mark。除非业务写和 Mark 在同一事务，否则它不是严格 exactly-once。
@@ -42,7 +43,7 @@ Outbox 的业务表写入与 outbox_events 插入必须在同一个 MySQL 事务
 - group-service:group.cache
 - msg-service:group-membership
 
-重要例外：Auth 的 profile_display_changed、User 的 user_created/account.deleted、Relation 的 account.deleted 对解码失败会记录日志后返回成功。因此该条消息会提交，不会进入 dead_events；上述 source 只覆盖解码成功后的处理失败或重试耗尽。新增消费者时不要复制这一语义，除非明确接受坏事件不可追溯地跳过。
+Auth 的 profile_display_changed、User 的 user_created/account.deleted、Relation 的 account.deleted 对解码失败统一返回永久错误；只有对应 `dead_events` 写入成功后才提交，坏事件不会无落点跳过。
 
 ## Redis 整键 DEL 补偿
 
@@ -55,4 +56,4 @@ Outbox 的业务表写入与 outbox_events 插入必须在同一个 MySQL 事务
 
 ## Message-push 例外
 
-Message-push 使用自定义有限本地重试消费者，而非手动提交死信消费者。msg.push 和 realtime.push 的处理在重试耗尽后记录告警/指标并让出 offset，不写 dead_events。它避免单条消息永久卡住分区，但实时下行不保证至少一次；客户端应通过消息拉取、批量同步或权威业务查询修复。
+Message-push 仍保留有限本地重试和 best-effort 丢弃语义，但编排统一使用两个 ManualConsumerPool。msg.push 和 realtime.push 的处理在重试耗尽后记录告警/指标并让出 offset，不写 dead_events。它避免单条消息永久卡住分区，但实时下行不保证至少一次；客户端应通过消息拉取、批量同步或权威业务查询修复。

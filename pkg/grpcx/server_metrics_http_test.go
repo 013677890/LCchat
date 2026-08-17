@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,6 +39,20 @@ func TestNewMetricsHTTPServerHandlesNilMetrics(t *testing.T) {
 	server.Handler.ServeHTTP(resp, req)
 
 	assert.Equal(t, http.StatusNotFound, resp.Code)
+}
+
+func TestMetricsRegisterCollectorExposesBusinessMetric(t *testing.T) {
+	metrics := NewMetrics()
+	counter := prometheus.NewCounter(prometheus.CounterOpts{Name: "test_background_failure_total"})
+	require.NoError(t, metrics.RegisterCollector(counter))
+	counter.Inc()
+
+	server := NewMetricsHTTPServer(":9190", metrics)
+	resp := httptest.NewRecorder()
+	server.Handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Contains(t, resp.Body.String(), "test_background_failure_total 1")
 }
 
 func TestNewMetricsHTTPServerRegistersPprofRoutes(t *testing.T) {

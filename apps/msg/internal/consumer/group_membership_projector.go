@@ -33,7 +33,7 @@ type GroupMembershipProjector struct {
 // NewGroupMembershipProjector 创建 msg 群成员会话分区级并行投影消费者。
 //
 // workers 必须由调用方用 kafka.ParsePoolWorkers 严格解析后传入。
-// NewManualCommitConsumer 在消费组没有已提交位点时使用 kafka-go 的 FirstOffset
+// ManualConsumerPool 在消费组没有已提交位点时使用 kafka-go 的 FirstOffset
 // 默认值。成员投影必须从该消费组可见的最早事件开始，不能从最新位置猜当前全集。
 func NewGroupMembershipProjector(
 	brokers []string,
@@ -65,7 +65,9 @@ func NewGroupMembershipProjector(
 	}, nil
 }
 
-// Start 启动阻塞式分区并行消费；任一 worker 致命退出会取消并等待其余 worker。
+// Start 启动阻塞式分区并行消费。
+// 任一 worker 致命退出会取消并等待其余 worker；MsgApp 通过 RunIsolatedPool 隔离该错误，
+// 发送消息 gRPC 仍可继续（投影滞后由后续事件与客户端同步弥补）。
 func (p *GroupMembershipProjector) Start(ctx context.Context) error {
 	if p == nil || p.pool == nil || p.repo == nil {
 		return fmt.Errorf("msg group membership projector 未完整初始化")
@@ -76,7 +78,7 @@ func (p *GroupMembershipProjector) Start(ctx context.Context) error {
 	return p.pool.Start(ctx, p.handle)
 }
 
-// Close 关闭全部底层 Kafka Reader。
+// Close 关闭全部底层 Kafka Reader；关停时应先 cancel Start 的 ctx。
 func (p *GroupMembershipProjector) Close() error {
 	if p == nil || p.pool == nil {
 		return nil

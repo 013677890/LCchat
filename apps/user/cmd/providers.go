@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -84,16 +85,31 @@ func provideUserKafkaProducer(redisClient *goredis.Client, cfg config.KafkaConfi
 	return kafka.NewProducer(cfg.Brokers, cfg.UserRedisRetryTopic)
 }
 
+// parseUserPoolWorkers 严格解析 user-service 旁路消费 Pool 的 Reader 数。
+// 空值统一默认 3；显式非法值带环境变量名返回，阻止错误配置进入运行态。
+func parseUserPoolWorkers(envName string) (int, error) {
+	workers, err := kafka.ParsePoolWorkers(os.Getenv(envName))
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", envName, err)
+	}
+	return workers, nil
+}
+
 // Consumer 只在这里构造，真正启动放到 UserApp.Run，避免 provider 隐式拉起后台 goroutine。
-func provideUserRedisRetryConsumer(redisClient *goredis.Client, cfg config.KafkaConfig, log *zap.Logger, db *gorm.DB) *redisretry.RedisRetryConsumer {
+func provideUserRedisRetryConsumer(redisClient *goredis.Client, cfg config.KafkaConfig, log *zap.Logger, db *gorm.DB) (*redisretry.RedisRetryConsumer, error) {
+	workers, err := parseUserPoolWorkers("KAFKA_USER_REDIS_RETRY_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return nil, err
+	}
 	if redisClient == nil {
-		return nil
+		return nil, nil
 	}
 	zapLogger := kafka.NewZapLoggerAdapter(log)
 	return redisretry.NewRedisRetryConsumer(
 		cfg.Brokers,
 		cfg.UserRedisRetryTopic,
 		cfg.UserRedisRetryGroupID,
+		workers,
 		redisClient,
 		outbox.NewDeadLetterSink(db, "user-service:redis-invalidation"),
 		zapLogger,
@@ -129,25 +145,38 @@ func provideUserGRPCMethodTimeouts() map[string]time.Duration {
 }
 
 // provideUserUserCreatedConsumer 构造 user-service 的 user_created 消费者。
-func provideUserUserCreatedConsumer(cfg config.KafkaConfig, internalProfileSvc service.InternalProfileService, db *gorm.DB) *consumer.UserCreatedConsumer {
+func provideUserUserCreatedConsumer(cfg config.KafkaConfig, internalProfileSvc service.InternalProfileService, db *gorm.DB) (*consumer.UserCreatedConsumer, error) {
+	workers, err := parseUserPoolWorkers("KAFKA_USER_CREATED_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return nil, err
+	}
 	groupID := cfg.ConsumerConfig.GroupID + "-user-created"
 	if cfg.ConsumerConfig.GroupID == "" {
 		groupID = "user-created-group"
 	}
-	return consumer.NewUserCreatedConsumer(cfg.Brokers, cfg.UserCreatedTopic, groupID, internalProfileSvc, db)
+	return consumer.NewUserCreatedConsumer(cfg.Brokers, cfg.UserCreatedTopic, groupID, workers, internalProfileSvc, db)
 }
 
 // provideUserAccountDeletedConsumer 构造 user-service 的 account.deleted 消费者。
-func provideUserAccountDeletedConsumer(cfg config.KafkaConfig, userRepo repository.IUserRepository, db *gorm.DB) *consumer.AccountDeletedConsumer {
+func provideUserAccountDeletedConsumer(cfg config.KafkaConfig, userRepo repository.IUserRepository, db *gorm.DB) (*consumer.AccountDeletedConsumer, error) {
+	workers, err := parseUserPoolWorkers("KAFKA_USER_ACCOUNT_DELETED_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return nil, err
+	}
 	groupID := cfg.ConsumerConfig.GroupID + "-user-account-deleted"
 	if cfg.ConsumerConfig.GroupID == "" {
 		groupID = "user-account-deleted-group"
 	}
-	return consumer.NewAccountDeletedConsumer(cfg.Brokers, cfg.AccountDeletedTopic, groupID, userRepo, db)
+	return consumer.NewAccountDeletedConsumer(cfg.Brokers, cfg.AccountDeletedTopic, groupID, workers, userRepo, db)
 }
 
-func provideUserMetricsServer(addr userMetricsAddress, built *grpcx.BuiltServer) *http.Server {
-	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
+// provideUserMetricsServer 注册 user 的 gRPC 与旁路 Kafka Pool 指标并创建 HTTP 服务。
+// 指标注册失败会中止初始化，避免 Pool 已隔离失败却无法从 /metrics 观测。
+func provideUserMetricsServer(addr userMetricsAddress, built *grpcx.BuiltServer) (*http.Server, error) {
+	if err := built.Metrics.RegisterCollector(kafka.IsolatedPoolFailureCollector()); err != nil {
+		return nil, fmt.Errorf("注册 user Kafka 旁路 Pool 指标失败: %w", err)
+	}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics), nil
 }
 
 func userInternalMethodWhitelist() map[string][]string {

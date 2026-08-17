@@ -8,10 +8,10 @@ import (
 	"time"
 
 	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
-	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/msgevent"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,6 +23,18 @@ func init() { logger.ReplaceGlobal(gozap.NewNop()) }
 
 // testMaxFanoutConcurrency 让直接构造的测试处理器满足生产代码的必填并发契约。
 const testMaxFanoutConcurrency = 32
+
+func TestNewConsumerBuildsManualPoolAndRejectsInvalidWorkers(t *testing.T) {
+	handler := &EventHandler{}
+	consumer, err := NewConsumer([]string{"127.0.0.1:9092"}, "msg.push", "message-push-test", 3, handler)
+	require.NoError(t, err)
+	require.NotNil(t, consumer.pool)
+	assert.Equal(t, 3, consumer.pool.WorkerCount())
+	require.NoError(t, consumer.Close())
+
+	_, err = NewConsumer([]string{"127.0.0.1:9092"}, "msg.push", "message-push-test", 0, handler)
+	require.Error(t, err)
+}
 
 func marshalEvent(t *testing.T, e *msgpb.MsgPushEvent) []byte {
 	t.Helper()
@@ -152,6 +164,12 @@ func TestEventTypeForMetric(t *testing.T) {
 	// 合法 protojson 事件返回真实类型。
 	data := marshalEvent(t, &msgpb.MsgPushEvent{ReceiverUuid: "user1", Type: "MSG_READ_RECEIPT"})
 	assert.Equal(t, "MSG_READ_RECEIPT", eventTypeForMetric(data))
+	realtimeData := marshalRealtimeEvent(t, realtimepush.NewEvent(
+		realtimepush.TypeFriendApplyCreated,
+		realtimepush.NewUserTarget("user1"),
+		nil,
+	))
+	assert.Equal(t, realtimepush.TypeFriendApplyCreated, eventTypeForMetric(realtimeData))
 
 	// 非 protojson / 垃圾字节回退 "unknown"。
 	assert.Equal(t, "unknown", eventTypeForMetric([]byte("garbage")))

@@ -89,17 +89,16 @@ func (a *AuthApp) Run(ctx context.Context) error {
 	if a.redisConsumer != nil {
 		go func() {
 			logger.Info(ctx, "Redis 重试消费者启动中")
-			if err := a.redisConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "Redis 重试消费者运行错误", logger.ErrorField("error", err))
-			}
+			// Redis 补偿是 API 旁路：Pool 内仍 fail-fast 收敛兄弟 worker，
+			// 但错误不返回 gRPC 主循环，避免 Kafka 故障拖垮登录鉴权。
+			kafka.RunIsolatedPool(ctx, "auth-redis-retry", a.redisConsumer.Start)
 		}()
 	}
 
 	if a.profileDisplayChangedConsumer != nil {
 		go func() {
-			if err := a.profileDisplayChangedConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "Auth profile_display_changed 消费者运行错误", logger.ErrorField("error", err))
-			}
+			// 登录展示冗余回写同样是旁路；失败只隔离重启该 Pool。
+			kafka.RunIsolatedPool(ctx, "auth-profile-display-changed", a.profileDisplayChangedConsumer.Start)
 		}()
 	}
 

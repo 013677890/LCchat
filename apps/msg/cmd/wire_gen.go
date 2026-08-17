@@ -55,12 +55,15 @@ func initializeMsgApp() (*MsgApp, error) {
 	markReadWorkflow := usecase.NewMarkReadWorkflow(service)
 	msgHandler := handler.NewMsgHandler(service, messageReadWorkflow, sendMessageWorkflow, recallMessageWorkflow, markReadWorkflow)
 	registrationFunc := provideMsgRegistration(msgHandler)
-	mainMsgGRPCAddress := provideMsgGRPCAddress()
 	builtServer, err := provideMsgGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}
-	server := provideMsgMetricsServer(mainMsgMetricsAddress, builtServer)
+	server, err := provideMsgMetricsServer(mainMsgMetricsAddress, builtServer)
+	if err != nil {
+		return nil, err
+	}
+	mainMsgGRPCAddress := provideMsgGRPCAddress()
 	listener, err := provideMsgGRPCListener(mainMsgGRPCAddress)
 	if err != nil {
 		return nil, err

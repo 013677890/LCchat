@@ -232,8 +232,13 @@ func provideMsgGRPCListener(addr msgGRPCAddress) (net.Listener, error) {
 	return grpcx.NewListener(string(addr))
 }
 
-func provideMsgMetricsServer(addr msgMetricsAddress, built *grpcx.BuiltServer) *http.Server {
-	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics)
+// provideMsgMetricsServer 注册 msg 的 gRPC 与旁路 Kafka Pool 指标并创建 HTTP 服务。
+// 指标注册失败会中止初始化，避免成员投影失败却无法从 /metrics 观测。
+func provideMsgMetricsServer(addr msgMetricsAddress, built *grpcx.BuiltServer) (*http.Server, error) {
+	if err := built.Metrics.RegisterCollector(kafka.IsolatedPoolFailureCollector()); err != nil {
+		return nil, fmt.Errorf("注册 msg Kafka 旁路 Pool 指标失败: %w", err)
+	}
+	return grpcx.NewMetricsHTTPServer(string(addr), built.Metrics), nil
 }
 
 var _ = conversation.NewRepository

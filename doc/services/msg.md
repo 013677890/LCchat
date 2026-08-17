@@ -8,7 +8,7 @@ msg 服务拥有消息、会话和已读位点事实，负责消息落库、会�
 - 基于 `(from_uuid, device_id, client_msg_id)` 做发送幂等，避免弱网重试重复落库。
 - 拉取单会话历史消息、按多个会话各自的 seq 位点批量追新、按消息 ID 批量反查、撤回消息。
 - 维护会话列表、最后消息预览、未读数、免打扰、置顶和逻辑删除位点。
-- 独立消费 `group.cache`（与 group Redis projector 不同 consumer group），以分区级并行 Reader 把群成员关系和群状态投影到 msg 自己的会话表；默认 3 个 Reader（`KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY`），同群严格有序、不同群可并行。
+- 独立消费 `group.cache`（与 group Redis projector 不同 consumer group），以 `ManualConsumerPool` 的分区级并行 Reader 把群成员关系和群状态投影到 msg 自己的会话表；默认 3 个 Reader（`KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY`），显式值必须为 `1～64`，同群严格有序、不同群可并行。
 - 标记会话已读，并与多端同步、P2P 已读回执 outbox 事件同事务提交。
 - 将新消息、撤回、已读事件写入 MySQL `outbox_events`，由 Debezium CDC 路由到 Kafka `msg.push`，再由 message-push 做下行投递。
 
@@ -109,6 +109,9 @@ GROUP 为发送方个人行与一条共享群行；不会重新扫描群成员�
    - 解散群：更新一条共享群状态；
    - 非成员事件：只推进版本。
 6. 业务更新、`projection_version` 和 `idempotent_events` 标记一起提交后，consumer 才提交 offset。
+
+workers 只表示本进程 Reader 数，partition 由 Kafka rebalance 自动分配；多余 Reader 正常 idle。
+projector 是 API 旁路，Pool 内 worker 致命退出会取消兄弟，MsgApp 记录指标与 Error 日志并退避重启该 Pool，不中断 gRPC。
 
 发送群消息的 msg 数据库写路径因此不随群人数增长。在线推送仍需按在线成员/设备扇出，
 那是 message-push 的下行复杂度，不是群消息持久化的写放大。

@@ -37,29 +37,41 @@ func initializeUserApp() (*UserApp, error) {
 	internalProfileService := service.NewInternalProfileService(iUserRepository)
 	internalProfileHandler := handler.NewInternalProfileHandler(internalProfileService)
 	registrationFunc := provideUserRegistration(userHandler, internalProfileHandler)
-	mainUserGRPCAddress := provideUserGRPCAddress()
 	builtServer, err := provideUserGRPCServer(registrationFunc)
 	if err != nil {
 		return nil, err
 	}
-	server := provideUserMetricsServer(mainUserMetricsAddress, builtServer)
+	server, err := provideUserMetricsServer(mainUserMetricsAddress, builtServer)
+	if err != nil {
+		return nil, err
+	}
+	mainUserGRPCAddress := provideUserGRPCAddress()
 	listener, err := provideUserGRPCListener(mainUserGRPCAddress)
 	if err != nil {
 		return nil, err
 	}
 	mainUserGRPCShutdownTimeout := provideUserGRPCShutdownTimeout()
 	kafkaConfig := provideUserKafkaConfig()
+	redisRetryConsumer, err := provideUserRedisRetryConsumer(client, kafkaConfig, logger, db)
+	if err != nil {
+		return nil, err
+	}
+	userCreatedConsumer, err := provideUserUserCreatedConsumer(kafkaConfig, internalProfileService, db)
+	if err != nil {
+		return nil, err
+	}
+	accountDeletedConsumer, err := provideUserAccountDeletedConsumer(kafkaConfig, iUserRepository, db)
+	if err != nil {
+		return nil, err
+	}
 	producer := provideUserKafkaProducer(client, kafkaConfig)
-	v := provideUserRedisRetryConsumer(client, kafkaConfig, logger, db)
-	userCreatedConsumer := provideUserUserCreatedConsumer(kafkaConfig, internalProfileService, db)
-	accountDeletedConsumer := provideUserAccountDeletedConsumer(kafkaConfig, iUserRepository, db)
 	asyncConfig := provideUserAsyncConfig()
 	pool, err := provideUserAsyncPool(logger, asyncConfig)
 	if err != nil {
 		return nil, err
 	}
 	mainUserAsyncReleaseTimeout := provideUserAsyncReleaseTimeout(asyncConfig)
-	userApp, err := NewUserApp(logger, server, builtServer, listener, mainUserGRPCShutdownTimeout, v, userCreatedConsumer, accountDeletedConsumer, producer, pool, mainUserAsyncReleaseTimeout, db, client)
+	userApp, err := NewUserApp(logger, server, builtServer, listener, mainUserGRPCShutdownTimeout, redisRetryConsumer, userCreatedConsumer, accountDeletedConsumer, producer, pool, mainUserAsyncReleaseTimeout, db, client)
 	if err != nil {
 		return nil, err
 	}

@@ -10,11 +10,12 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/connectcli"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/groupcli"
-	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	mpserver "github.com/013677890/LCchat-Backend/apps/message-push/internal/server"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
+	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	pkgredis "github.com/013677890/LCchat-Backend/pkg/redis"
 	"github.com/google/wire"
 	goredis "github.com/redis/go-redis/v9"
@@ -225,14 +226,42 @@ func provideRealtimeHandler(routes *route.RedisRepository, sender *connectcli.Se
 	return consumer.NewRealtimeHandler(routes, sender, groups)
 }
 
-// providePushConsumer 创建 msg.push topic 消费者。
-func providePushConsumer(cfg config.KafkaConfig, groupID string, handler *consumer.EventHandler) msgPushConsumer {
-	return msgPushConsumer{Consumer: consumer.NewConsumer(cfg.Brokers, cfg.MsgPushTopic, groupID, handler)}
+// parseMessagePushPoolWorkers 严格解析指定 message-push Pool 的 Reader 数。
+// 空值使用统一默认值 3，任何显式非法值都返回带环境变量名的启动错误。
+func parseMessagePushPoolWorkers(envName string) (int, error) {
+	workers, err := kafka.ParsePoolWorkers(os.Getenv(envName))
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", envName, err)
+	}
+	return workers, nil
 }
 
-// provideRealtimePushConsumer 创建 realtime.push topic 消费者。
-func provideRealtimePushConsumer(cfg config.KafkaConfig, handler *consumer.RealtimeHandler) realtimePushConsumer {
-	return realtimePushConsumer{Consumer: consumer.NewConsumer(cfg.Brokers, cfg.RealtimePushTopic, cfg.RealtimePushGroupID, handler)}
+// providePushConsumer 创建 msg.push topic 消费 Pool。
+// 显式并发必须在 1～64，非法配置直接中止初始化，避免生产实例悄悄以错误容量运行。
+func providePushConsumer(cfg config.KafkaConfig, groupID string, handler *consumer.EventHandler) (msgPushConsumer, error) {
+	workers, err := parseMessagePushPoolWorkers("KAFKA_MSG_PUSH_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return msgPushConsumer{}, err
+	}
+	pool, err := consumer.NewConsumer(cfg.Brokers, cfg.MsgPushTopic, groupID, workers, handler)
+	if err != nil {
+		return msgPushConsumer{}, err
+	}
+	return msgPushConsumer{Consumer: pool}, nil
+}
+
+// provideRealtimePushConsumer 创建 realtime.push topic 消费 Pool。
+// 它使用独立 groupID 与并发配置，不会和 msg.push 消费者互相抢占消息。
+func provideRealtimePushConsumer(cfg config.KafkaConfig, handler *consumer.RealtimeHandler) (realtimePushConsumer, error) {
+	workers, err := parseMessagePushPoolWorkers("KAFKA_REALTIME_PUSH_CONSUMER_CONCURRENCY")
+	if err != nil {
+		return realtimePushConsumer{}, err
+	}
+	pool, err := consumer.NewConsumer(cfg.Brokers, cfg.RealtimePushTopic, cfg.RealtimePushGroupID, workers, handler)
+	if err != nil {
+		return realtimePushConsumer{}, err
+	}
+	return realtimePushConsumer{Consumer: pool}, nil
 }
 
 // providePushConsumers 聚合 message-push 启动所需的所有 Kafka 消费者。

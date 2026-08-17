@@ -2,6 +2,7 @@ package grpcx
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -113,4 +114,16 @@ func (m *Metrics) UnaryInterceptor() grpc.UnaryServerInterceptor {
 // 使用独立 Registry 的 handler，仅包含本服务的指标。
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+}
+
+// RegisterCollector 把业务后台指标注册到当前服务的独立 Registry。
+// 注册失败会返回错误，调用方应在启动阶段 fail-fast，避免组件已运行但关键故障指标不可见。
+func (m *Metrics) RegisterCollector(collector prometheus.Collector) error {
+	if m == nil || m.registry == nil {
+		return errors.New("metrics registry 未初始化")
+	}
+	if collector == nil {
+		return errors.New("metrics collector 不能为空")
+	}
+	return m.registry.Register(collector)
 }

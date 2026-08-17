@@ -42,9 +42,15 @@ func initializeMessagePushApp() (*MessagePushApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	mainMsgPushConsumer := providePushConsumer(kafkaConfig, string2, eventHandler)
+	mainMsgPushConsumer, err := providePushConsumer(kafkaConfig, string2, eventHandler)
+	if err != nil {
+		return nil, err
+	}
 	realtimeHandler := provideRealtimeHandler(redisRepository, sender, groupcliClient)
-	mainRealtimePushConsumer := provideRealtimePushConsumer(kafkaConfig, realtimeHandler)
+	mainRealtimePushConsumer, err := provideRealtimePushConsumer(kafkaConfig, realtimeHandler)
+	if err != nil {
+		return nil, err
+	}
 	mainPushConsumers := providePushConsumers(mainMsgPushConsumer, mainRealtimePushConsumer)
 	config := provideMessagePushHTTPConfig()
 	server := provideMessagePushHTTPServer(config)

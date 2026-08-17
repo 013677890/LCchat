@@ -103,25 +103,22 @@ func (a *UserApp) Run(ctx context.Context) error {
 	if a.redisConsumer != nil {
 		go func() {
 			logger.Info(ctx, "Redis 重试消费者启动中")
-			if err := a.redisConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "Redis 重试消费者运行错误", logger.ErrorField("error", err))
-			}
+			// Kafka 旁路：监督器持续告警并单独重启 Pool，资料 gRPC 主链路继续服务。
+			kafka.RunIsolatedPool(ctx, "user-redis-retry", a.redisConsumer.Start)
 		}()
 	}
 
 	if a.userCreatedConsumer != nil {
 		go func() {
-			if err := a.userCreatedConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "User user_created 消费者运行错误", logger.ErrorField("error", err))
-			}
+			// 注册资料闭环事件；失败隔离，不阻断已有用户读资料。
+			kafka.RunIsolatedPool(ctx, "user-created", a.userCreatedConsumer.Start)
 		}()
 	}
 
 	if a.accountDeletedConsumer != nil {
 		go func() {
-			if err := a.accountDeletedConsumer.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error(ctx, "User account.deleted 消费者运行错误", logger.ErrorField("error", err))
-			}
+			// 注销清理异步进行；失败隔离，避免拖死 user 服务入口。
+			kafka.RunIsolatedPool(ctx, "user-account-deleted", a.accountDeletedConsumer.Start)
 		}()
 	}
 

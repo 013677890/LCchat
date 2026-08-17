@@ -17,6 +17,20 @@ type testLogger struct{}
 func (testLogger) Info(context.Context, string, map[string]interface{})  {}
 func (testLogger) Error(context.Context, string, map[string]interface{}) {}
 
+func TestNewRedisRetryConsumerRejectsInvalidWorkers(t *testing.T) {
+	consumer, err := NewRedisRetryConsumer(
+		[]string{"127.0.0.1:9092"},
+		"test.redis.invalidate",
+		"test-redis-invalidate-group",
+		0,
+		nil,
+		nil,
+		testLogger{},
+	)
+	require.Error(t, err)
+	require.Nil(t, consumer)
+}
+
 func TestRedisRetryConsumerDeletesEveryTaskKey(t *testing.T) {
 	mr := miniredis.RunT(t)
 	require.NoError(t, mr.Set("cache:1", "old"))

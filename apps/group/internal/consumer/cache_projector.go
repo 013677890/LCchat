@@ -24,7 +24,7 @@ const groupCacheProjectorIdempotentEventType = groupevent.EventTypeGroupCache + 
 //   - 不同 partition 由 Kafka 分配给不同 Reader，从而并行投影不同群；
 //   - 同群事件因 entity_id=group_uuid 作为 Kafka key，始终落在同一 partition，保持严格有序。
 //
-// 可靠性约定与单 Reader 时代一致：
+// 每个 Pool Reader 都遵守相同可靠性约定：
 //  1. Kafka 手动提交；
 //  2. 幂等表去重；
 //  3. Redis 可重试错误返回上层，由同一消息重试；
@@ -71,7 +71,9 @@ func NewCacheProjector(
 	}, nil
 }
 
-// Start 启动全部 partition worker；任一 worker 致命退出会取消并等待其余 worker。
+// Start 启动全部 partition worker 并阻塞到取消或 Pool 致命失败。
+// 任一 worker 致命退出会取消并等待其余 worker；GroupApp 通过 RunIsolatedPool 隔离该错误，
+// 不中断 group gRPC。返回 nil 且 pool 未初始化时表示未配置投影（测试/降级路径）。
 func (c *CacheProjector) Start(ctx context.Context) error {
 	if c == nil || c.pool == nil {
 		return nil
@@ -82,7 +84,7 @@ func (c *CacheProjector) Start(ctx context.Context) error {
 	return c.pool.Start(ctx, c.handle)
 }
 
-// Close 关闭全部 Reader。
+// Close 关闭全部 Reader；可在 Start 前后安全调用。
 func (c *CacheProjector) Close() error {
 	if c == nil || c.pool == nil {
 		return nil
