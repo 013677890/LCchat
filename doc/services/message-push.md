@@ -17,9 +17,12 @@ message-push 是消息下行桥接服务，负责消费 Kafka `msg.push` 与 `re
 | 路径 | 说明 |
 | --- | --- |
 | `apps/message-push/cmd` | 服务启动、两个 Kafka Pool、Connect gRPC 客户端装配。 |
-| `apps/message-push/internal/consumer` | 业务 Handler、事件解析、下行分发和有限重试；不自行创建 Kafka Reader。 |
+| `apps/message-push/internal/consumer` | Kafka Pool 壳与 best-effort 有限重试适配；不自行创建 Kafka Reader。 |
+| `apps/message-push/internal/msgpush` | `msg.push` 下行 Handler：事件解析、路由策略、节点扇出。 |
+| `apps/message-push/internal/realtime` | `realtime.push` 实时提醒 Handler：目标解析与设备投递。 |
+| `apps/message-push/internal/pusherr` | 可重试错误哨兵 `ErrRetriable`，供 consumer/msgpush/realtime 共用。 |
 | `pkg/kafka` | 独立 Reader 的 Fetch/Handle/Commit 循环、退避和 Pool fail-fast 编排。 |
-| `apps/message-push/internal/route` | Redis 在线路由查询。 |
+| `pkg/presence` | Redis 在线路由查询（`user:routing:{user_uuid}`）。 |
 | `proto/msg/msg_push_event.proto` | `MsgPushEvent`、撤回和已读通知契约。 |
 | `proto/connect/connect.proto` | Connect gRPC 和 WebSocket Envelope 契约。 |
 
@@ -85,7 +88,7 @@ web-chrome-001 => connect:9091|1710000000123
 - 节点并发上限由 `MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY` 配置；未配置时默认 32，显式配置必须是正整数，否则服务初始化失败。节点少于上限时按实际节点数并发。
 - Kafka Reader 并发和单条事件内的 Connect 节点扇出是两层独立限制，不能用后者代替前者。
 - 同一节点内不对每台设备各开 goroutine，而是按用户串行调用，避免打满复用的 gRPC 连接。
-- `EventHandler` 强制要求 sender 同时实现 `PushToUser` 和 `PushToDevice`；完整用户目标固定使用前者，不支持回退到旧的逐设备发送路径。
+- `msgpush.Handler`（`msg.push` 处理器）强制要求 sender 同时实现 `PushToUser` 和 `PushToDevice`；完整用户目标固定使用前者，不支持回退到旧的逐设备发送路径。
 - `PushToUser` 返回成功入队的设备数：零投递计为失败，小于路由快照设备数计为部分成功。
 - 所有已尝试设备都失败时返回可重试错误；部分成功时整体返回成功，避免重推已经成功的设备。
 

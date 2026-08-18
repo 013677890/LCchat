@@ -1,4 +1,4 @@
-package consumer
+package msgpush
 
 import (
 	"context"
@@ -8,12 +8,19 @@ import (
 
 	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/metrics"
-	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 )
 
+// 本文件实现 msg.push 的节点级有界扇出。
+//
+// 设计取舍：
+//   - 并发粒度是 connect 节点，不是设备：同节点共享一条 gRPC 连接，设备级并发易打满；
+//   - 同用户多设备靠 PushToUser 压缩 RPC，而不是在节点内再开设备 goroutine；
+//   - 信号量先占槽再起 goroutine，限制的是活跃协程数，而不仅是在飞 RPC。
+
 // fanoutSummary 汇总所有已启动节点的实际投递结果。
-// ctx 取消后尚未启动或尚未尝试的目标不计入失败数，与原串行循环 break 的语义一致。
+// ctx 取消后尚未启动或尚未尝试的目标不计入失败数，与串行循环遇到 cancel 即 break 的语义一致。
 type fanoutSummary struct {
 	SuccessCount int
 	FailedCount  int
@@ -53,9 +60,11 @@ type fanoutAccumulator struct {
 }
 
 // pushEventTargets 按 connect 节点执行有界并发，并等待所有已启动节点完成。
+//
 // 信号量在创建 goroutine 之前获取，因此限制的不只是活跃 RPC，也限制了活跃 goroutine 数；
 // 节点数远超配置时，调度循环会等待空位，不会一次性创建大量阻塞协程。
-func (h *EventHandler) pushEventTargets(
+// ctx 取消只停止调度新节点；已启动 worker 必须 Wait 收敛，避免 Handle 返回后仍投递。
+func (h *Handler) pushEventTargets(
 	ctx context.Context,
 	eventType string,
 	targets []deliveryTarget,
@@ -96,8 +105,8 @@ launchLoop:
 
 // fanoutConcurrency 返回本次事件实际需要的节点并发数。
 // maxFanoutConcurrency 在构造阶段已经强制校验；这里再次检查内部不变量，
-// 防止包内直接构造非法 EventHandler 后创建零容量信号量并永久阻塞。
-func (h *EventHandler) fanoutConcurrency(nodeCount int) int {
+// 防止包内直接构造非法 Handler 后创建零容量信号量并永久阻塞。
+func (h *Handler) fanoutConcurrency(nodeCount int) int {
 	if h.maxFanoutConcurrency <= 0 {
 		panic("message-push: maxFanoutConcurrency 必须大于零")
 	}
@@ -110,7 +119,7 @@ func (h *EventHandler) fanoutConcurrency(nodeCount int) int {
 // pushNode 在单个 connect 节点内串行执行按用户或按设备推送。
 // 节点内串行可避免同一 gRPC 连接上的瞬时请求洪峰；并发收益主要来自不同 connect 节点，
 // 而同用户多设备的调用压缩由 PushToUser 完成。
-func (h *EventHandler) pushNode(
+func (h *Handler) pushNode(
 	ctx context.Context,
 	eventType string,
 	node *nodeFanout,
@@ -140,7 +149,7 @@ func (h *EventHandler) pushNode(
 
 // pushDevices 在同一 connect 节点内逐设备串行推送。
 // 每次调用前检查 ctx，避免预算到期后对剩余设备发起一串必然失败的 RPC。
-func (h *EventHandler) pushDevices(
+func (h *Handler) pushDevices(
 	ctx context.Context,
 	eventType string,
 	connectAddr string,

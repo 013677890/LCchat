@@ -10,6 +10,8 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/connectcli"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/groupcli"
+	"github.com/013677890/LCchat-Backend/apps/message-push/internal/msgpush"
+	"github.com/013677890/LCchat-Backend/apps/message-push/internal/realtime"
 	mpserver "github.com/013677890/LCchat-Backend/apps/message-push/internal/server"
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/grpcx"
@@ -203,16 +205,16 @@ func provideConnectSender(manager *connectcli.ClientManager, timeout messagePush
 	return connectcli.NewSender(manager, time.Duration(timeout))
 }
 
-// provideEventHandler 创建 Kafka 事件处理器。
+// provideMsgPushHandler 创建 msg.push 下行处理器。
 // 它负责把 MsgPushEvent 解释为“查路由 / 查群成员 -> 调 connect 推送”的执行流程。
-// 并发上限是强制构造参数；EventHandler 会再次校验依赖与配置，不提供旧签名或默认回退。
-func provideEventHandler(
+// 并发上限是强制构造参数；Handler 会再次校验依赖与配置，不提供旧签名或默认回退。
+func provideMsgPushHandler(
 	routes *route.RedisRepository,
 	sender *connectcli.Sender,
 	groups *groupcli.Client,
 	concurrency messagePushMaxFanoutConcurrency,
-) (*consumer.EventHandler, error) {
-	return consumer.NewEventHandler(
+) (*msgpush.Handler, error) {
+	return msgpush.NewHandler(
 		routes,
 		sender,
 		groups,
@@ -222,8 +224,8 @@ func provideEventHandler(
 
 // provideRealtimeHandler 创建 realtime.push 事件处理器。
 // 它负责把非消息类提醒按目标类型扩散到在线设备并复用 connect 下行链路。
-func provideRealtimeHandler(routes *route.RedisRepository, sender *connectcli.Sender, groups *groupcli.Client) *consumer.RealtimeHandler {
-	return consumer.NewRealtimeHandler(routes, sender, groups)
+func provideRealtimeHandler(routes *route.RedisRepository, sender *connectcli.Sender, groups *groupcli.Client) *realtime.Handler {
+	return realtime.NewHandler(routes, sender, groups)
 }
 
 // parseMessagePushPoolWorkers 严格解析指定 message-push Pool 的 Reader 数。
@@ -238,7 +240,7 @@ func parseMessagePushPoolWorkers(envName string) (int, error) {
 
 // providePushConsumer 创建 msg.push topic 消费 Pool。
 // 显式并发必须在 1～64，非法配置直接中止初始化，避免生产实例悄悄以错误容量运行。
-func providePushConsumer(cfg config.KafkaConfig, groupID string, handler *consumer.EventHandler) (msgPushConsumer, error) {
+func providePushConsumer(cfg config.KafkaConfig, groupID string, handler *msgpush.Handler) (msgPushConsumer, error) {
 	workers, err := parseMessagePushPoolWorkers("KAFKA_MSG_PUSH_CONSUMER_CONCURRENCY")
 	if err != nil {
 		return msgPushConsumer{}, err
@@ -252,7 +254,7 @@ func providePushConsumer(cfg config.KafkaConfig, groupID string, handler *consum
 
 // provideRealtimePushConsumer 创建 realtime.push topic 消费 Pool。
 // 它使用独立 groupID 与并发配置，不会和 msg.push 消费者互相抢占消息。
-func provideRealtimePushConsumer(cfg config.KafkaConfig, handler *consumer.RealtimeHandler) (realtimePushConsumer, error) {
+func provideRealtimePushConsumer(cfg config.KafkaConfig, handler *realtime.Handler) (realtimePushConsumer, error) {
 	workers, err := parseMessagePushPoolWorkers("KAFKA_REALTIME_PUSH_CONSUMER_CONCURRENCY")
 	if err != nil {
 		return realtimePushConsumer{}, err
@@ -265,8 +267,8 @@ func provideRealtimePushConsumer(cfg config.KafkaConfig, handler *consumer.Realt
 }
 
 // providePushConsumers 聚合 message-push 启动所需的所有 Kafka 消费者。
-func providePushConsumers(msg msgPushConsumer, realtime realtimePushConsumer) pushConsumers {
-	return pushConsumers{msg: msg.Consumer, realtime: realtime.Consumer}
+func providePushConsumers(msg msgPushConsumer, realtimeConsumer realtimePushConsumer) pushConsumers {
+	return pushConsumers{msg: msg.Consumer, realtime: realtimeConsumer.Consumer}
 }
 
 // provideMessagePushHTTPConfig 提供 message-push 指标 HTTP 服务配置。
@@ -298,7 +300,7 @@ var messagePushProviderSet = wire.NewSet(
 	provideRouteRepository,
 	provideConnectClientManager,
 	provideConnectSender,
-	provideEventHandler,
+	provideMsgPushHandler,
 	provideRealtimeHandler,
 	providePushConsumer,
 	provideRealtimePushConsumer,

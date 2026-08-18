@@ -61,9 +61,9 @@ connect 在连接建立和心跳时写入 Redis：
 
 节点并发上限由 `MESSAGE_PUSH_MAX_FANOUT_CONCURRENCY` 配置；未配置时默认 32，显式配置必须是正整数，否则 message-push 初始化失败。实际并发数为配置值与目标 connect 节点数的较小值。信号量在启动节点 goroutine 前获取，避免节点数异常增大时一次性创建无界协程；处理预算到期或关停时停止调度新节点，并等待已启动节点收敛。
 
-`EventHandler` 的 sender 契约同时要求 `PushToUser` 和 `PushToDevice`，不会探测能力或回退到旧的逐设备实现。`PushToUser` 只返回 `DeliveredCount`，不返回设备明细。message-push 将零投递记为失败，将小于路由快照设备数的返回记为部分成功；新增的 `PushToUserTotal` 和 `PushToUserDuration` 指标使用 `success`、`partial`、`error` 区分结果，原有 `PushToDevice` 指标保持设备调用粒度。
+`msgpush.Handler`（`msg.push` 处理器）的 sender 契约同时要求 `PushToUser` 和 `PushToDevice`，不会探测能力或回退到旧的逐设备实现。`PushToUser` 只返回 `DeliveredCount`，不返回设备明细。message-push 将零投递记为失败，将小于路由快照设备数的返回记为部分成功；新增的 `PushToUserTotal` 和 `PushToUserDuration` 指标使用 `success`、`partial`、`error` 区分结果，原有 `PushToDevice` 指标保持设备调用粒度。
 
-`realtime.push` 的目标解析流程类似，但 Kafka value 是 `RealtimePushEvent`：message-push 先按 `target.kind` 解析 `user`、`device`、`user_list`、`group_members`、`group_admins`，再批量查询在线路由，最后复用同一个 `MessageEnvelope` 下发。当前节点级有界并发和 `PushToUser` 混合策略只应用于 `msg.push` 的 `EventHandler`；`realtime.push` 仍按设备调用 `PushToDevice`。connect 不感知 payload 的业务含义。
+`realtime.push` 的目标解析流程类似，但 Kafka value 是 `RealtimePushEvent`：message-push 先按 `target.kind` 解析 `user`、`device`、`user_list`、`group_members`、`group_admins`，再批量查询在线路由，最后复用同一个 `MessageEnvelope` 下发。当前节点级有界并发和 `PushToUser` 混合策略只应用于 `msg.push` 的 `msgpush.Handler`；`realtime.push` 仍由 `realtime.Handler` 按设备调用 `PushToDevice`。connect 不感知 payload 的业务含义。
 
 ## connect 连接生命周期
 

@@ -1,4 +1,4 @@
-package consumer
+package msgpush
 
 import (
 	"context"
@@ -9,8 +9,9 @@ import (
 	"time"
 
 	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
-	route "github.com/013677890/LCchat-Backend/pkg/presence"
+	"github.com/013677890/LCchat-Backend/apps/message-push/internal/pusherr"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -177,7 +178,7 @@ func TestPushEventTargets_MultipleNodesRunConcurrently(t *testing.T) {
 		started: make(chan string, 2),
 		release: release,
 	}
-	handler := &EventHandler{sender: sender, maxFanoutConcurrency: 2}
+	handler := &Handler{sender: sender, maxFanoutConcurrency: 2}
 	resultChannel := make(chan fanoutSummary, 1)
 	go func() {
 		resultChannel <- handler.pushEventTargets(
@@ -209,7 +210,7 @@ func TestHandle_PartialNodeFailureStillSucceeds(t *testing.T) {
 			{UserUUID: "reader", DeviceID: "other-b", ConnectGRPCAddr: "connect-b"},
 		},
 	}}
-	handler := &EventHandler{routes: routes, sender: sender, maxFanoutConcurrency: 2}
+	handler := &Handler{routes: routes, sender: sender, maxFanoutConcurrency: 2}
 	err := handler.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "reader",
 		DeviceId:     "current-device",
@@ -233,7 +234,7 @@ func TestHandle_AllNodesFailReturnsRetriable(t *testing.T) {
 			{UserUUID: "reader", DeviceID: "other-b", ConnectGRPCAddr: "connect-b"},
 		},
 	}}
-	handler := &EventHandler{routes: routes, sender: sender, maxFanoutConcurrency: 2}
+	handler := &Handler{routes: routes, sender: sender, maxFanoutConcurrency: 2}
 	err := handler.Handle(context.Background(), marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "reader",
 		DeviceId:     "current-device",
@@ -241,7 +242,7 @@ func TestHandle_AllNodesFailReturnsRetriable(t *testing.T) {
 	}))
 
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, errRetriable))
+	assert.True(t, errors.Is(err, pusherr.ErrRetriable))
 }
 
 // TestHandle_ContextCancellationStopsFanout 验证取消后阻塞调用和后续扇出会快速停止。
@@ -259,7 +260,7 @@ func TestHandle_ContextCancellationStopsFanout(t *testing.T) {
 			{UserUUID: "reader", DeviceID: "other-d", ConnectGRPCAddr: "connect-d"},
 		},
 	}}
-	handler := &EventHandler{routes: routes, sender: sender, maxFanoutConcurrency: 2}
+	handler := &Handler{routes: routes, sender: sender, maxFanoutConcurrency: 2}
 	ctx, cancel := context.WithCancel(context.Background())
 	payload := marshalEvent(t, &msgpb.MsgPushEvent{
 		ReceiverUuid: "reader",
@@ -276,7 +277,7 @@ func TestHandle_ContextCancellationStopsFanout(t *testing.T) {
 	select {
 	case err := <-resultChannel:
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, errRetriable))
+		assert.True(t, errors.Is(err, pusherr.ErrRetriable))
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("上下文取消后扇出未快速停止")
 	}
@@ -289,7 +290,7 @@ func TestPushEventTargets_ConcurrencyLimit(t *testing.T) {
 		started: make(chan string, 5),
 		release: release,
 	}
-	handler := &EventHandler{sender: sender, maxFanoutConcurrency: 2}
+	handler := &Handler{sender: sender, maxFanoutConcurrency: 2}
 	resultChannel := make(chan fanoutSummary, 1)
 	go func() {
 		resultChannel <- handler.pushEventTargets(
@@ -315,7 +316,7 @@ func TestPushEventTargets_ConcurrencyLimit(t *testing.T) {
 
 // TestFanoutConcurrency_RejectsMissingLimit 验证包内绕过构造器时也不会静默采用默认值。
 func TestFanoutConcurrency_RejectsMissingLimit(t *testing.T) {
-	handler := &EventHandler{}
+	handler := &Handler{}
 	assert.PanicsWithValue(
 		t,
 		"message-push: maxFanoutConcurrency 必须大于零",
@@ -334,7 +335,7 @@ func TestHandle_PushToUserBatchesSameNodeDevices(t *testing.T) {
 			{UserUUID: "receiver", DeviceID: "device-b", ConnectGRPCAddr: "connect-a"},
 		},
 	}}
-	handler := &EventHandler{
+	handler := &Handler{
 		routes:               routes,
 		sender:               sender,
 		maxFanoutConcurrency: testMaxFanoutConcurrency,
@@ -364,7 +365,7 @@ func TestHandle_PushToUserPartialDeliveryStillSucceeds(t *testing.T) {
 			{UserUUID: "receiver", DeviceID: "device-b", ConnectGRPCAddr: "connect-a"},
 		},
 	}}
-	handler := &EventHandler{
+	handler := &Handler{
 		routes:               routes,
 		sender:               sender,
 		maxFanoutConcurrency: testMaxFanoutConcurrency,
@@ -391,7 +392,7 @@ func TestHandle_PushToUserZeroDeliveryReturnsRetriable(t *testing.T) {
 			{UserUUID: "receiver", DeviceID: "device-b", ConnectGRPCAddr: "connect-a"},
 		},
 	}}
-	handler := &EventHandler{
+	handler := &Handler{
 		routes:               routes,
 		sender:               sender,
 		maxFanoutConcurrency: testMaxFanoutConcurrency,
@@ -402,7 +403,7 @@ func TestHandle_PushToUserZeroDeliveryReturnsRetriable(t *testing.T) {
 	}))
 
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, errRetriable))
+	assert.True(t, errors.Is(err, pusherr.ErrRetriable))
 	deviceCalls, userCalls, _ := sender.snapshots()
 	assert.Empty(t, deviceCalls)
 	assert.Len(t, userCalls, 1)
@@ -423,7 +424,7 @@ func TestHandle_PushToUserPreservesExcludedDevice(t *testing.T) {
 			{UserUUID: "sender", DeviceID: "other-device", ConnectGRPCAddr: "connect-b"},
 		},
 	}}
-	handler := &EventHandler{
+	handler := &Handler{
 		routes:               routes,
 		sender:               sender,
 		maxFanoutConcurrency: testMaxFanoutConcurrency,

@@ -38,11 +38,11 @@ func initializeMessagePushApp() (*MessagePushApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	eventHandler, err := provideEventHandler(redisRepository, sender, groupcliClient, mainMessagePushMaxFanoutConcurrency)
+	msgPushHandler, err := provideMsgPushHandler(redisRepository, sender, groupcliClient, mainMessagePushMaxFanoutConcurrency)
 	if err != nil {
 		return nil, err
 	}
-	mainMsgPushConsumer, err := providePushConsumer(kafkaConfig, string2, eventHandler)
+	mainMsgPushConsumer, err := providePushConsumer(kafkaConfig, string2, msgPushHandler)
 	if err != nil {
 		return nil, err
 	}
