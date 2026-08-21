@@ -1,3 +1,10 @@
+// Package async 提供两类互不混用的并发原语。
+//
+//  1. 后台协程池（本文件）：基于 ants 的进程级全局池，供 RunSafe / TryRunSafe
+//     做 fire-and-forget 缓存补偿、异步写 Redis 等。任务与父请求取消树物理隔离，
+//     超时独立计时；提交失败只表示没进池，不代表任务执行结果。
+//  2. 请求内 Group（group.go）：直接 go，继承父 ctx。用于请求路径上的 fan-out，
+//     任一任务失败即取消同组。不占用后台池，避免补偿任务挤占关键路径。
 package async
 
 import (
@@ -18,8 +25,9 @@ import (
 
 // ======================== 异步任务超时常量 ========================
 //
-// 调用 RunSafe 时应使用以下常量而非传 0。
-// timeout <= 0 将回退到 DefaultAsyncTimeout，但显式传常量更易于 code review。
+// 调用 RunSafe / TryRunSafe 时应使用以下常量而非传 0。
+// timeout <= 0 会回退到 DefaultAsyncTimeout，但显式常量更易于 code review
+// 判断任务类别（单次 Redis / Pipeline / DB / 含重试补偿）。
 const (
 	// AsyncRedisTimeout 单次 Redis 操作（SET / DEL / Lua 脚本等）。
 	AsyncRedisTimeout = 5 * time.Second
@@ -38,21 +46,25 @@ const (
 )
 
 var (
+	// global 是进程级 ants 池。业务代码应走 RunSafe / Submit，不要直接操作该指针。
 	global   *ants.Pool
 	globalMu sync.RWMutex
-	cfgCopy  config.AsyncConfig
+	// cfgCopy 与 global 成对更新，供 Release 在摘掉全局指针后仍按原超时等待在途任务。
+	cfgCopy config.AsyncConfig
 
 	contextPropagator   func(parent context.Context) context.Context
 	contextPropagatorMu sync.RWMutex
 
-	// submitRejected 记录因池满而被丢弃的任务计数，便于监控和告警。
+	// submitRejected 记录因池满或未初始化而被丢弃的任务计数，便于监控和告警。
 	submitRejected atomic.Int64
 )
 
-// SetContextPropagator 设置上下文传递器（建议在 main 初始化时调用）。
+// SetContextPropagator 设置上下文传递器（建议在 main 初始化时调用一次）。
 //
-// fn 用于从父 ctx 提取需要透传的字段。后台异步任务必须与父请求取消树物理隔离，
-// 因此传入 fn 的 parent 已通过 context.WithoutCancel 切断父级取消和 deadline。
+// fn 只负责从父 ctx 提取需要透传的字段（trace_id、user_uuid 等）。
+// 后台任务必须与父请求取消树物理隔离：父请求结束不能把补偿任务一起 Cancel。
+// 因此包装层会先 WithoutCancel，再交给 fn；调用方不必自己切断取消链。
+// 传入 nil 表示清空传递器，后续任务退回 context.Background()。
 func SetContextPropagator(fn func(context.Context) context.Context) {
 	contextPropagatorMu.Lock()
 	defer contextPropagatorMu.Unlock()
@@ -69,27 +81,30 @@ func SetContextPropagator(fn func(context.Context) context.Context) {
 	}
 }
 
-// ErrNotInitialized 表示协程池尚未初始化。
+// ErrNotInitialized 表示协程池尚未初始化，或对 nil Group 调用了 Go。
 var ErrNotInitialized = errors.New("async pool not initialized")
 
 // ErrNilTask 表示提交了空任务。
 var ErrNilTask = errors.New("async task is nil")
 
-// ErrTaskPanic 表示协程池任务发生 panic。
+// ErrTaskPanic 表示任务发生 panic。Group.Wait 会把它作为第一个错误返回；
+// 后台池任务的 panic 只记日志，不回传给提交方。
 var ErrTaskPanic = errors.New("async task panic")
 
 // ErrInvalidPoolSize 表示协程池容量配置非法。
 var ErrInvalidPoolSize = errors.New("async pool size must be positive")
 
 // Pool 返回全局协程池（未初始化时为 nil）。
+// 生命周期比较（如 app.Stop 判断当前全局池是否仍是本实例）应使用本函数，不要缓存指针后跨阶段比较。
 func Pool() *ants.Pool {
 	globalMu.RLock()
 	defer globalMu.RUnlock()
 	return global
 }
 
-// ReplaceGlobal 设置全局协程池。
-// 未传入 cfg 时使用默认配置，确保 Release 仍按默认超时等待运行中任务退出。
+// ReplaceGlobal 设置全局协程池，供各服务 cmd 在 Wire 装配后挂载已 Build 的实例。
+// 未传入 cfg 时使用默认配置，避免 Release 因零值超时而立刻 p.Release()、不等待在途任务。
+// p == nil 用于测试隔离或停机后清空，同时丢掉 cfgCopy。
 func ReplaceGlobal(p *ants.Pool, cfgs ...config.AsyncConfig) {
 	cfg := config.DefaultAsyncConfig()
 	if len(cfgs) > 0 {
@@ -107,23 +122,27 @@ func ReplaceGlobal(p *ants.Pool, cfgs ...config.AsyncConfig) {
 	cfgCopy = cfg
 }
 
-// ReplaceGlobalWithReleaseTimeout 设置全局协程池并指定释放等待时间。
+// ReplaceGlobalWithReleaseTimeout 设置全局协程池并覆盖释放等待时间。
+// 各服务 Stop 路径需要与环境变量中的 async release timeout 对齐时使用本函数。
 func ReplaceGlobalWithReleaseTimeout(p *ants.Pool, timeout time.Duration) {
 	cfg := config.DefaultAsyncConfig()
 	cfg.ReleaseTimeout = timeout
 	ReplaceGlobal(p, cfg)
 }
 
-// Build 根据配置创建协程池实例。
+// Build 根据配置创建协程池实例，不挂到全局。
+// 启动失败时调用方应 ReleasePool 释放这个尚未挂载的实例，避免泄漏。
 func Build(cfg config.AsyncConfig) (*ants.Pool, error) {
 	if cfg.PoolSize <= 0 {
 		return nil, fmt.Errorf("%w: %d", ErrInvalidPoolSize, cfg.PoolSize)
 	}
 
 	opts := []ants.Option{
-		// ants 阻塞入队无法感知请求 ctx.Done，因此协程池强制非阻塞提交。
+		// ants 默认阻塞入队，且无法感知请求 ctx.Done。池满时阻塞会拖死 HTTP/gRPC
+		// 关键路径，因此强制非阻塞：满则立即返回错误，由 TryRunSafe 记 rejected 并上抛。
 		ants.WithNonblocking(true),
 		ants.WithExpiryDuration(cfg.ExpiryDuration),
+		// 兜底 panic：RunSafe 包装层已 recover，这里覆盖未经 Submit 包装的裸任务。
 		ants.WithPanicHandler(func(p any) {
 			logPanic(context.Background(), "async task panic", p)
 		}),
@@ -132,6 +151,7 @@ func Build(cfg config.AsyncConfig) (*ants.Pool, error) {
 }
 
 // Init 初始化全局协程池（仅需在进程启动时调用一次）。
+// 已初始化时直接返回成功，避免重复 Build 泄漏旧池。
 func Init(cfg config.AsyncConfig) error {
 	globalMu.Lock()
 	defer globalMu.Unlock()
@@ -151,6 +171,7 @@ func Init(cfg config.AsyncConfig) error {
 }
 
 // Submit 将任务投递到全局协程池。
+// 池满时因 Nonblocking 立即失败，不会在调用方 goroutine 上排队等待。
 func Submit(task func()) error {
 	if task == nil {
 		return ErrNilTask
@@ -163,7 +184,8 @@ func Submit(task func()) error {
 	return p.Submit(task)
 }
 
-// Release 优雅释放协程池资源（等待任务执行完）。
+// Release 优雅释放全局协程池。
+// 先摘掉全局指针再等待，避免停机等待期间仍有新任务经 Pool()/Submit 进入已关闭的池。
 func Release() error {
 	globalMu.Lock()
 	p := global
@@ -179,6 +201,8 @@ func Release() error {
 	return releasePool(p, cfg.ReleaseTimeout)
 }
 
+// releasePool 按超时释放指定池。timeout <= 0 走 ants.Release（立即关闭，在途任务可能被丢）。
+// 已关闭的池再 ReleaseTimeout 会返回 ErrPoolClosed，停机路径视为成功，避免掩盖真正的超时错误。
 func releasePool(p *ants.Pool, timeout time.Duration) error {
 	if p == nil {
 		return nil
@@ -193,123 +217,25 @@ func releasePool(p *ants.Pool, timeout time.Duration) error {
 	return nil
 }
 
-// ReleasePool 释放指定协程池实例，适用于尚未挂载为全局池的启动失败兜底路径。
+// ReleasePool 释放尚未挂载为全局池的实例，适用于启动失败兜底路径。
 func ReleasePool(p *ants.Pool, timeout time.Duration) error {
 	return releasePool(p, timeout)
 }
 
-// Group 表示一组需要随请求收敛的协程池任务。
-//
-// 与 RunSafe 的后台异步语义不同，Group 直接继承父 ctx 的取消和 deadline，
-// 适用于请求内 fan-out 并发；任务返回错误或任务 panic 都会取消同组任务，
-// 并由 Wait 返回第一个错误。
-type Group struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
-	errOnce sync.Once
-	err     error
-}
-
-// NewGroup 创建一个请求内并发组。
-// timeout > 0 时会在父 ctx 基础上增加一层超时；timeout <= 0 时仅继承父 ctx。
-func NewGroup(ctx context.Context, timeout time.Duration) *Group {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	var groupCtx context.Context
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		groupCtx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		groupCtx, cancel = context.WithCancel(ctx)
-	}
-
-	return &Group{ctx: groupCtx, cancel: cancel}
-}
-
-// Context 返回并发组的派生 ctx。
-func (g *Group) Context() context.Context {
-	if g == nil || g.ctx == nil {
-		return context.Background()
-	}
-	return g.ctx
-}
-
-// Go 启动请求内轻量并发任务。
-// Group 不复用后台异步协程池，避免后台缓存/补偿任务挤占请求关键路径。
-func (g *Group) Go(task func(ctx context.Context) error) error {
-	if g == nil {
-		return ErrNotInitialized
-	}
-	if task == nil {
-		g.setError(ErrNilTask)
-		return ErrNilTask
-	}
-
-	select {
-	case <-g.ctx.Done():
-		err := g.ctx.Err()
-		g.setError(err)
-		return err
-	default:
-	}
-
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				err := fmt.Errorf("%w: %v", ErrTaskPanic, r)
-				logPanic(g.ctx, "async group task panic", r)
-				g.setError(err)
-			}
-		}()
-
-		if err := task(g.ctx); err != nil {
-			g.setError(err)
-		}
-	}()
-
-	return nil
-}
-
-// Wait 等待所有已成功提交的任务结束，并返回第一个错误。
-func (g *Group) Wait() error {
-	if g == nil {
-		return nil
-	}
-
-	g.wg.Wait()
-	err := g.err
-	ctxErr := g.ctx.Err()
-	g.cancel()
-
-	if err != nil {
-		return err
-	}
-	return ctxErr
-}
-
-func (g *Group) setError(err error) {
-	if err == nil {
-		return
-	}
-	g.errOnce.Do(func() {
-		g.err = err
-		g.cancel()
-	})
-}
-
 // RunSafe 安全提交 fire-and-forget 异步任务。
+// 提交失败只打日志并累计 rejected，不返回给调用方。需要感知「没进池」时应改用 TryRunSafe。
 func RunSafe(ctx context.Context, task func(ctx context.Context), timeout time.Duration) {
 	_ = TryRunSafe(ctx, task, timeout)
 }
 
-// TryRunSafe 安全提交异步任务；返回值仅表示任务是否成功进入协程池，不代表任务执行结果。
+// TryRunSafe 安全提交异步任务。返回值仅表示是否进入协程池，不代表任务执行结果。
 // 需要在提交失败时安排持久化补偿的调用方应使用此方法。
+//
+// 语义约束：
+//   - 与父请求取消树隔离，避免请求结束把补偿任务一起取消；
+//   - timeout <= 0 回退 DefaultAsyncTimeout，禁止无限跑；
+//   - 任务 panic 只记日志，不击穿进程；
+//   - 超时日志可能由定时器或任务返回后两条路径触发，timeoutOnce 保证只打一次。
 func TryRunSafe(ctx context.Context, task func(ctx context.Context), timeout time.Duration) error {
 	if task == nil {
 		return ErrNilTask
@@ -336,6 +262,7 @@ func TryRunSafe(ctx context.Context, task func(ctx context.Context), timeout tim
 			})
 		}
 
+		// 任务若忽略 ctx、卡住不返回，AfterFunc 仍能打超时日志；任务正常返回则 Stop 掉定时器。
 		timer := time.AfterFunc(timeout, logDeadline)
 		defer timer.Stop()
 		defer cancel()
@@ -346,6 +273,7 @@ func TryRunSafe(ctx context.Context, task func(ctx context.Context), timeout tim
 		}()
 
 		task(runCtx)
+		// 任务已返回但 ctx 已超时：任务可能忽略了 deadline，补一条日志。
 		if runCtx.Err() == context.DeadlineExceeded {
 			logDeadline()
 		}
@@ -360,12 +288,14 @@ func TryRunSafe(ctx context.Context, task func(ctx context.Context), timeout tim
 	return nil
 }
 
+// getContextPropagator 读当前传递器。TryRunSafe 每次提交都取一次，避免持有过期闭包。
 func getContextPropagator() func(context.Context) context.Context {
 	contextPropagatorMu.RLock()
 	defer contextPropagatorMu.RUnlock()
 	return contextPropagator
 }
 
+// logPanic 记录任务 panic。logger 尚未初始化时（测试或进程极早期）回退到标准库，避免丢栈。
 func logPanic(ctx context.Context, msg string, p any) {
 	stack := string(debug.Stack())
 	if logger.L() != nil {
@@ -378,6 +308,7 @@ func logPanic(ctx context.Context, msg string, p any) {
 	log.Printf("%s: %v\n%s", msg, p, stack)
 }
 
+// logTimeout 记录后台任务超时。级别用 Warn：超时不一定是故障，但需要可观测。
 func logTimeout(ctx context.Context, timeout time.Duration) {
 	if logger.L() != nil {
 		logger.Warn(ctx, "async task timeout",
@@ -388,6 +319,7 @@ func logTimeout(ctx context.Context, timeout time.Duration) {
 	log.Printf("async task timeout: %s", timeout)
 }
 
+// logSubmitFailed 记录入池失败，并带上累计 rejected，便于和监控对账。
 func logSubmitFailed(ctx context.Context, err error, timeout time.Duration, rejectedTotal int64) {
 	if logger.L() != nil {
 		logger.Error(ctx, "async submit failed",
