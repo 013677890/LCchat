@@ -15,7 +15,11 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 | `apps/group/cmd` | 服务启动、gRPC 服务、依赖注入和缓存投影消费者装配。 |
 | `apps/group/internal/handler` | gRPC handler，负责参数转换和错误映射。 |
 | `apps/group/internal/service` | 群业务规则和权限校验。 |
-| `apps/group/internal/repository` | MySQL、Redis、Outbox 写入和缓存投影仓储。 |
+| `apps/group/internal/repository` | 共享协议：领域错误、DTO、状态常量、Redis 编解码与 Lua。 |
+| `apps/group/internal/repository/store` | MySQL 权威写与回源读；事务内写业务表、`cache_version` 和 Outbox。 |
+| `apps/group/internal/repository/cache` | 同步读缓存。展示列表与发送权限都走最终一致投影；权限点查使用 Hash field。 |
+| `apps/group/internal/repository/projection` | 异步 `group.cache` 投影、版本化 Redis 写入、权威对账与 miss 修复调度。 |
+| `apps/group/internal/repository/compose` | 把 store 写路径与 cache 读路径组合成 service 使用的 `IGroupRepository` 门面。 |
 | `apps/group/internal/consumer` | `group.cache` 投影消费者与周期缓存对账任务。 |
 | `proto/group` | GroupService gRPC 契约。 |
 | `pkg/groupevent` | 群缓存事件 payload 编解码和 action 常量。 |

@@ -8,45 +8,11 @@ import (
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
 )
 
-// GroupInfoUpdates 描述群资料更新意图。
-//
-// 这里仅承载仍由 UpdateGroupInfo 负责的正式资料字段：
-//  1. name / avatar 允许管理员及以上更新；
-//  2. add_mode 仅允许群主更新；
-//  3. notice 已拆到独立接口，避免不同权限矩阵继续混在同一写入口。
-type GroupInfoUpdates struct {
-	Name    *string
-	Avatar  *string
-	AddMode *int8
-}
-
-// ApplyJoinGroupResult 描述用户申请入群后的最终结果。
-//
-// 当 joined_directly=true 时表示 add_mode=0 已直接入群；
-// 当 joined_directly=false 且 apply_id>0 时表示已创建待审批申请记录。
-type ApplyJoinGroupResult struct {
-	ApplyID        int64
-	JoinedDirectly bool
-}
-
-// CheckGroupSendPermissionResult 描述群消息发送权限检查结果。
-//
-// 该结果把“是否允许发送”和“为什么不允许”一起返回，方便 msg-service
-// 在拒绝发送时给客户端明确提示，而不是只能得到一个模糊的权限失败。
-type CheckGroupSendPermissionResult struct {
-	CanSend   bool
-	Role      int8
-	Reason    string
-	MuteUntil int64
-	MuteAll   bool
-}
-
-// IsEmpty 判断当前更新意图是否为空。
-func (u GroupInfoUpdates) IsEmpty() bool {
-	return u.Name == nil && u.Avatar == nil && u.AddMode == nil
-}
-
 // IGroupRepository 定义 group-service 当前阶段需要的仓储抽象。
+//
+// service 只依赖本接口。运行时实现是 repository/compose.Facade：
+// 写命令转发 store，展示与权限读取转发 cache。
+// 父包只保留协议，不再作为运行时仓储实现，避免再 import cache 造成循环依赖。
 type IGroupRepository interface {
 	// CreateGroup 创建群与初始成员关系。
 	CreateGroup(ctx context.Context, group *model.GroupInfo, members []*model.GroupMember) error
@@ -112,9 +78,6 @@ type IGroupRepository interface {
 	GetUserProfiles(ctx context.Context, userUUIDs []string) (map[string]*model.UserProfile, error)
 }
 
-// GroupRepository 是 IGroupRepository 的语义化别名。
-type GroupRepository = IGroupRepository
-
 // IGroupCacheProjectorRepository 定义 group.cache 投影链路需要的最小仓储能力。
 //
 // 这里单独拆一个接口，而不是把投影能力塞进 IGroupRepository，原因有两点：
@@ -134,6 +97,3 @@ type IGroupCacheProjectorRepository interface {
 	// ListGroupCacheReconcileTargets 使用 ID 游标分页扫描群聚合，供周期对账任务调用。
 	ListGroupCacheReconcileTargets(ctx context.Context, afterID int64, limit int) ([]GroupCacheReconcileTarget, error)
 }
-
-// GroupCacheProjectorRepository 是 IGroupCacheProjectorRepository 的语义化别名。
-type GroupCacheProjectorRepository = IGroupCacheProjectorRepository

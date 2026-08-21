@@ -2,6 +2,8 @@
 
 group 服务使用 MySQL Outbox、Debezium、Kafka 和 Redis projector 维护群缓存。MySQL 是唯一权威事实；group Kafka projector 是正常写链路中唯一的 Redis 投影者，读 miss 与周期对账只允许用带数据库版本的完整快照修复缓存。同一 `group.cache` 还由 msg 的独立消费组维护成员会话投影，但它只写 msg 自己拥有的表，不参与 Redis 写入。
 
+代码组织上，group 仓储按调用语义拆成子包：`repository/store` 只做 MySQL 权威写和回源读；`repository/cache` 做最终一致的同步读，发送权限走成员 Hash field 点查而不是 `HGETALL`；`repository/projection` 负责异步投影与对账；`repository/compose` 把 store 与 cache 组合成 service 使用的 `IGroupRepository`。共享错误、常量和 Redis 编解码留在父包 `repository`，避免父包再 import cache 造成循环依赖。
+
 ## 1. 一致性边界
 
 - 群业务表、`groups.cache_version` 和 `outbox_events` 在同一个 MySQL 事务内提交或回滚。

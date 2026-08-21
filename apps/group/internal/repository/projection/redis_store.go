@@ -1,4 +1,4 @@
-package repository
+package projection
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/async"
@@ -16,15 +17,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-// GroupCacheReconcileTarget 是周期对账扫描使用的轻量游标记录。
-//
-// 使用数据库自增 ID 做 keyset 游标，避免 OFFSET 在大表扫描时反复跳过前缀行；
-// UUID 才是实际聚合标识，ID 只服务于本轮稳定分页。
-type GroupCacheReconcileTarget struct {
-	ID        int64  `gorm:"column:id"`
-	GroupUUID string `gorm:"column:uuid"`
-}
 
 type groupCacheReconcileSnapshot struct {
 	group           *model.GroupInfo
@@ -62,7 +54,7 @@ const (
 // mode 把“增量 patch”“事件首次创建”“权威修复”分成互斥语义。三种模式都在 Lua
 // 内比较 projection_version：普通事件拒绝 <= 当前版本；权威修复仅允许覆盖相同版本，
 // 仍然拒绝更低版本，因此晚到的 DB 快照不可能回滚并发新事件。
-func (r *groupRepositoryImpl) setVersionedGroupInfoProjection(
+func (r *Repository) setVersionedGroupInfoProjection(
 	ctx context.Context,
 	group *model.GroupInfo,
 	projectionVersion int64,
@@ -72,7 +64,7 @@ func (r *groupRepositoryImpl) setVersionedGroupInfoProjection(
 		return nil
 	}
 	if group == nil || group.Uuid == "" || projectionVersion <= 0 {
-		return fmt.Errorf("%w: invalid versioned group info projection", ErrInvalidProjectorPayload)
+		return fmt.Errorf("%w: invalid versioned group info projection", repository.ErrInvalidProjectorPayload)
 	}
 	projectedGroup := group
 	if group.DeletedAt.Valid {
@@ -80,13 +72,13 @@ func (r *groupRepositoryImpl) setVersionedGroupInfoProjection(
 		// tombstone 来挡住旧事件。复制后映射为解散终态，避免周期对账把
 		// status=0、deleted_at!=NULL 的 DB 行重新发布成可读正常群。
 		copyGroup := *group
-		copyGroup.Status = groupStatusDismissed
+		copyGroup.Status = repository.GroupStatusDismissed
 		projectedGroup = &copyGroup
 	}
 
-	value, err := encodeGroupInfoCacheValue(projectedGroup, projectionVersion)
+	value, err := repository.EncodeGroupInfoCacheValue(projectedGroup, projectionVersion)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidProjectorPayload, err)
+		return fmt.Errorf("%w: %v", repository.ErrInvalidProjectorPayload, err)
 	}
 	createFlag := "0"
 	repairEqualFlag := "0"
@@ -98,9 +90,9 @@ func (r *groupRepositoryImpl) setVersionedGroupInfoProjection(
 		createFlag = "1"
 		repairEqualFlag = "1"
 	default:
-		return fmt.Errorf("%w: unknown group info projection mode %d", ErrInvalidProjectorPayload, mode)
+		return fmt.Errorf("%w: unknown group info projection mode %d", repository.ErrInvalidProjectorPayload, mode)
 	}
-	result, err := goredis.NewScript(luaSetVersionedGroupInfo).Run(
+	result, err := goredis.NewScript(repository.LuaSetVersionedGroupInfo).Run(
 		ctx,
 		r.redisClient,
 		[]string{rediskey.GroupInfoKey(group.Uuid)},
@@ -108,7 +100,7 @@ func (r *groupRepositoryImpl) setVersionedGroupInfoProjection(
 		value,
 		int(cachex.JitterTTL(rediskey.GroupInfoTTL).Seconds()),
 		createFlag,
-		groupCacheSchemaVersion,
+		repository.GroupCacheSchemaVersion,
 		repairEqualFlag,
 	).Int64()
 	if err != nil {
@@ -121,7 +113,7 @@ func (r *groupRepositoryImpl) setVersionedGroupInfoProjection(
 }
 
 // replaceVersionedHashProjection 原子替换一个群维度 Hash。
-func (r *groupRepositoryImpl) replaceVersionedHashProjection(
+func (r *Repository) replaceVersionedHashProjection(
 	ctx context.Context,
 	cacheKey string,
 	projectionVersion int64,
@@ -134,7 +126,7 @@ func (r *groupRepositoryImpl) replaceVersionedHashProjection(
 		return nil
 	}
 	if cacheKey == "" || projectionVersion <= 0 || ttlSeconds <= 0 {
-		return fmt.Errorf("%w: invalid versioned hash replacement", ErrInvalidProjectorPayload)
+		return fmt.Errorf("%w: invalid versioned hash replacement", repository.ErrInvalidProjectorPayload)
 	}
 	repairEqualFlag := "0"
 	if repairEqual {
@@ -143,7 +135,7 @@ func (r *groupRepositoryImpl) replaceVersionedHashProjection(
 	args := make([]interface{}, 0, 6+len(fields)*2)
 	args = append(
 		args,
-		groupCacheSchemaVersion,
+		repository.GroupCacheSchemaVersion,
 		projectionVersion,
 		ttlSeconds,
 		emptyField,
@@ -153,11 +145,11 @@ func (r *groupRepositoryImpl) replaceVersionedHashProjection(
 	keys := make([]string, 0, len(fields))
 	for field := range fields {
 		if field == "" ||
-			field == groupProjectionSchemaField ||
-			field == groupProjectionVersionField ||
-			field == groupProjectionCompleteField ||
+			field == repository.GroupProjectionSchemaField ||
+			field == repository.GroupProjectionVersionField ||
+			field == repository.GroupProjectionCompleteField ||
 			field == emptyField {
-			return fmt.Errorf("%w: hash projection contains reserved field %q", ErrInvalidProjectorPayload, field)
+			return fmt.Errorf("%w: hash projection contains reserved field %q", repository.ErrInvalidProjectorPayload, field)
 		}
 
 		keys = append(keys, field)
@@ -168,7 +160,7 @@ func (r *groupRepositoryImpl) replaceVersionedHashProjection(
 	for _, field := range keys {
 		args = append(args, field, fields[field])
 	}
-	if _, err := goredis.NewScript(luaReplaceVersionedHash).
+	if _, err := goredis.NewScript(repository.LuaReplaceVersionedHash).
 		Run(ctx, r.redisClient, []string{cacheKey}, args...).
 		Int64(); err != nil {
 		return repoerr.WrapRedisError(err)
@@ -178,7 +170,7 @@ func (r *groupRepositoryImpl) replaceVersionedHashProjection(
 }
 
 // upsertVersionedHashProjectionIfExists 在一个 Lua 调用里更新同事件的全部 field。
-func (r *groupRepositoryImpl) upsertVersionedHashProjectionIfExists(
+func (r *Repository) upsertVersionedHashProjectionIfExists(
 	ctx context.Context,
 	cacheKey string,
 	projectionVersion int64,
@@ -190,18 +182,18 @@ func (r *groupRepositoryImpl) upsertVersionedHashProjectionIfExists(
 		return nil
 	}
 	if cacheKey == "" || projectionVersion <= 0 || ttlSeconds <= 0 || len(fields) == 0 {
-		return fmt.Errorf("%w: invalid versioned hash upsert", ErrInvalidProjectorPayload)
+		return fmt.Errorf("%w: invalid versioned hash upsert", repository.ErrInvalidProjectorPayload)
 	}
 	args := make([]interface{}, 0, 5+len(fields)*2)
-	args = append(args, groupCacheSchemaVersion, projectionVersion, ttlSeconds, emptyField, emptyValue)
+	args = append(args, repository.GroupCacheSchemaVersion, projectionVersion, ttlSeconds, emptyField, emptyValue)
 	keys := make([]string, 0, len(fields))
 	for field := range fields {
 		if field == "" ||
-			field == groupProjectionSchemaField ||
-			field == groupProjectionVersionField ||
-			field == groupProjectionCompleteField ||
+			field == repository.GroupProjectionSchemaField ||
+			field == repository.GroupProjectionVersionField ||
+			field == repository.GroupProjectionCompleteField ||
 			field == emptyField {
-			return fmt.Errorf("%w: hash projection contains reserved field %q", ErrInvalidProjectorPayload, field)
+			return fmt.Errorf("%w: hash projection contains reserved field %q", repository.ErrInvalidProjectorPayload, field)
 		}
 
 		keys = append(keys, field)
@@ -211,7 +203,7 @@ func (r *groupRepositoryImpl) upsertVersionedHashProjectionIfExists(
 	for _, field := range keys {
 		args = append(args, field, fields[field])
 	}
-	if _, err := goredis.NewScript(luaUpsertVersionedHash).
+	if _, err := goredis.NewScript(repository.LuaUpsertVersionedHash).
 		Run(ctx, r.redisClient, []string{cacheKey}, args...).
 		Int64(); err != nil {
 		return repoerr.WrapRedisError(err)
@@ -221,7 +213,7 @@ func (r *groupRepositoryImpl) upsertVersionedHashProjectionIfExists(
 }
 
 // removeVersionedHashProjectionIfExists 删除 field，同时把 key 版本推进到删除事件版本。
-func (r *groupRepositoryImpl) removeVersionedHashProjectionIfExists(
+func (r *Repository) removeVersionedHashProjectionIfExists(
 	ctx context.Context,
 	cacheKey string,
 	projectionVersion int64,
@@ -233,23 +225,23 @@ func (r *groupRepositoryImpl) removeVersionedHashProjectionIfExists(
 		return nil
 	}
 	if cacheKey == "" || projectionVersion <= 0 || ttlSeconds <= 0 || len(fields) == 0 {
-		return fmt.Errorf("%w: invalid versioned hash removal", ErrInvalidProjectorPayload)
+		return fmt.Errorf("%w: invalid versioned hash removal", repository.ErrInvalidProjectorPayload)
 	}
 	args := make([]interface{}, 0, 5+len(fields))
-	args = append(args, groupCacheSchemaVersion, projectionVersion, ttlSeconds, emptyField, emptyValue)
+	args = append(args, repository.GroupCacheSchemaVersion, projectionVersion, ttlSeconds, emptyField, emptyValue)
 	for _, field := range fields {
 		if field == "" ||
-			field == groupProjectionSchemaField ||
-			field == groupProjectionVersionField ||
-			field == groupProjectionCompleteField ||
+			field == repository.GroupProjectionSchemaField ||
+			field == repository.GroupProjectionVersionField ||
+			field == repository.GroupProjectionCompleteField ||
 			field == emptyField {
-			return fmt.Errorf("%w: hash projection contains reserved field %q", ErrInvalidProjectorPayload, field)
+			return fmt.Errorf("%w: hash projection contains reserved field %q", repository.ErrInvalidProjectorPayload, field)
 		}
 
 		args = append(args, field)
 	}
 
-	if _, err := goredis.NewScript(luaRemoveVersionedHash).
+	if _, err := goredis.NewScript(repository.LuaRemoveVersionedHash).
 		Run(ctx, r.redisClient, []string{cacheKey}, args...).
 		Int64(); err != nil {
 		return repoerr.WrapRedisError(err)
@@ -263,7 +255,7 @@ func (r *groupRepositoryImpl) removeVersionedHashProjectionIfExists(
 // fieldExists=false、cacheHit=true 表示“缓存完整且确定没有这个业务 field”；它与
 // cacheHit=false 的“缓存缺失/格式非法”必须区分，否则成员权限检查会把缓存 miss
 // 错判为明确的非成员结论。
-func (r *groupRepositoryImpl) readVersionedHashFieldProjection(
+func (r *Repository) readVersionedHashFieldProjection(
 	ctx context.Context,
 	cacheKey, field string,
 	ttlSeconds int,
@@ -276,11 +268,11 @@ func (r *groupRepositoryImpl) readVersionedHashFieldProjection(
 	if renew {
 		renewFlag = "1"
 	}
-	result, err := goredis.NewScript(luaReadVersionedHashField).Run(
+	result, err := goredis.NewScript(repository.LuaReadVersionedHashField).Run(
 		ctx,
 		r.redisClient,
 		[]string{cacheKey},
-		groupCacheSchemaVersion,
+		repository.GroupCacheSchemaVersion,
 		field,
 		ttlSeconds,
 		renewFlag,
@@ -337,7 +329,7 @@ func (r *groupRepositoryImpl) readVersionedHashFieldProjection(
 }
 
 // readVersionedUserGroupsProjection 原子读取 READY 用户群列表及每个活跃群的版本。
-func (r *groupRepositoryImpl) readVersionedUserGroupsProjection(
+func (r *Repository) readVersionedUserGroupsProjection(
 	ctx context.Context,
 	userUUID string,
 	renew bool,
@@ -349,11 +341,11 @@ func (r *groupRepositoryImpl) readVersionedUserGroupsProjection(
 	if renew {
 		renewFlag = "1"
 	}
-	result, err := goredis.NewScript(luaReadVersionedUserGroups).Run(
+	result, err := goredis.NewScript(repository.LuaReadVersionedUserGroups).Run(
 		ctx,
 		r.redisClient,
 		[]string{rediskey.UserGroupListKey(userUUID), rediskey.UserGroupVersionKey(userUUID)},
-		groupCacheSchemaVersion,
+		repository.GroupCacheSchemaVersion,
 		int(cachex.JitterTTL(rediskey.UserGroupListTTL).Seconds()),
 		renewFlag,
 	).Slice()
@@ -395,7 +387,7 @@ func (r *groupRepositoryImpl) readVersionedUserGroupsProjection(
 		if versionErr != nil {
 			return nil, false, fmt.Errorf("%w: invalid user-group version: %v", repoerr.ErrRedis, versionErr)
 		}
-		if groupUUID == userGroupsEmptyValue {
+		if groupUUID == repository.UserGroupsEmptyValue {
 			if count != 1 || version != 0 {
 				return nil, false, fmt.Errorf("%w: malformed user-group empty sentinel", repoerr.ErrRedis)
 			}
@@ -448,19 +440,23 @@ func buildGroupMemberProjectionFields(members []*model.GroupMember) (map[string]
 	for _, member := range members {
 		if member == nil ||
 			member.UserUuid == "" ||
-			member.Role < memberRoleMember ||
-			member.Role > memberRoleOwner ||
+			member.Role < repository.MemberRoleMember ||
+			member.Role > repository.MemberRoleOwner ||
 			member.JoinedAt.UnixMilli() <= 0 {
-			return nil, fmt.Errorf("%w: invalid member in cache projection", ErrInvalidProjectorPayload)
+			return nil, fmt.Errorf("%w: invalid member in cache projection", repository.ErrInvalidProjectorPayload)
 		}
 		if _, duplicate := fields[member.UserUuid]; duplicate {
 			return nil, fmt.Errorf(
 				"%w: duplicate member %s in cache projection",
-				ErrInvalidProjectorPayload,
+				repository.ErrInvalidProjectorPayload,
 				member.UserUuid,
 			)
 		}
-		fields[member.UserUuid] = encodeGroupMemberCacheValue(member)
+		value, err := repository.EncodeGroupMemberCacheValue(member)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", repository.ErrInvalidProjectorPayload, err)
+		}
+		fields[member.UserUuid] = value
 	}
 	return fields, nil
 }
@@ -472,22 +468,26 @@ func buildGroupJoinRequestProjectionFields(requests []*model.GroupJoinRequest) (
 			request.Id <= 0 ||
 			request.ApplicantUuid == "" ||
 			request.CreatedAt.UnixMilli() <= 0 {
-			return nil, fmt.Errorf("%w: invalid join request in cache projection", ErrInvalidProjectorPayload)
+			return nil, fmt.Errorf("%w: invalid join request in cache projection", repository.ErrInvalidProjectorPayload)
 		}
 		field := strconv.FormatInt(request.Id, 10)
 		if _, duplicate := fields[field]; duplicate {
 			return nil, fmt.Errorf(
 				"%w: duplicate join request %s in cache projection",
-				ErrInvalidProjectorPayload,
+				repository.ErrInvalidProjectorPayload,
 				field,
 			)
 		}
-		fields[field] = encodeGroupJoinRequestCacheValue(request)
+		value, err := repository.EncodeGroupJoinRequestCacheValue(request)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", repository.ErrInvalidProjectorPayload, err)
+		}
+		fields[field] = value
 	}
 	return fields, nil
 }
 
-func (r *groupRepositoryImpl) replaceGroupMembersProjection(
+func (r *Repository) replaceGroupMembersProjection(
 	ctx context.Context,
 	groupUUID string,
 	members []*model.GroupMember,
@@ -503,14 +503,14 @@ func (r *groupRepositoryImpl) replaceGroupMembersProjection(
 		rediskey.GroupMembersKey(groupUUID),
 		projectionVersion,
 		int(cachex.JitterTTL(rediskey.GroupMembersTTL).Seconds()),
-		groupMembersEmptyField,
-		groupMembersEmptyValue,
+		repository.GroupMembersEmptyField,
+		repository.GroupMembersEmptyValue,
 		fields,
 		repairEqual,
 	)
 }
 
-func (r *groupRepositoryImpl) upsertGroupMembersProjectionIfExists(
+func (r *Repository) upsertGroupMembersProjectionIfExists(
 	ctx context.Context,
 	groupUUID string,
 	members []*model.GroupMember,
@@ -525,13 +525,13 @@ func (r *groupRepositoryImpl) upsertGroupMembersProjectionIfExists(
 		rediskey.GroupMembersKey(groupUUID),
 		projectionVersion,
 		int(cachex.JitterTTL(rediskey.GroupMembersTTL).Seconds()),
-		groupMembersEmptyField,
-		groupMembersEmptyValue,
+		repository.GroupMembersEmptyField,
+		repository.GroupMembersEmptyValue,
 		fields,
 	)
 }
 
-func (r *groupRepositoryImpl) removeGroupMemberProjectionIfExists(
+func (r *Repository) removeGroupMemberProjectionIfExists(
 	ctx context.Context,
 	groupUUID, userUUID string,
 	projectionVersion int64,
@@ -541,13 +541,13 @@ func (r *groupRepositoryImpl) removeGroupMemberProjectionIfExists(
 		rediskey.GroupMembersKey(groupUUID),
 		projectionVersion,
 		int(cachex.JitterTTL(rediskey.GroupMembersTTL).Seconds()),
-		groupMembersEmptyField,
-		groupMembersEmptyValue,
+		repository.GroupMembersEmptyField,
+		repository.GroupMembersEmptyValue,
 		userUUID,
 	)
 }
 
-func (r *groupRepositoryImpl) replaceGroupJoinRequestsProjection(
+func (r *Repository) replaceGroupJoinRequestsProjection(
 	ctx context.Context,
 	groupUUID string,
 	requests []*model.GroupJoinRequest,
@@ -563,14 +563,14 @@ func (r *groupRepositoryImpl) replaceGroupJoinRequestsProjection(
 		rediskey.GroupJoinRequestPendingKey(groupUUID),
 		projectionVersion,
 		int(cachex.JitterTTL(rediskey.GroupJoinRequestTTL).Seconds()),
-		groupJoinRequestsEmptyField,
-		groupJoinRequestsEmptyValue,
+		repository.GroupJoinRequestsEmptyField,
+		repository.GroupJoinRequestsEmptyValue,
 		fields,
 		repairEqual,
 	)
 }
 
-func (r *groupRepositoryImpl) upsertGroupJoinRequestProjectionIfExists(
+func (r *Repository) upsertGroupJoinRequestProjectionIfExists(
 	ctx context.Context,
 	groupUUID string,
 	request *model.GroupJoinRequest,
@@ -585,13 +585,13 @@ func (r *groupRepositoryImpl) upsertGroupJoinRequestProjectionIfExists(
 		rediskey.GroupJoinRequestPendingKey(groupUUID),
 		projectionVersion,
 		int(cachex.JitterTTL(rediskey.GroupJoinRequestTTL).Seconds()),
-		groupJoinRequestsEmptyField,
-		groupJoinRequestsEmptyValue,
+		repository.GroupJoinRequestsEmptyField,
+		repository.GroupJoinRequestsEmptyValue,
 		fields,
 	)
 }
 
-func (r *groupRepositoryImpl) removeGroupJoinRequestProjectionIfExists(
+func (r *Repository) removeGroupJoinRequestProjectionIfExists(
 	ctx context.Context,
 	groupUUID string,
 	applyID, projectionVersion int64,
@@ -601,14 +601,14 @@ func (r *groupRepositoryImpl) removeGroupJoinRequestProjectionIfExists(
 		rediskey.GroupJoinRequestPendingKey(groupUUID),
 		projectionVersion,
 		int(cachex.JitterTTL(rediskey.GroupJoinRequestTTL).Seconds()),
-		groupJoinRequestsEmptyField,
-		groupJoinRequestsEmptyValue,
+		repository.GroupJoinRequestsEmptyField,
+		repository.GroupJoinRequestsEmptyValue,
 		strconv.FormatInt(applyID, 10),
 	)
 }
 
 // patchUserGroupProjection 原子更新 ZSet 与逐群版本 tombstone。
-func (r *groupRepositoryImpl) patchUserGroupProjection(
+func (r *Repository) patchUserGroupProjection(
 	ctx context.Context,
 	userUUID string,
 	group *model.GroupInfo,
@@ -620,7 +620,7 @@ func (r *groupRepositoryImpl) patchUserGroupProjection(
 		return nil
 	}
 	if userUUID == "" || group == nil || group.Uuid == "" || projectionVersion <= 0 {
-		return fmt.Errorf("%w: invalid user-group projection", ErrInvalidProjectorPayload)
+		return fmt.Errorf("%w: invalid user-group projection", repository.ErrInvalidProjectorPayload)
 	}
 	activeFlag := "0"
 	if active {
@@ -630,11 +630,11 @@ func (r *groupRepositoryImpl) patchUserGroupProjection(
 	if repairEqual {
 		repairEqualFlag = "1"
 	}
-	if _, err := goredis.NewScript(luaPatchVersionedUserGroup).Run(
+	if _, err := goredis.NewScript(repository.LuaPatchVersionedUserGroup).Run(
 		ctx,
 		r.redisClient,
 		[]string{rediskey.UserGroupListKey(userUUID), rediskey.UserGroupVersionKey(userUUID)},
-		groupCacheSchemaVersion,
+		repository.GroupCacheSchemaVersion,
 		projectionVersion,
 		int(cachex.JitterTTL(rediskey.UserGroupListTTL).Seconds()),
 		group.Uuid,
@@ -648,7 +648,7 @@ func (r *groupRepositoryImpl) patchUserGroupProjection(
 }
 
 // reconcileUserGroupProjection 把一个数据库完整快照合并进用户群反向索引。
-func (r *groupRepositoryImpl) reconcileUserGroupProjection(
+func (r *Repository) reconcileUserGroupProjection(
 	ctx context.Context,
 	userUUID string,
 	targets []userGroupReconcileTarget,
@@ -657,13 +657,13 @@ func (r *groupRepositoryImpl) reconcileUserGroupProjection(
 		return nil
 	}
 	if userUUID == "" {
-		return fmt.Errorf("%w: empty user uuid for user-group reconciliation", ErrInvalidProjectorPayload)
+		return fmt.Errorf("%w: empty user uuid for user-group reconciliation", repository.ErrInvalidProjectorPayload)
 	}
 	args := make([]interface{}, 0, 2+len(targets)*4)
-	args = append(args, groupCacheSchemaVersion, int(cachex.JitterTTL(rediskey.UserGroupListTTL).Seconds()))
+	args = append(args, repository.GroupCacheSchemaVersion, int(cachex.JitterTTL(rediskey.UserGroupListTTL).Seconds()))
 	for _, target := range targets {
 		if target.group == nil || target.group.Uuid == "" || target.group.CacheVersion <= 0 {
-			return fmt.Errorf("%w: user-group reconcile target missing version", ErrInvalidProjectorPayload)
+			return fmt.Errorf("%w: user-group reconcile target missing version", repository.ErrInvalidProjectorPayload)
 		}
 	}
 	sort.SliceStable(targets, func(i, j int) bool {
@@ -683,7 +683,7 @@ func (r *groupRepositoryImpl) reconcileUserGroupProjection(
 		)
 	}
 
-	if _, err := goredis.NewScript(luaReconcileVersionedUserGroups).Run(
+	if _, err := goredis.NewScript(repository.LuaReconcileVersionedUserGroups).Run(
 		ctx,
 		r.redisClient,
 		[]string{rediskey.UserGroupListKey(userUUID), rediskey.UserGroupVersionKey(userUUID)},
@@ -695,18 +695,18 @@ func (r *groupRepositoryImpl) reconcileUserGroupProjection(
 }
 
 // ListGroupCacheReconcileTargets 分页列出需要进行缓存对账的群。
-func (r *groupRepositoryImpl) ListGroupCacheReconcileTargets(
+func (r *Repository) ListGroupCacheReconcileTargets(
 	ctx context.Context,
 	afterID int64,
 	limit int,
-) ([]GroupCacheReconcileTarget, error) {
+) ([]repository.GroupCacheReconcileTarget, error) {
 	if r == nil || r.db == nil {
 		return nil, repoerr.ErrDatabase
 	}
 	if afterID < 0 || limit <= 0 {
 		return nil, fmt.Errorf("%w: invalid group cache reconcile cursor", repoerr.ErrDatabase)
 	}
-	var targets []GroupCacheReconcileTarget
+	var targets []repository.GroupCacheReconcileTarget
 	if err := r.db.WithContext(ctx).
 		Unscoped().
 		Model(&model.GroupInfo{}).
@@ -726,7 +726,7 @@ func (r *groupRepositoryImpl) ListGroupCacheReconcileTargets(
 // 而是在一个 DB 事务里同时读取 group、全部历史成员和待审批申请，再以
 // groups.cache_version 写入版本化 Lua。即使读取期间 Kafka 正在投影，较低版本快照
 // 也只会被脚本拒绝，不会把新缓存回滚。
-func (r *groupRepositoryImpl) ReconcileGroupCache(ctx context.Context, groupUUID string) error {
+func (r *Repository) ReconcileGroupCache(ctx context.Context, groupUUID string) error {
 	if r == nil || r.db == nil || groupUUID == "" {
 		return fmt.Errorf("%w: invalid group cache reconcile request", repoerr.ErrDatabase)
 	}
@@ -742,7 +742,7 @@ func (r *groupRepositoryImpl) ReconcileGroupCache(ctx context.Context, groupUUID
 		return fmt.Errorf("%w: group %s cache_version is not initialized", repoerr.ErrDatabase, groupUUID)
 	}
 
-	r.addGroupUUIDToBloomBestEffort(ctx, groupUUID)
+	repository.AddGroupUUIDToBloomBestEffort(ctx, r.redisClient, groupUUID)
 	if err := r.setVersionedGroupInfoProjection(
 		ctx,
 		snapshot.group,
@@ -758,12 +758,12 @@ func (r *groupRepositoryImpl) ReconcileGroupCache(ctx context.Context, groupUUID
 		return err
 	}
 
-	groupActive := snapshot.group.Status == groupStatusNormal && !snapshot.group.DeletedAt.Valid
+	groupActive := snapshot.group.Status == repository.GroupStatusNormal && !snapshot.group.DeletedAt.Valid
 	for _, member := range snapshot.allMembers {
 		if member == nil || member.UserUuid == "" {
 			continue
 		}
-		memberActive := groupActive && member.Status == memberStatusNormal && !member.DeletedAt.Valid
+		memberActive := groupActive && member.Status == repository.MemberStatusNormal && !member.DeletedAt.Valid
 		if err := r.patchUserGroupProjection(
 			ctx,
 			member.UserUuid,
@@ -779,7 +779,7 @@ func (r *groupRepositoryImpl) ReconcileGroupCache(ctx context.Context, groupUUID
 	return nil
 }
 
-func (r *groupRepositoryImpl) loadGroupCacheReconcileSnapshot(
+func (r *Repository) loadGroupCacheReconcileSnapshot(
 	ctx context.Context,
 	groupUUID string,
 ) (groupCacheReconcileSnapshot, error) {
@@ -804,16 +804,16 @@ func (r *groupRepositoryImpl) loadGroupCacheReconcileSnapshot(
 		}
 
 		activeMembers := make([]*model.GroupMember, 0, len(allMembers))
-		if group.Status == groupStatusNormal && !group.DeletedAt.Valid {
+		if group.Status == repository.GroupStatusNormal && !group.DeletedAt.Valid {
 			for _, member := range allMembers {
-				if member != nil && member.Status == memberStatusNormal && !member.DeletedAt.Valid {
+				if member != nil && member.Status == repository.MemberStatusNormal && !member.DeletedAt.Valid {
 					activeMembers = append(activeMembers, member)
 				}
 			}
 		}
 		var pendingRequests []*model.GroupJoinRequest
-		if group.Status == groupStatusNormal && !group.DeletedAt.Valid {
-			if err := tx.Where("group_uuid = ? AND status = ?", groupUUID, joinRequestStatusPending).
+		if group.Status == repository.GroupStatusNormal && !group.DeletedAt.Valid {
+			if err := tx.Where("group_uuid = ? AND status = ?", groupUUID, repository.JoinRequestStatusPending).
 				Order("created_at DESC, id DESC").
 				Find(&pendingRequests).Error; err != nil {
 				return repoerr.WrapDBError(err)
@@ -839,7 +839,7 @@ func (r *groupRepositoryImpl) loadGroupCacheReconcileSnapshot(
 //
 // 历史退出/被踢记录也必须读出并写入 tombstone；只查询当前有效群会失去删除版本，
 // 在“读快照 vN 与删除事件 vN+1 交错”时可能把已退出群重新加回缓存。
-func (r *groupRepositoryImpl) ReconcileUserGroupsCache(ctx context.Context, userUUID string) error {
+func (r *Repository) ReconcileUserGroupsCache(ctx context.Context, userUUID string) error {
 	if r == nil || r.db == nil || userUUID == "" {
 		return fmt.Errorf("%w: invalid user-group reconcile request", repoerr.ErrDatabase)
 	}
@@ -881,7 +881,7 @@ func (r *groupRepositoryImpl) ReconcileUserGroupsCache(ctx context.Context, user
 	return nil
 }
 
-func (r *groupRepositoryImpl) loadUserGroupReconcileTargets(
+func (r *Repository) loadUserGroupReconcileTargets(
 	ctx context.Context,
 	userUUID string,
 	cachedVersions map[string]int64,
@@ -922,7 +922,7 @@ func (r *groupRepositoryImpl) loadUserGroupReconcileTargets(
 // 这次查询不是权威快照：它可以与成员写事务并发，结果仅用于下一阶段按固定顺序锁
 // groups 行。真正的 active 状态必须在群锁全部取得后重新读取，绝不能把这里看到的
 // 旧 membership 与随后读到的新 cache_version 拼在一起。
-func (r *groupRepositoryImpl) discoverUserGroupReconcileCandidates(
+func (r *Repository) discoverUserGroupReconcileCandidates(
 	ctx context.Context,
 	userUUID string,
 	cachedVersions map[string]int64,
@@ -951,7 +951,7 @@ func (r *groupRepositoryImpl) discoverUserGroupReconcileCandidates(
 // “旧 active 状态 + 新 cache_version”；同版本权威 Lua 随后会写错状态，并挡住对应
 // Kafka 事件。这里取得全部群共享锁后重新读取成员关系，群写事务要么完整发生在快照
 // 之前，要么等本事务结束后再提交，不再出现跨事务拼接。
-func (r *groupRepositoryImpl) loadUserGroupReconcileTargetsOnce(
+func (r *Repository) loadUserGroupReconcileTargetsOnce(
 	ctx context.Context,
 	userUUID string,
 	candidateUUIDs []string,
@@ -1028,9 +1028,9 @@ func (r *groupRepositoryImpl) loadUserGroupReconcileTargetsOnce(
 			}
 			membership := membershipByGroup[groupUUID]
 			active := membership != nil &&
-				membership.Status == memberStatusNormal &&
+				membership.Status == repository.MemberStatusNormal &&
 				!membership.DeletedAt.Valid &&
-				group.Status == groupStatusNormal &&
+				group.Status == repository.GroupStatusNormal &&
 				!group.DeletedAt.Valid
 			targets = append(targets, userGroupReconcileTarget{group: group, active: active})
 		}
@@ -1067,7 +1067,7 @@ func mergeSortedUniqueStrings(base, additions []string) []string {
 //
 // 这不是权威读，也不参与最终裁决，只用于让用户全量对账发现“DB 从未有过该成员关系，
 // 但 ZSet 里多出一个群”的污染项。读取后发生的并发变化仍由每群 cache_version 保护。
-func (r *groupRepositoryImpl) loadCachedUserGroupProjectionVersions(
+func (r *Repository) loadCachedUserGroupProjectionVersions(
 	ctx context.Context,
 	userUUID string,
 ) (map[string]int64, error) {
@@ -1081,11 +1081,11 @@ func (r *groupRepositoryImpl) loadCachedUserGroupProjectionVersions(
 		return nil, repoerr.WrapRedisError(err)
 	}
 
-	if len(values) == 0 || values[groupProjectionSchemaField] != groupCacheSchemaVersion {
+	if len(values) == 0 || values[repository.GroupProjectionSchemaField] != repository.GroupCacheSchemaVersion {
 		return result, nil
 	}
 	for field, raw := range values {
-		if field == groupProjectionSchemaField || field == userGroupsReadyField || field == "" {
+		if field == repository.GroupProjectionSchemaField || field == repository.UserGroupsReadyField || field == "" {
 			continue
 		}
 		version, parseErr := strconv.ParseInt(raw, 10, 64)
@@ -1102,12 +1102,16 @@ func (r *groupRepositoryImpl) loadCachedUserGroupProjectionVersions(
 //
 // 任务只传聚合标识，不携带请求线程读出的对象；后台会重新读取一致性 DB 快照。
 // 这样“查询旧快照后晚写 Redis”的经典 cache-aside 竞态会被彻底消除。
-func (r *groupRepositoryImpl) scheduleGroupCacheReconcile(ctx context.Context, groupUUID string) {
+// ScheduleGroupCacheReconcile 接收 cache 读 miss 提交的群维度修复意图。
+//
+// 请求线程只传入 group_uuid；真正的 Redis 写入仍由 ReconcileGroupCache
+// 重新读取 MySQL 一致性快照完成，禁止把请求里已经读到的旧对象晚写缓存。
+func (r *Repository) ScheduleGroupCacheReconcile(ctx context.Context, groupUUID string) {
 	if r == nil || r.redisClient == nil || groupUUID == "" {
 		return
 	}
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		_, err, _ := r.memberGroup.Do("cache-reconcile-group:"+groupUUID, func() (interface{}, error) {
+		_, err, _ := r.flightGroup.Do("cache-reconcile-group:"+groupUUID, func() (interface{}, error) {
 			return nil, r.ReconcileGroupCache(runCtx, groupUUID)
 		})
 		if err != nil && !errors.Is(err, repoerr.ErrRecordNotFound) {
@@ -1116,12 +1120,13 @@ func (r *groupRepositoryImpl) scheduleGroupCacheReconcile(ctx context.Context, g
 	}, async.AsyncRetryTimeout)
 }
 
-func (r *groupRepositoryImpl) scheduleUserGroupsCacheReconcile(ctx context.Context, userUUID string) {
+// ScheduleUserGroupsCacheReconcile 接收用户群列表 miss 后的修复意图。
+func (r *Repository) ScheduleUserGroupsCacheReconcile(ctx context.Context, userUUID string) {
 	if r == nil || r.redisClient == nil || userUUID == "" {
 		return
 	}
 	async.RunSafe(ctx, func(runCtx context.Context) {
-		_, err, _ := r.memberGroup.Do("cache-reconcile-user:"+userUUID, func() (interface{}, error) {
+		_, err, _ := r.flightGroup.Do("cache-reconcile-user:"+userUUID, func() (interface{}, error) {
 			return nil, r.ReconcileUserGroupsCache(runCtx, userUUID)
 		})
 		if err != nil {
@@ -1136,7 +1141,11 @@ func (r *groupRepositoryImpl) scheduleUserGroupsCacheReconcile(ctx context.Conte
 // 可以持续命中：群级周期对账又只知道该群历史上出现过的用户，无法发现一个 DB 中从未
 // 加入该群的陌生用户。这里用 Redis SET NX 租约给命中路径增加低频权威对账，使这类污染
 // 最迟在活跃用户下一次租约窗口内被清除，同时避免每个请求都访问 MySQL。
-func (r *groupRepositoryImpl) scheduleUserGroupsCacheAuditAfterHit(ctx context.Context, userUUID string) {
+// ScheduleUserGroupsCacheAuditAfterHit 给命中路径增加低频权威对账。
+//
+// 结构合法但语义错误的 READY 缓存可以持续命中；租约窗口内最多触发一次修复，
+// 避免每个 ListUserGroups 请求都打 MySQL。
+func (r *Repository) ScheduleUserGroupsCacheAuditAfterHit(ctx context.Context, userUUID string) {
 	claimed, err := r.claimUserGroupsReconcileLease(ctx, userUUID)
 	if err != nil {
 		// 对账是读路径的自愈增强项。Redis 短暂异常不能把已经成功完成的业务读降级为失败。
@@ -1144,11 +1153,11 @@ func (r *groupRepositoryImpl) scheduleUserGroupsCacheAuditAfterHit(ctx context.C
 		return
 	}
 	if claimed {
-		r.scheduleUserGroupsCacheReconcile(ctx, userUUID)
+		r.ScheduleUserGroupsCacheReconcile(ctx, userUUID)
 	}
 }
 
-func (r *groupRepositoryImpl) claimUserGroupsReconcileLease(ctx context.Context, userUUID string) (bool, error) {
+func (r *Repository) claimUserGroupsReconcileLease(ctx context.Context, userUUID string) (bool, error) {
 	if r == nil || r.redisClient == nil || userUUID == "" {
 		return false, nil
 	}

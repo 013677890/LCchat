@@ -1,7 +1,7 @@
 package repository
 
 const (
-	// luaSetVersionedGroupInfo 以“结构版本 + 投影版本”为栅栏原子写入 group:info。
+	// LuaSetVersionedGroupInfo 以“结构版本 + 投影版本”为栅栏原子写入 group:info。
 	//
 	// 返回值：
 	//   1  已写入；
@@ -12,7 +12,7 @@ const (
 	// ARGV[6] 只允许权威 MySQL 对账传 1：此时 incoming==current 也会重写，
 	// 用于修复“版本元数据仍在、业务值已损坏”的缓存。普通 Kafka 事件必须传 0，
 	// 保持同版本重放幂等，且绝不让相同版本的不同 payload 互相覆盖。
-	luaSetVersionedGroupInfo = `
+	LuaSetVersionedGroupInfo = `
 local key_type = redis.call('TYPE', KEYS[1])
 if type(key_type) == 'table' then key_type = key_type['ok'] end
 local incompatible = false
@@ -46,13 +46,13 @@ redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
 return 1
 `
 
-	// luaReplaceVersionedHash 用一段 Lua 原子完成 Hash 的版本判断、整表替换和 TTL。
+	// LuaReplaceVersionedHash 用一段 Lua 原子完成 Hash 的版本判断、整表替换和 TTL。
 	//
 	// ARGV 固定头部依次为 schema、version、ttl、emptyField、emptyValue，后续是
 	// field/value 成对列表。ARGV[6] 是“允许同版本权威修复”标记，业务字段从
 	// ARGV[7] 开始。循环 HSET 而不使用 unpack，避免大群成员数触发 Lua 参数栈上限。
 	// 旧 Hash 缺少当前 schema/version 时会被直接删除后按新格式重建。
-	luaReplaceVersionedHash = `
+	LuaReplaceVersionedHash = `
 local key_type = redis.call('TYPE', KEYS[1])
 if type(key_type) == 'table' then key_type = key_type['ok'] end
 if key_type ~= 'none' and key_type ~= 'hash' then
@@ -91,7 +91,7 @@ redis.call('EXPIRE', KEYS[1], ARGV[3])
 	return 1
 	`
 
-	// luaReadVersionedHashField 原子读取版本化 Hash 的元数据与一个业务 field。
+	// LuaReadVersionedHashField 原子读取版本化 Hash 的元数据与一个业务 field。
 	//
 	// 返回值：
 	//   {0}                 key 不存在；
@@ -101,7 +101,7 @@ redis.call('EXPIRE', KEYS[1], ARGV[3])
 	//
 	// Pipeline 不能保证 EXISTS/HGET/HGET 之间不插入另一客户端的 Lua 更新，因此权限
 	// 点查必须用一个脚本获取自洽快照。ARGV[4]=1 时顺便原子续期。
-	luaReadVersionedHashField = `
+	LuaReadVersionedHashField = `
 	local key_type = redis.call('TYPE', KEYS[1])
 	if type(key_type) == 'table' then key_type = key_type['ok'] end
 	if key_type == 'none' then return {0} end
@@ -138,11 +138,11 @@ redis.call('EXPIRE', KEYS[1], ARGV[3])
 	return {1, '1', version_raw, redis.call('HGET', KEYS[1], ARGV[2])}
 	`
 
-	// luaUpsertVersionedHash 只在完整 Hash 已存在时，原子覆盖一批 field。
+	// LuaUpsertVersionedHash 只在完整 Hash 已存在时，原子覆盖一批 field。
 	//
 	// 同一事件涉及两个成员（例如群主转让）时必须一次传入，不能循环执行两次：
 	// 第一次执行已经推进 key 版本，第二次会被当作重复事件拒绝。
-	luaUpsertVersionedHash = `
+	LuaUpsertVersionedHash = `
 	local key_type = redis.call('TYPE', KEYS[1])
 	if type(key_type) == 'table' then key_type = key_type['ok'] end
 if key_type == 'none' then return -1 end
@@ -179,11 +179,11 @@ redis.call('EXPIRE', KEYS[1], ARGV[3])
 return 1
 `
 
-	// luaRemoveVersionedHash 只在完整 Hash 已存在时，原子删除一批 field 并留下版本。
+	// LuaRemoveVersionedHash 只在完整 Hash 已存在时，原子删除一批 field 并留下版本。
 	//
 	// 即使业务 field 被删空，__VERSION__ 仍作为 tombstone 保留；这样旧的 add/upsert
 	// 事件无法在删除之后复活成员或待审批申请。
-	luaRemoveVersionedHash = `
+	LuaRemoveVersionedHash = `
 local key_type = redis.call('TYPE', KEYS[1])
 if type(key_type) == 'table' then key_type = key_type['ok'] end
 if key_type == 'none' then return -1 end
@@ -223,13 +223,13 @@ redis.call('EXPIRE', KEYS[1], ARGV[3])
 return 1
 `
 
-	// luaPatchVersionedUserGroup 原子更新用户群 ZSet 与逐群版本 Hash。
+	// LuaPatchVersionedUserGroup 原子更新用户群 ZSet 与逐群版本 Hash。
 	//
 	// 单条事件可以创建这两个 key 并留下版本 tombstone，但绝不写 __READY__；
 	// 因为一个群事件不能证明该用户的整个群列表已经完整。只有全量用户对账脚本
 	// 能设置 READY，读路径才会把这个 ZSet 当作命中。ARGV[7]=1 仅供权威群对账
 	// 在 incoming==current 时修复损坏的 ZSet；普通事件必须传 0。
-	luaPatchVersionedUserGroup = `
+	LuaPatchVersionedUserGroup = `
 local ztype = redis.call('TYPE', KEYS[1])
 local vtype = redis.call('TYPE', KEYS[2])
 if type(ztype) == 'table' then ztype = ztype['ok'] end
@@ -268,13 +268,13 @@ redis.call('EXPIRE', KEYS[2], ARGV[3])
 	return 1
 	`
 
-	// luaReadVersionedUserGroups 原子读取用户群 ZSet 与活跃群对应版本。
+	// LuaReadVersionedUserGroups 原子读取用户群 ZSet 与活跃群对应版本。
 	//
 	// 返回 {0} 表示 miss/局部集合尚未 READY，返回 {-1} 表示类型或当前严格结构非法且
 	// 已删除，成功时返回 {1, count, group_uuid, version, ...}。空集合哨兵的版本固定
 	// 返回 0。读取与版本校验在一个脚本中完成，避免 ZREVRANGE 和 HGETALL 之间插入
 	// member_added/member_removed，导致一次请求观察到半新半旧的反向索引。
-	luaReadVersionedUserGroups = `
+	LuaReadVersionedUserGroups = `
 	local ztype = redis.call('TYPE', KEYS[1])
 	local vtype = redis.call('TYPE', KEYS[2])
 	if type(ztype) == 'table' then ztype = ztype['ok'] end
@@ -324,12 +324,12 @@ redis.call('EXPIRE', KEYS[2], ARGV[3])
 	return result
 	`
 
-	// luaReconcileVersionedUserGroups 用数据库完整快照合并用户群反向索引。
+	// LuaReconcileVersionedUserGroups 用数据库完整快照合并用户群反向索引。
 	//
 	// ARGV 头部为 schema、ttl，之后每四项为 group_uuid、score、version、active。
 	// 对每个群独立比较版本，所以在 DB 快照与 Lua 执行之间到达的更新事件不会被
 	// 旧快照覆盖；最后才写 READY=1，使读路径不会观察到半完成的列表。
-	luaReconcileVersionedUserGroups = `
+	LuaReconcileVersionedUserGroups = `
 local ztype = redis.call('TYPE', KEYS[1])
 local vtype = redis.call('TYPE', KEYS[2])
 if type(ztype) == 'table' then ztype = ztype['ok'] end

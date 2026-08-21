@@ -1,4 +1,4 @@
-package repository
+package projection
 
 import (
 	"context"
@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/cachex"
 	"github.com/013677890/LCchat-Backend/pkg/groupevent"
-	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	miniredis "github.com/alicebob/miniredis/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -19,15 +20,15 @@ import (
 	"gorm.io/gorm"
 )
 
-func newProjectorTestRepository(t *testing.T) (*groupRepositoryImpl, *goredis.Client) {
+func newProjectorTestRepository(t *testing.T) (*Repository, *goredis.Client) {
 	t.Helper()
 	server := miniredis.RunT(t)
 	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	return &groupRepositoryImpl{redisClient: client}, client
+	return &Repository{redisClient: client}, client
 }
 
-func newProjectorReconcileTestRepository(t *testing.T) (*groupRepositoryImpl, *goredis.Client, *gorm.DB) {
+func newProjectorReconcileTestRepository(t *testing.T) (*Repository, *goredis.Client, *gorm.DB) {
 	t.Helper()
 	repo, client := newProjectorTestRepository(t)
 	dsn := fmt.Sprintf("file:group_cache_reconcile_%d?mode=memory&cache=shared", time.Now().UnixNano())
@@ -83,11 +84,11 @@ func readGroupInfoProjection(
 	t *testing.T,
 	client *goredis.Client,
 	groupUUID string,
-) (*groupInfoCacheEntry, int64) {
+) (*repository.GroupInfoCacheEntry, int64) {
 	t.Helper()
 	raw, err := client.Get(context.Background(), rediskey.GroupInfoKey(groupUUID)).Result()
 	require.NoError(t, err)
-	entry, version, empty, err := decodeGroupInfoCacheValue(raw)
+	entry, version, empty, err := repository.DecodeGroupInfoCacheValue(raw)
 	require.NoError(t, err)
 	require.False(t, empty)
 	return entry, version
@@ -97,9 +98,9 @@ func requireHashVersion(t *testing.T, client *goredis.Client, key string, versio
 	t.Helper()
 	values, err := client.HGetAll(context.Background(), key).Result()
 	require.NoError(t, err)
-	require.Equal(t, groupCacheSchemaVersion, values[groupProjectionSchemaField])
-	require.Equal(t, strconv.FormatInt(version, 10), values[groupProjectionVersionField])
-	require.Equal(t, "1", values[groupProjectionCompleteField])
+	require.Equal(t, repository.GroupCacheSchemaVersion, values[repository.GroupProjectionSchemaField])
+	require.Equal(t, strconv.FormatInt(version, 10), values[repository.GroupProjectionVersionField])
+	require.Equal(t, "1", values[repository.GroupProjectionCompleteField])
 	return values
 }
 
@@ -109,11 +110,11 @@ func TestApplyGroupCreatedBuildsStrictVersionedProjection(t *testing.T) {
 	payload := projectorPayload(
 		10,
 		groupevent.ActionGroupCreated,
-		projectorGroupSnapshot("group-1", "v10", 2, groupStatusNormal, now),
+		projectorGroupSnapshot("group-1", "v10", 2, repository.GroupStatusNormal, now),
 	)
 	payload.Members = []groupevent.GroupMemberSnapshot{
-		projectorMemberSnapshot("owner-1", memberRoleOwner, now),
-		projectorMemberSnapshot("member-1", memberRoleMember, now),
+		projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now),
+		projectorMemberSnapshot("member-1", repository.MemberRoleMember, now),
 	}
 	payload.UserUUIDs = []string{"owner-1", "member-1"}
 
@@ -134,7 +135,7 @@ func TestApplyGroupCreatedBuildsStrictVersionedProjection(t *testing.T) {
 		versions, err := client.HGetAll(context.Background(), rediskey.UserGroupVersionKey(userUUID)).Result()
 		require.NoError(t, err)
 		assert.Equal(t, "10", versions["group-1"])
-		assert.Empty(t, versions[userGroupsReadyField], "单条事件不能把局部反向索引标成完整列表")
+		assert.Empty(t, versions[repository.UserGroupsReadyField], "单条事件不能把局部反向索引标成完整列表")
 	}
 }
 
@@ -143,7 +144,7 @@ func TestProjectionRejectsOutOfOrderGroupInfo(t *testing.T) {
 	now := time.UnixMilli(1710001000123)
 
 	created := projectorPayload(10, groupevent.ActionGroupCreated, projectorGroupSnapshot("group-1", "v10", 1, 0, now))
-	created.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("owner-1", memberRoleOwner, now)}
+	created.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now)}
 	created.UserUUIDs = []string{"owner-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), created))
 
@@ -162,8 +163,8 @@ func TestOwnerTransferUpdatesTwoMembersInOneVersionedLua(t *testing.T) {
 	now := time.UnixMilli(1710002000123)
 	created := projectorPayload(1, groupevent.ActionGroupCreated, projectorGroupSnapshot("group-1", "group", 2, 0, now))
 	created.Members = []groupevent.GroupMemberSnapshot{
-		projectorMemberSnapshot("owner-1", memberRoleOwner, now),
-		projectorMemberSnapshot("member-1", memberRoleMember, now),
+		projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now),
+		projectorMemberSnapshot("member-1", repository.MemberRoleMember, now),
 	}
 	created.UserUUIDs = []string{"owner-1", "member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), created))
@@ -171,19 +172,19 @@ func TestOwnerTransferUpdatesTwoMembersInOneVersionedLua(t *testing.T) {
 	transfer := projectorPayload(2, groupevent.ActionOwnerTransferred, projectorGroupSnapshot("group-1", "group", 2, 0, now.Add(time.Second)))
 	transfer.Group.OwnerUUID = "member-1"
 	transfer.Members = []groupevent.GroupMemberSnapshot{
-		projectorMemberSnapshot("owner-1", memberRoleMember, now),
-		projectorMemberSnapshot("member-1", memberRoleOwner, now),
+		projectorMemberSnapshot("owner-1", repository.MemberRoleMember, now),
+		projectorMemberSnapshot("member-1", repository.MemberRoleOwner, now),
 	}
 	transfer.UserUUIDs = []string{"owner-1", "member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), transfer))
 
 	fields := requireHashVersion(t, client, rediskey.GroupMembersKey("group-1"), 2)
-	oldOwner, err := decodeGroupMemberCacheValue(fields["owner-1"])
+	oldOwner, err := repository.DecodeGroupMemberCacheValue(fields["owner-1"])
 	require.NoError(t, err)
-	newOwner, err := decodeGroupMemberCacheValue(fields["member-1"])
+	newOwner, err := repository.DecodeGroupMemberCacheValue(fields["member-1"])
 	require.NoError(t, err)
-	assert.Equal(t, int8(memberRoleMember), oldOwner.Role)
-	assert.Equal(t, int8(memberRoleOwner), newOwner.Role)
+	assert.Equal(t, int8(repository.MemberRoleMember), oldOwner.Role)
+	assert.Equal(t, int8(repository.MemberRoleOwner), newOwner.Role)
 }
 
 func TestRemovalTombstoneRejectsLateAdd(t *testing.T) {
@@ -191,8 +192,8 @@ func TestRemovalTombstoneRejectsLateAdd(t *testing.T) {
 	now := time.UnixMilli(1710003000123)
 	created := projectorPayload(5, groupevent.ActionGroupCreated, projectorGroupSnapshot("group-1", "group", 2, 0, now))
 	created.Members = []groupevent.GroupMemberSnapshot{
-		projectorMemberSnapshot("owner-1", memberRoleOwner, now),
-		projectorMemberSnapshot("member-1", memberRoleMember, now),
+		projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now),
+		projectorMemberSnapshot("member-1", repository.MemberRoleMember, now),
 	}
 	created.UserUUIDs = []string{"owner-1", "member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), created))
@@ -202,7 +203,7 @@ func TestRemovalTombstoneRejectsLateAdd(t *testing.T) {
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), removed))
 
 	lateAdd := projectorPayload(6, groupevent.ActionMemberAdded, projectorGroupSnapshot("group-1", "group", 2, 0, now.Add(time.Second)))
-	lateAdd.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("member-1", memberRoleMember, now)}
+	lateAdd.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("member-1", repository.MemberRoleMember, now)}
 	lateAdd.UserUUIDs = []string{"member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), lateAdd))
 
@@ -210,7 +211,7 @@ func TestRemovalTombstoneRejectsLateAdd(t *testing.T) {
 	assert.NotContains(t, fields, "member-1")
 	groups, err := client.ZRange(context.Background(), rediskey.UserGroupListKey("member-1"), 0, -1).Result()
 	require.NoError(t, err)
-	assert.Equal(t, []string{userGroupsEmptyValue}, groups)
+	assert.Equal(t, []string{repository.UserGroupsEmptyValue}, groups)
 	assert.Equal(
 		t,
 		"7",
@@ -244,35 +245,34 @@ func TestOldCacheFormatIsDeletedInsteadOfAdapted(t *testing.T) {
 
 	require.NoError(t, client.HSet(ctx, rediskey.GroupMembersKey("group-1"), "member-1", `{}`).Err())
 	roleUpdate := projectorPayload(3, groupevent.ActionMemberRoleUpdated, projectorGroupSnapshot("group-1", "new", 1, 0, now))
-	roleUpdate.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("member-1", memberRoleAdmin, now)}
+	roleUpdate.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("member-1", repository.MemberRoleAdmin, now)}
 	roleUpdate.UserUUIDs = []string{"member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(ctx, roleUpdate))
 	assert.Equal(t, int64(0), client.Exists(ctx, rediskey.GroupMembersKey("group-1")).Val())
 }
 
 func TestAtomicReadScriptsRejectIncompatibleCacheWithoutCompatibilityFallback(t *testing.T) {
-	repo, client := newProjectorTestRepository(t)
+	_, client := newProjectorTestRepository(t)
 	ctx := context.Background()
+	ttlSeconds := int(cachex.JitterTTL(rediskey.GroupMembersTTL).Seconds())
 
 	memberKey := rediskey.GroupMembersKey("group-1")
 	require.NoError(t, client.HSet(ctx, memberKey, map[string]string{
-		groupProjectionSchemaField:  "1",
-		groupProjectionVersionField: "8",
-		"user-1":                    `{"role":0,"joined_at_unix_ms":1710000000000}`,
+		repository.GroupProjectionSchemaField:  "1",
+		repository.GroupProjectionVersionField: "8",
+		"user-1":                               `{"role":0,"joined_at_unix_ms":1710000000000}`,
 	}).Err())
-	cacheHit, isMember, role, err := repo.checkGroupMemberFromCache(ctx, "group-1", "user-1")
+	_, _, cacheHit, err := repository.ReadVersionedHashField(ctx, client, memberKey, "user-1", ttlSeconds, false)
 	require.NoError(t, err)
 	assert.False(t, cacheHit)
-	assert.False(t, isMember)
-	assert.Equal(t, int8(-1), role)
 	assert.Equal(t, int64(0), client.Exists(ctx, memberKey).Val())
 
 	// 只有 schema/version 也不是当前格式；缺少 complete 凭证必须直接失效。
 	require.NoError(t, client.HSet(ctx, memberKey, map[string]string{
-		groupProjectionSchemaField:  groupCacheSchemaVersion,
-		groupProjectionVersionField: "8",
+		repository.GroupProjectionSchemaField:  repository.GroupCacheSchemaVersion,
+		repository.GroupProjectionVersionField: "8",
 	}).Err())
-	cacheHit, _, _, err = repo.checkGroupMemberFromCache(ctx, "group-1", "user-1")
+	_, _, cacheHit, err = repository.ReadVersionedHashField(ctx, client, memberKey, "user-1", ttlSeconds, false)
 	require.NoError(t, err)
 	assert.False(t, cacheHit)
 	assert.Equal(t, int64(0), client.Exists(ctx, memberKey).Val())
@@ -281,14 +281,14 @@ func TestAtomicReadScriptsRejectIncompatibleCacheWithoutCompatibilityFallback(t 
 	versionKey := rediskey.UserGroupVersionKey("user-1")
 	require.NoError(t, client.ZAdd(ctx, listKey, goredis.Z{Score: 1, Member: "group-1"}).Err())
 	require.NoError(t, client.HSet(ctx, versionKey, map[string]string{
-		groupProjectionSchemaField: "1",
-		userGroupsReadyField:       "1",
-		"group-1":                  "8",
+		repository.GroupProjectionSchemaField: "1",
+		repository.UserGroupsReadyField:       "1",
+		"group-1":                             "8",
 	}).Err())
-	groups, hit, err := repo.getUserGroupsFromCache(ctx, "user-1")
+	references, hit, err := repository.ReadVersionedUserGroups(ctx, client, "user-1", false)
 	require.NoError(t, err)
 	assert.False(t, hit)
-	assert.Nil(t, groups)
+	assert.Nil(t, references)
 	assert.Equal(t, int64(0), client.Exists(ctx, listKey, versionKey).Val())
 }
 
@@ -301,9 +301,9 @@ func TestIncrementalHashScriptsCannotPromoteMetadataOnlyCacheToCompleteState(t *
 	writeMetadataOnly := func() {
 		t.Helper()
 		require.NoError(t, client.HSet(ctx, memberKey, map[string]string{
-			groupProjectionSchemaField:   groupCacheSchemaVersion,
-			groupProjectionVersionField:  "8",
-			groupProjectionCompleteField: "1",
+			repository.GroupProjectionSchemaField:   repository.GroupCacheSchemaVersion,
+			repository.GroupProjectionVersionField:  "8",
+			repository.GroupProjectionCompleteField: "1",
 		}).Err())
 	}
 
@@ -314,7 +314,7 @@ func TestIncrementalHashScriptsCannotPromoteMetadataOnlyCacheToCompleteState(t *
 		[]*model.GroupMember{{
 			GroupUuid: "group-1",
 			UserUuid:  "user-1",
-			Role:      memberRoleMember,
+			Role:      repository.MemberRoleMember,
 			JoinedAt:  now,
 		}},
 		9,
@@ -337,7 +337,7 @@ func TestReconcileGroupCacheRepairsAllProjectionsFromDB(t *testing.T) {
 		Name:         "authoritative",
 		OwnerUuid:    "owner-1",
 		MemberCnt:    1,
-		Status:       groupStatusNormal,
+		Status:       repository.GroupStatusNormal,
 		CacheVersion: 9,
 		UpdatedAt:    now,
 	}
@@ -345,15 +345,15 @@ func TestReconcileGroupCacheRepairsAllProjectionsFromDB(t *testing.T) {
 	active := &model.GroupMember{
 		GroupUuid: "group-1",
 		UserUuid:  "owner-1",
-		Role:      memberRoleOwner,
-		Status:    memberStatusNormal,
+		Role:      repository.MemberRoleOwner,
+		Status:    repository.MemberStatusNormal,
 		JoinedAt:  now.Add(-time.Hour),
 	}
 	removed := &model.GroupMember{
 		GroupUuid: "group-1",
 		UserUuid:  "removed-1",
-		Role:      memberRoleMember,
-		Status:    memberStatusKicked,
+		Role:      repository.MemberRoleMember,
+		Status:    repository.MemberStatusKicked,
 		JoinedAt:  now.Add(-time.Hour),
 	}
 	require.NoError(t, db.Create(active).Error)
@@ -362,13 +362,13 @@ func TestReconcileGroupCacheRepairsAllProjectionsFromDB(t *testing.T) {
 	require.NoError(t, db.Create(&model.GroupJoinRequest{
 		GroupUuid:     "group-1",
 		ApplicantUuid: "pending-1",
-		Status:        joinRequestStatusPending,
+		Status:        repository.JoinRequestStatusPending,
 		CreatedAt:     now,
 	}).Error)
 	require.NoError(t, db.Create(&model.GroupJoinRequest{
 		GroupUuid:     "group-1",
 		ApplicantUuid: "reviewed-1",
-		Status:        joinRequestStatusApproved,
+		Status:        repository.JoinRequestStatusApproved,
 		CreatedAt:     now,
 	}).Error)
 
@@ -379,8 +379,8 @@ func TestReconcileGroupCacheRepairsAllProjectionsFromDB(t *testing.T) {
 			Member: "group-1",
 		}).Err())
 		require.NoError(t, client.HSet(ctx, rediskey.UserGroupVersionKey(userUUID), map[string]string{
-			groupProjectionSchemaField: groupCacheSchemaVersion,
-			userGroupsReadyField:       "1",
+			repository.GroupProjectionSchemaField: repository.GroupCacheSchemaVersion,
+			repository.UserGroupsReadyField:       "1",
 			"group-1":                  "3",
 		}).Err())
 	}
@@ -399,7 +399,7 @@ func TestReconcileGroupCacheRepairsAllProjectionsFromDB(t *testing.T) {
 	assert.Len(t, requestFields, 4, "schema、version、complete 和唯一 pending 申请")
 
 	assert.Equal(t, []string{"group-1"}, client.ZRange(ctx, rediskey.UserGroupListKey("owner-1"), 0, -1).Val())
-	assert.Equal(t, []string{userGroupsEmptyValue}, client.ZRange(ctx, rediskey.UserGroupListKey("removed-1"), 0, -1).Val())
+	assert.Equal(t, []string{repository.UserGroupsEmptyValue}, client.ZRange(ctx, rediskey.UserGroupListKey("removed-1"), 0, -1).Val())
 	assert.Equal(t, "9", client.HGet(ctx, rediskey.UserGroupVersionKey("removed-1"), "group-1").Val())
 }
 
@@ -412,7 +412,7 @@ func TestReconcileSoftDeletedGroupPublishesUnavailableTombstones(t *testing.T) {
 		Name:         "must-not-resurrect",
 		OwnerUuid:    "owner-1",
 		MemberCnt:    1,
-		Status:       groupStatusNormal,
+		Status:       repository.GroupStatusNormal,
 		CacheVersion: 6,
 		UpdatedAt:    now,
 		DeletedAt:    gorm.DeletedAt{Time: now, Valid: true},
@@ -421,8 +421,8 @@ func TestReconcileSoftDeletedGroupPublishesUnavailableTombstones(t *testing.T) {
 	require.NoError(t, db.Create(&model.GroupMember{
 		GroupUuid: group.Uuid,
 		UserUuid:  "owner-1",
-		Role:      memberRoleOwner,
-		Status:    memberStatusNormal,
+		Role:      repository.MemberRoleOwner,
+		Status:    repository.MemberStatusNormal,
 		JoinedAt:  now.Add(-time.Hour),
 	}).Error)
 
@@ -430,16 +430,16 @@ func TestReconcileSoftDeletedGroupPublishesUnavailableTombstones(t *testing.T) {
 
 	info, version := readGroupInfoProjection(t, client, group.Uuid)
 	assert.Equal(t, int64(6), version)
-	assert.Equal(t, groupStatusDismissed, info.Status,
+	assert.Equal(t, repository.GroupStatusDismissed, info.Status,
 		"软删除行必须投影为正版本终态，不能因 DB status=0 复活成正常群")
 	memberFields := requireHashVersion(t, client, rediskey.GroupMembersKey(group.Uuid), 6)
-	assert.Equal(t, groupMembersEmptyValue, memberFields[groupMembersEmptyField])
+	assert.Equal(t, repository.GroupMembersEmptyValue, memberFields[repository.GroupMembersEmptyField])
 
-	_, err := repo.GetGroupInfo(ctx, group.Uuid)
-	assert.ErrorIs(t, err, repoerr.ErrRecordNotFound)
-	_, err = repo.GetGroupMembers(ctx, group.Uuid)
-	assert.ErrorIs(t, err, ErrGroupDismissed,
-		"有效空成员 tombstone 不能把不可用群降级成成功空列表")
+	// 读路径约定：解散终态对 GetGroupInfo 映射为不存在，对 GetGroupMembers 映射为群已解散。
+	// 这里只断言投影内容，避免 projection 测试 import cache 造成 import cycle。
+	restored := repository.BuildGroupInfoFromCache(info, version)
+	require.NotNil(t, restored)
+	assert.Equal(t, repository.GroupStatusDismissed, restored.Status)
 }
 
 func TestReconcileGroupCacheRepairsCorruptionAtEqualVersion(t *testing.T) {
@@ -451,7 +451,7 @@ func TestReconcileGroupCacheRepairsCorruptionAtEqualVersion(t *testing.T) {
 		Name:         "authoritative",
 		OwnerUuid:    "owner-equal",
 		MemberCnt:    1,
-		Status:       groupStatusNormal,
+		Status:       repository.GroupStatusNormal,
 		CacheVersion: 9,
 		UpdatedAt:    now,
 	}
@@ -459,15 +459,15 @@ func TestReconcileGroupCacheRepairsCorruptionAtEqualVersion(t *testing.T) {
 	owner := &model.GroupMember{
 		GroupUuid: "group-equal",
 		UserUuid:  "owner-equal",
-		Role:      memberRoleOwner,
-		Status:    memberStatusNormal,
+		Role:      repository.MemberRoleOwner,
+		Status:    repository.MemberStatusNormal,
 		JoinedAt:  now.Add(-time.Hour),
 	}
 	require.NoError(t, db.Create(owner).Error)
 	request := &model.GroupJoinRequest{
 		GroupUuid:     "group-equal",
 		ApplicantUuid: "pending-equal",
-		Status:        joinRequestStatusPending,
+		Status:        repository.JoinRequestStatusPending,
 		CreatedAt:     now,
 	}
 	require.NoError(t, db.Create(request).Error)
@@ -483,7 +483,7 @@ func TestReconcileGroupCacheRepairsCorruptionAtEqualVersion(t *testing.T) {
 		groupInfoCreateIfMissing,
 	))
 	corruptMember := *owner
-	corruptMember.Role = memberRoleMember
+	corruptMember.Role = repository.MemberRoleMember
 	require.NoError(t, repo.replaceGroupMembersProjection(
 		ctx,
 		group.Uuid,
@@ -512,9 +512,9 @@ func TestReconcileGroupCacheRepairsCorruptionAtEqualVersion(t *testing.T) {
 	assert.Equal(t, group.Name, info.Name)
 
 	memberFields := requireHashVersion(t, client, rediskey.GroupMembersKey(group.Uuid), 9)
-	memberEntry, err := decodeGroupMemberCacheValue(memberFields[owner.UserUuid])
+	memberEntry, err := repository.DecodeGroupMemberCacheValue(memberFields[owner.UserUuid])
 	require.NoError(t, err)
-	assert.Equal(t, memberRoleOwner, memberEntry.Role)
+	assert.Equal(t, repository.MemberRoleOwner, memberEntry.Role)
 
 	requestFields := requireHashVersion(t, client, rediskey.GroupJoinRequestPendingKey(group.Uuid), 9)
 	assert.Contains(t, requestFields, strconv.FormatInt(request.Id, 10))
@@ -530,7 +530,7 @@ func TestReconcileUserGroupsRemovesEqualVersionStrayGroup(t *testing.T) {
 		Uuid:         "stray-group",
 		Name:         "group",
 		OwnerUuid:    "owner-1",
-		Status:       groupStatusNormal,
+		Status:       repository.GroupStatusNormal,
 		CacheVersion: 5,
 		UpdatedAt:    now,
 	}
@@ -542,14 +542,14 @@ func TestReconcileUserGroupsRemovesEqualVersionStrayGroup(t *testing.T) {
 		Member: group.Uuid,
 	}).Err())
 	require.NoError(t, client.HSet(ctx, rediskey.UserGroupVersionKey("user-1"), map[string]string{
-		groupProjectionSchemaField: groupCacheSchemaVersion,
-		userGroupsReadyField:       "1",
+		repository.GroupProjectionSchemaField: repository.GroupCacheSchemaVersion,
+		repository.UserGroupsReadyField:       "1",
 		group.Uuid:                 "5",
 	}).Err())
 
 	require.NoError(t, repo.ReconcileUserGroupsCache(ctx, "user-1"))
 
-	assert.Equal(t, []string{userGroupsEmptyValue}, client.ZRange(
+	assert.Equal(t, []string{repository.UserGroupsEmptyValue}, client.ZRange(
 		ctx,
 		rediskey.UserGroupListKey("user-1"),
 		0,
@@ -557,7 +557,7 @@ func TestReconcileUserGroupsRemovesEqualVersionStrayGroup(t *testing.T) {
 	).Val())
 	versions := client.HGetAll(ctx, rediskey.UserGroupVersionKey("user-1")).Val()
 	assert.Equal(t, "5", versions[group.Uuid])
-	assert.Equal(t, "1", versions[userGroupsReadyField])
+	assert.Equal(t, "1", versions[repository.UserGroupsReadyField])
 }
 
 func TestUserGroupCacheHitReconcileLeaseIsBoundedPerUser(t *testing.T) {
@@ -585,7 +585,7 @@ func TestListUserGroupsReadyHitMakesStrayGroupRepairReachable(t *testing.T) {
 		Uuid:         "stray-on-hit",
 		Name:         "group",
 		OwnerUuid:    "owner-1",
-		Status:       groupStatusNormal,
+		Status:       repository.GroupStatusNormal,
 		CacheVersion: 5,
 		UpdatedAt:    now,
 	}
@@ -603,10 +603,12 @@ func TestListUserGroupsReadyHitMakesStrayGroupRepairReachable(t *testing.T) {
 		active: true,
 	}}))
 
-	groups, err := repo.ListUserGroups(ctx, "user-1")
+	references, hit, err := repository.ReadVersionedUserGroups(ctx, client, "user-1", false)
 	require.NoError(t, err)
-	require.Len(t, groups, 1)
-	assert.Equal(t, group.Uuid, groups[0].Uuid)
+	require.True(t, hit)
+	require.Len(t, references, 1)
+	assert.Equal(t, group.Uuid, references[0].GroupUUID)
+	repo.ScheduleUserGroupsCacheAuditAfterHit(ctx, "user-1")
 	assert.Equal(t, "1", client.Get(
 		ctx,
 		rediskey.UserGroupReconcileLeaseKey("user-1"),
@@ -621,7 +623,7 @@ func TestLoadUserGroupReconcileTargetsLocksGroupsBeforeAuthoritativeMembershipRe
 		Uuid:         "locked-group",
 		Name:         "group",
 		OwnerUuid:    "user-1",
-		Status:       groupStatusNormal,
+		Status:       repository.GroupStatusNormal,
 		CacheVersion: 7,
 		UpdatedAt:    now,
 	}
@@ -629,8 +631,8 @@ func TestLoadUserGroupReconcileTargetsLocksGroupsBeforeAuthoritativeMembershipRe
 	require.NoError(t, db.Create(&model.GroupMember{
 		GroupUuid: group.Uuid,
 		UserUuid:  "user-1",
-		Role:      memberRoleOwner,
-		Status:    memberStatusNormal,
+		Role:      repository.MemberRoleOwner,
+		Status:    repository.MemberStatusNormal,
 		JoinedAt:  now,
 	}).Error)
 
@@ -675,16 +677,16 @@ func TestUserReadReconcileCannotUndoNewerRemoval(t *testing.T) {
 		active: true,
 	}}))
 
-	assert.Equal(t, []string{userGroupsEmptyValue}, client.ZRange(ctx, rediskey.UserGroupListKey("user-1"), 0, -1).Val())
+	assert.Equal(t, []string{repository.UserGroupsEmptyValue}, client.ZRange(ctx, rediskey.UserGroupListKey("user-1"), 0, -1).Val())
 	versions := client.HGetAll(ctx, rediskey.UserGroupVersionKey("user-1")).Val()
 	assert.Equal(t, "12", versions["group-1"])
-	assert.Equal(t, "1", versions[userGroupsReadyField])
+	assert.Equal(t, "1", versions[repository.UserGroupsReadyField])
 }
 
 func TestValidateGroupCachePayloadRejectsCompatibilityFallbacks(t *testing.T) {
 	now := time.UnixMilli(1710008000123)
 	valid := projectorPayload(1, groupevent.ActionMemberAdded, projectorGroupSnapshot("group-1", "group", 1, 0, now))
-	valid.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("user-1", memberRoleMember, now)}
+	valid.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("user-1", repository.MemberRoleMember, now)}
 	valid.UserUUIDs = []string{"user-1"}
 	require.NoError(t, validateGroupCacheEventPayload(valid))
 
@@ -704,7 +706,7 @@ func TestValidateGroupCachePayloadRejectsCompatibilityFallbacks(t *testing.T) {
 	dismissedWithNormalStatus := projectorPayload(
 		2,
 		groupevent.ActionGroupDismissed,
-		projectorGroupSnapshot("group-1", "group", 1, groupStatusNormal, now),
+		projectorGroupSnapshot("group-1", "group", 1, repository.GroupStatusNormal, now),
 	)
 	dismissedWithNormalStatus.UserUUIDs = []string{"user-1"}
 	assert.Error(t, validateGroupCacheEventPayload(dismissedWithNormalStatus),
@@ -713,12 +715,12 @@ func TestValidateGroupCachePayloadRejectsCompatibilityFallbacks(t *testing.T) {
 	invalidTransfer := projectorPayload(
 		3,
 		groupevent.ActionOwnerTransferred,
-		projectorGroupSnapshot("group-1", "group", 2, groupStatusNormal, now),
+		projectorGroupSnapshot("group-1", "group", 2, repository.GroupStatusNormal, now),
 	)
 	invalidTransfer.Group.OwnerUUID = "new-owner"
 	invalidTransfer.Members = []groupevent.GroupMemberSnapshot{
-		projectorMemberSnapshot("old-owner", memberRoleAdmin, now),
-		projectorMemberSnapshot("new-owner", memberRoleOwner, now),
+		projectorMemberSnapshot("old-owner", repository.MemberRoleAdmin, now),
+		projectorMemberSnapshot("new-owner", repository.MemberRoleOwner, now),
 	}
 	invalidTransfer.UserUUIDs = []string{"old-owner", "new-owner"}
 	assert.Error(t, validateGroupCacheEventPayload(invalidTransfer),

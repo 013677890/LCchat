@@ -8,7 +8,10 @@ package main
 
 import (
 	"github.com/013677890/LCchat-Backend/apps/group/internal/handler"
-	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository/cache"
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository/compose"
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository/projection"
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository/store"
 )
 
 // Injectors from wire.go:
@@ -36,10 +39,13 @@ func initializeGroupApp() (*GroupApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	iGroupRepository := repository.NewGroupRepository(db, client)
+	storeStore := store.New(db, client)
+	repository := projection.New(db, client)
+	reader := cache.NewWithProjector(client, storeStore, repository)
+	facade := compose.New(storeStore, reader)
 	kafkaConfig := provideGroupKafkaConfig()
 	producer := provideGroupRealtimePushProducer(kafkaConfig)
-	iGroupService := provideGroupService(iGroupRepository, producer)
+	iGroupService := provideGroupService(facade, producer)
 	groupHandler := handler.NewGroupHandler(iGroupService)
 	registrationFunc := provideGroupRegistration(groupHandler)
 	builtServer, err := provideGroupGRPCServer(registrationFunc)
@@ -62,8 +68,7 @@ func initializeGroupApp() (*GroupApp, error) {
 		return nil, err
 	}
 	mainGroupAsyncReleaseTimeout := provideGroupAsyncReleaseTimeout(asyncConfig)
-	iGroupCacheProjectorRepository := repository.NewGroupCacheProjectorRepository(db, client)
-	cacheProjector, err := provideGroupCacheProjector(kafkaConfig, iGroupCacheProjectorRepository, db)
+	cacheProjector, err := provideGroupCacheProjector(kafkaConfig, repository, db)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +76,7 @@ func initializeGroupApp() (*GroupApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	cacheReconciler, err := provideGroupCacheReconciler(iGroupCacheProjectorRepository, cacheReconcilerConfig)
+	cacheReconciler, err := provideGroupCacheReconciler(repository, cacheReconcilerConfig)
 	if err != nil {
 		return nil, err
 	}

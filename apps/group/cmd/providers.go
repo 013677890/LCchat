@@ -12,6 +12,10 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/group/internal/consumer"
 	"github.com/013677890/LCchat-Backend/apps/group/internal/handler"
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository/cache"
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository/compose"
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository/projection"
+	"github.com/013677890/LCchat-Backend/apps/group/internal/repository/store"
 	"github.com/013677890/LCchat-Backend/apps/group/internal/service"
 	grouppb "github.com/013677890/LCchat-Backend/apps/group/pb"
 	"github.com/013677890/LCchat-Backend/config"
@@ -241,10 +245,16 @@ var groupInfraProviderSet = wire.NewSet(
 	provideGroupGRPCListener,
 )
 
-// group-service 当前只有一个聚合仓储，占位承接未来的群资料、成员、审批等持久化能力。
+// groupRepositoryProviderSet 装配 store + cache + projection，再由 compose 组合成 service 门面。
+//
+// 这里必须把投影仓储绑到父包接口，才能让 consumer 继续只依赖 IGroupCacheProjectorRepository。
 var groupRepositoryProviderSet = wire.NewSet(
-	repository.NewGroupRepository,
-	repository.NewGroupCacheProjectorRepository,
+	store.New,
+	projection.New,
+	cache.NewWithProjector,
+	compose.New,
+	wire.Bind(new(repository.IGroupRepository), new(*compose.Facade)),
+	wire.Bind(new(repository.IGroupCacheProjectorRepository), new(*projection.Repository)),
 )
 
 // service / handler 先只保留单一入口，后续若群审批、群角色拆成独立 service，
