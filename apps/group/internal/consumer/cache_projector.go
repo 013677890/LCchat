@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"gorm.io/gorm"
 )
 
-const groupCacheProjectorIdempotentEventType = groupevent.EventTypeGroupCache + ":group-cache-projector"
+const groupCacheProjectorIdempotentEventType = event.EventTypeGroupCache + ":group-cache-projector"
 
 // CacheProjector 负责消费 group.cache 事件并把最终事实投影到 Redis。
 //
@@ -111,7 +111,7 @@ func (c *CacheProjector) WorkerCount() int {
 // handle 可被多个 worker 并发调用，但同一 group_uuid 的事件不会并发进入
 // （Kafka key + partition 内串行保证）。GORM/Redis 客户端线程安全，可共享。
 func (c *CacheProjector) handle(ctx context.Context, message []byte) error {
-	payload, err := groupevent.DecodeGroupCache(message)
+	payload, err := event.DecodeGroupCache(message)
 	if err != nil {
 		return kafka.Permanent(fmt.Errorf("解析 group.cache 严格事件失败: %w", err))
 	}

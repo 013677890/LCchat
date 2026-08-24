@@ -7,7 +7,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -112,9 +112,9 @@ func TestInsertGroupCacheEventAllocatesVersionPerEventInTransaction(t *testing.T
 
 	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
 		for index := int64(1); index <= 2; index++ {
-			payload := groupevent.GroupCacheEventPayload{
+			payload := event.GroupCacheEventPayload{
 				EventID:   "event-" + time.Unix(index, 0).Format("150405"),
-				Action:    groupevent.ActionGroupInfoUpdated,
+				Action:    event.ActionGroupInfoUpdated,
 				GroupUUID: group.Uuid,
 				Group:     buildGroupSnapshot(group),
 			}
@@ -132,11 +132,11 @@ func TestInsertGroupCacheEventAllocatesVersionPerEventInTransaction(t *testing.T
 	var events []outbox.Event
 	require.NoError(t, db.Order("id ASC").Find(&events).Error)
 	require.Len(t, events, 2)
-	for index, event := range events {
-		payload, decodeErr := groupevent.DecodeGroupCache([]byte(event.Payload))
+	for index, outboxEvent := range events {
+		payload, decodeErr := event.DecodeGroupCache([]byte(outboxEvent.Payload))
 		require.NoError(t, decodeErr)
 		assert.Equal(t, int64(index+1), payload.ProjectionVersion)
-		assert.Equal(t, groupevent.GroupCacheSchemaVersion, payload.SchemaVersion)
+		assert.Equal(t, event.GroupCacheSchemaVersion, payload.SchemaVersion)
 	}
 }
 
@@ -156,9 +156,9 @@ func TestInsertGroupCacheEventRollsBackVersionWithOutbox(t *testing.T) {
 	rollbackErr := errors.New("force rollback")
 
 	err = db.Transaction(func(tx *gorm.DB) error {
-		require.NoError(t, mysqlStore.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
+		require.NoError(t, mysqlStore.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
 			EventID:   "event-rollback",
-			Action:    groupevent.ActionGroupInfoUpdated,
+			Action:    event.ActionGroupInfoUpdated,
 			GroupUUID: group.Uuid,
 			Group:     buildGroupSnapshot(group),
 		}))

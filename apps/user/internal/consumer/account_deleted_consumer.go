@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
-	"github.com/013677890/LCchat-Backend/pkg/accountevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"gorm.io/gorm"
 )
 
-const userAccountDeletedIdempotentEventType = accountevent.EventTypeAccountDeleted + ":user-service"
+const userAccountDeletedIdempotentEventType = event.EventTypeAccountDeleted + ":user-service"
 
 // AccountDeletedConsumer 消费 account.deleted 并执行 user-service 侧清理。
 // 使用 ManualConsumerPool；与 auth/relation 的同名 topic 使用不同 consumer group，互不抢消息。
@@ -67,7 +67,7 @@ func (c *AccountDeletedConsumer) Close() error {
 // handle 解码并幂等清理 user 域账号资料。
 // 契约错误进入 dead_events；数据库错误可重试；成功后才推进 offset。
 func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) error {
-	payload, err := accountevent.DecodeAccountDeleted(message)
+	payload, err := event.DecodeAccountDeleted(message)
 	if err != nil {
 		return kafka.Permanent(fmt.Errorf("解析 account.deleted 事件失败: %w", err))
 	}

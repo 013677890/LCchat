@@ -8,7 +8,7 @@ import (
 
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -53,7 +53,7 @@ func TestRepositoryUpdateStatusWithOutbox_OutboxFailureRollsBackMessage(t *testi
 
 	repo := &repositoryImpl{db: db}
 	err := repo.UpdateStatusWithOutbox(context.Background(), "conv-1", "msg-1", 1, `{"text":"recalled"}`, OutboxEvent{
-		EventType: msgevent.EventTypeMsgPush,
+		EventType: event.EventTypeMsgPush,
 		EntityID:  "conv-1",
 		Payload:   `{"event_id":"evt-1"}`,
 	})

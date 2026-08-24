@@ -10,9 +10,9 @@ import (
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
@@ -129,7 +129,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 
 	// 注册成功后需要异步打通资料初始化闭环，因此在同一事务里写入 user_created outbox 事件。
 	eventID := util.GenIDString()
-	payload, err := accountevent.Encode(accountevent.UserCreatedPayload{
+	payload, err := event.Encode(event.UserCreatedPayload{
 		EventID:  eventID,
 		UserUUID: user.UserUuid,
 		Nickname: user.LoginNickname,
@@ -141,7 +141,7 @@ func (s *authServiceImpl) Register(ctx context.Context, req *authpb.RegisterRequ
 	}
 
 	// 把 user_account 与 user_created 事件放进同一事务，确保资料初始化链路有可靠事实来源。
-	createdUser, err := s.authRepo.CreateWithOutboxEvent(ctx, user, accountevent.EventTypeUserCreated, payload)
+	createdUser, err := s.authRepo.CreateWithOutboxEvent(ctx, user, event.EventTypeUserCreated, payload)
 	if err != nil {
 		if errors.Is(err, repoerr.ErrDuplicateKey) {
 			return nil, apperr.New(consts.CodeUserAlreadyExist)

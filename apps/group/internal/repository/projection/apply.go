@@ -6,7 +6,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 )
 
 // ApplyGroupCacheEvent 根据 group.cache 事件把最终事实投影到 Redis。
@@ -17,36 +17,36 @@ import (
 //  3. group_created 可以首次完整创建缓存，普通增量事件只 patch 已存在的群维度缓存；
 //  4. 用户群反向索引会留下逐群版本 tombstone，但只有完整对账才能写 READY；
 //  5. 任意 Redis 可重试错误直接返回，由 Kafka 手动提交模式负责重试。
-func (r *Repository) ApplyGroupCacheEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) ApplyGroupCacheEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	if err := validateGroupCacheEventPayload(payload); err != nil {
 		return err
 	}
 	switch payload.Action {
-	case groupevent.ActionGroupCreated:
+	case event.ActionGroupCreated:
 		return r.applyGroupCreatedEvent(ctx, payload)
-	case groupevent.ActionMemberAdded:
+	case event.ActionMemberAdded:
 		return r.applyMemberAddedEvent(ctx, payload)
-	case groupevent.ActionMemberRemoved:
+	case event.ActionMemberRemoved:
 		return r.applyMemberRemovedEvent(ctx, payload)
-	case groupevent.ActionGroupDismissed:
+	case event.ActionGroupDismissed:
 		return r.applyGroupDismissedEvent(ctx, payload)
-	case groupevent.ActionGroupInfoUpdated:
+	case event.ActionGroupInfoUpdated:
 		return r.applyGroupInfoUpdatedEvent(ctx, payload)
-	case groupevent.ActionGroupMuteSettingUpdated:
+	case event.ActionGroupMuteSettingUpdated:
 		return r.applyGroupMuteSettingUpdatedEvent(ctx, payload)
-	case groupevent.ActionOwnerTransferred:
+	case event.ActionOwnerTransferred:
 		return r.applyOwnerTransferredEvent(ctx, payload)
-	case groupevent.ActionMemberRoleUpdated:
+	case event.ActionMemberRoleUpdated:
 		return r.applyMemberRoleUpdatedEvent(ctx, payload)
-	case groupevent.ActionMemberProfileUpdated:
+	case event.ActionMemberProfileUpdated:
 		return r.applyMemberProfileUpdatedEvent(ctx, payload)
-	case groupevent.ActionMemberMuted:
+	case event.ActionMemberMuted:
 		return r.applyMemberMutedEvent(ctx, payload)
-	case groupevent.ActionJoinRequestCreated:
+	case event.ActionJoinRequestCreated:
 		return r.applyJoinRequestCreatedEvent(ctx, payload)
-	case groupevent.ActionJoinRequestReviewed:
+	case event.ActionJoinRequestReviewed:
 		return r.applyJoinRequestReviewedEvent(ctx, payload)
-	case groupevent.ActionJoinRequestCanceled:
+	case event.ActionJoinRequestCanceled:
 		return r.applyJoinRequestReviewedEvent(ctx, payload)
 	default:
 		return fmt.Errorf("%w: unsupported action %s", repository.ErrInvalidProjectorPayload, payload.Action)
@@ -54,9 +54,9 @@ func (r *Repository) ApplyGroupCacheEvent(ctx context.Context, payload groupeven
 }
 
 // validateGroupCacheEventPayload 把共享的 group.cache v2 契约错误映射为 group projector
-// 的永久错误类型。严格语义集中在 pkg/groupevent，禁止 group 与 msg 各自维护一套规则。
-func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) error {
-	if err := groupevent.ValidateGroupCachePayload(payload); err != nil {
+// 的永久错误类型。严格语义集中在 pkg/event，禁止 group 与 msg 各自维护一套规则。
+func validateGroupCacheEventPayload(payload event.GroupCacheEventPayload) error {
+	if err := event.ValidateGroupCachePayload(payload); err != nil {
 		return fmt.Errorf("%w: %w", repository.ErrInvalidProjectorPayload, err)
 	}
 	return nil
@@ -68,7 +68,7 @@ func validateGroupCacheEventPayload(payload groupevent.GroupCacheEventPayload) e
 //  1. group_created 自带完整群快照和首批成员快照；
 //  2. 首次建缓存比增量 patch 更稳定；
 //  3. user_groups 会创建逐群版本 tombstone，但不写 READY，避免局部事件伪装成完整列表。
-func (r *Repository) applyGroupCreatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyGroupCreatedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	group := repository.BuildGroupInfoFromSnapshot(payload.Group)
 	// projector 消费到 group_created 时 DB 事实已经存在，这里只做 Bloom 自愈补写；
 	// 失败不能阻断主缓存投影，否则会影响 group:info/group:members 的正常重建。
@@ -100,7 +100,7 @@ func (r *Repository) applyGroupCreatedEvent(ctx context.Context, payload groupev
 //  1. 事件里已经携带最终成员快照；
 //  2. 恢复成员和新增成员都可以安全落成“当前最新字段值”；
 //  3. key 不存在时脚本会自动跳过，仍由读路径负责全量重建。
-func (r *Repository) applyMemberAddedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyMemberAddedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	group := repository.BuildGroupInfoFromSnapshot(payload.Group)
 	if err := r.setVersionedGroupInfoProjection(
 		ctx,
@@ -127,7 +127,7 @@ func (r *Repository) applyMemberAddedEvent(ctx context.Context, payload groupeve
 //  1. 群资料里的 member_count；
 //  2. 群成员 Hash 中的单个成员 field；
 //  3. 目标用户的 user_groups 反向索引。
-func (r *Repository) applyMemberRemovedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyMemberRemovedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	group := repository.BuildGroupInfoFromSnapshot(payload.Group)
 	if err := r.setVersionedGroupInfoProjection(
 		ctx,
@@ -161,7 +161,7 @@ func (r *Repository) applyMemberRemovedEvent(ctx context.Context, payload groupe
 //  1. `group:info` 若存在则补成 status=2；
 //  2. `group:members` 原子替换为带删除版本的空 Hash，拒绝旧 member_added 复活成员；
 //  3. 每个活跃成员的 user_groups 写入逐群删除 tombstone。
-func (r *Repository) applyGroupDismissedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyGroupDismissedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	group := repository.BuildGroupInfoFromSnapshot(payload.Group)
 	if err := r.setVersionedGroupInfoProjection(
 		ctx,
@@ -187,7 +187,7 @@ func (r *Repository) applyGroupDismissedEvent(ctx context.Context, payload group
 //
 // 第二批资料更新只改 `group:info` 主缓存，不主动触碰 members / user_groups，
 // 因为成员结构与反向索引都不依赖 notice / add_mode 这些资料字段。
-func (r *Repository) applyGroupInfoUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyGroupInfoUpdatedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	return r.setVersionedGroupInfoProjection(
 		ctx,
 		repository.BuildGroupInfoFromSnapshot(payload.Group),
@@ -200,7 +200,7 @@ func (r *Repository) applyGroupInfoUpdatedEvent(ctx context.Context, payload gro
 //
 // 全员禁言只影响群级发送策略，因此这里只刷新 group:info；
 // 成员角色和单人禁言仍保留在 group:members，由发送权限检查组合判断。
-func (r *Repository) applyGroupMuteSettingUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyGroupMuteSettingUpdatedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	return r.setVersionedGroupInfoProjection(
 		ctx,
 		repository.BuildGroupInfoFromSnapshot(payload.Group),
@@ -214,7 +214,7 @@ func (r *Repository) applyGroupMuteSettingUpdatedEvent(ctx context.Context, payl
 // 该事件需要同步两类缓存：
 //  1. `group:info` 里的 owner_uuid；
 //  2. `group:members` 中老群主和新群主的 role。
-func (r *Repository) applyOwnerTransferredEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyOwnerTransferredEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	if err := r.setVersionedGroupInfoProjection(
 		ctx,
 		repository.BuildGroupInfoFromSnapshot(payload.Group),
@@ -235,7 +235,7 @@ func (r *Repository) applyOwnerTransferredEvent(ctx context.Context, payload gro
 //
 // 角色变更不会改变成员集合和 user_groups 反向索引，
 // 因此这里只 patch 群资料主缓存与目标成员 role 字段。
-func (r *Repository) applyMemberRoleUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyMemberRoleUpdatedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	if err := r.setVersionedGroupInfoProjection(
 		ctx,
 		repository.BuildGroupInfoFromSnapshot(payload.Group),
@@ -255,14 +255,14 @@ func (r *Repository) applyMemberRoleUpdatedEvent(ctx context.Context, payload gr
 // applyMemberProfileUpdatedEvent 处理成员群名片变更后的缓存投影。
 //
 // 该事件与角色更新一样只 patch 受影响成员字段，避免为了单个群名片更新重建整个成员 Hash。
-func (r *Repository) applyMemberProfileUpdatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyMemberProfileUpdatedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	return r.applyMemberRoleUpdatedEvent(ctx, payload)
 }
 
 // applyMemberMutedEvent 处理成员单人禁言变更后的缓存投影。
 //
 // 单人禁言是成员维度权限事实，复用成员 patch 逻辑即可同步 mute_until 到 Redis。
-func (r *Repository) applyMemberMutedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyMemberMutedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	return r.applyMemberRoleUpdatedEvent(ctx, payload)
 }
 
@@ -272,7 +272,7 @@ func (r *Repository) applyMemberMutedEvent(ctx context.Context, payload groupeve
 //  1. 缓存已存在时增量写入单条申请；
 //  2. 缓存不存在时直接跳过，继续由读路径负责全量重建；
 //  3. 申请展示资料仍由上层聚合 user_profile，不在这里冗余缓存。
-func (r *Repository) applyJoinRequestCreatedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyJoinRequestCreatedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	return r.upsertGroupJoinRequestProjectionIfExists(
 		ctx,
 		payload.GroupUUID,
@@ -285,7 +285,7 @@ func (r *Repository) applyJoinRequestCreatedEvent(ctx context.Context, payload g
 //
 // 审批完成后，这条申请不应继续停留在“待审批列表”缓存里，
 // 因此这里直接按 apply_id 删除对应 field；若缓存缺失则继续保持跳过语义。
-func (r *Repository) applyJoinRequestReviewedEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *Repository) applyJoinRequestReviewedEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	if payload.JoinRequest == nil {
 		return fmt.Errorf("%w: join_request_reviewed missing join request snapshot", repository.ErrInvalidProjectorPayload)
 	}

@@ -1,4 +1,4 @@
-package msgevent
+package event
 
 import (
 	"encoding/json"

@@ -9,8 +9,8 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/repository"
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
 	"github.com/013677890/LCchat-Backend/consts"
-	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	"github.com/013677890/LCchat-Backend/pkg/util"
@@ -202,7 +202,7 @@ func (s *accountServiceImpl) DeleteAccount(ctx context.Context, req *authpb.Dele
 	eventID := util.GenIDString()
 
 	// 事件里只保留跨服务清理所需的最小字段，避免把账号敏感信息继续外发。
-	payload, err := accountevent.Encode(accountevent.AccountDeletedPayload{
+	payload, err := event.Encode(event.AccountDeletedPayload{
 		EventID:   eventID,
 		UserUUID:  userUUID,
 		DeletedAt: deleteAt,
@@ -213,7 +213,7 @@ func (s *accountServiceImpl) DeleteAccount(ctx context.Context, req *authpb.Dele
 	}
 
 	// 第一步：软删除 user_account，并在同一事务中写入 account_deleted 事件。
-	if err := s.authRepo.DeleteWithOutboxEvent(ctx, userUUID, accountevent.EventTypeAccountDeleted, payload); err != nil {
+	if err := s.authRepo.DeleteWithOutboxEvent(ctx, userUUID, event.EventTypeAccountDeleted, payload); err != nil {
 		return nil, apperr.Wrap(err, consts.CodeInternalError, "注销账号失败")
 	}
 

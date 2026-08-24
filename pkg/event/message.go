@@ -1,4 +1,4 @@
-package msgevent
+package event
 
 import (
 	"errors"
@@ -21,7 +21,7 @@ var (
 	}
 )
 
-// EncodeMsgPush encodes a msg.push outbox payload as strict protojson.
+// EncodeMsgPush 将 msg.push outbox 负载编码为严格的 protojson。
 func EncodeMsgPush(event *msgpb.MsgPushEvent) (string, error) {
 	if err := validateMsgPushEvent(event); err != nil {
 		return "", err
@@ -33,9 +33,8 @@ func EncodeMsgPush(event *msgpb.MsgPushEvent) (string, error) {
 	return string(data), nil
 }
 
-// DecodeMsgPush decodes the Kafka value produced by the CDC outbox EventRouter.
-// The connector must expand the outbox payload to the current top-level protojson
-// object; string and envelope wrappers are rejected.
+// DecodeMsgPush 解码 CDC outbox EventRouter 生成的 Kafka 消息。
+// connector 必须将 outbox payload 展开为当前顶层 protojson 对象；字符串和信封包装会被拒绝。
 func DecodeMsgPush(message []byte) (*msgpb.MsgPushEvent, error) {
 	var event msgpb.MsgPushEvent
 	if err := unmarshalOptions.Unmarshal(message, &event); err != nil {

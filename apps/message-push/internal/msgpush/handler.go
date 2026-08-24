@@ -18,8 +18,8 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/metrics"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/pusherr"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	"google.golang.org/protobuf/proto"
 )
@@ -147,9 +147,9 @@ func (h *Handler) Handle(ctx context.Context, value []byte) error {
 // decodeMsgPushEvent 解码 Outbox/CDC 顶层 JSON Object 为 MsgPushEvent。
 // 解码失败属于永久错误：payload 形状非法时重试无意义，记指标后返回 ok=false。
 func decodeMsgPushEvent(ctx context.Context, value []byte) (*msgpb.MsgPushEvent, bool) {
-	event, err := msgevent.DecodeMsgPush(value)
+	decodedEvent, err := event.DecodeMsgPush(value)
 	if err == nil {
-		return event, true
+		return decodedEvent, true
 	}
 	metrics.EventTypeSkipped.WithLabelValues("unknown", "decode_error").Inc()
 	logger.Warn(ctx, "message-push 解析 msg.push outbox payload 失败，跳过该消息",

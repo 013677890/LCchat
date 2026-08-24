@@ -16,9 +16,9 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/metrics"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/pusherr"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 )
 
@@ -216,9 +216,9 @@ func (c *Consumer) runHandleWithRetry(ctx context.Context, payload []byte) error
 // 先试 msg.push（protojson）再试 realtime.push（protobuf bytes）；
 // 两种当前契约都不匹配时回退 "unknown"，避免把任意 payload 片段写进 Prometheus 标签造成基数爆炸。
 func eventTypeForMetric(value []byte) string {
-	event, err := msgevent.DecodeMsgPush(value)
-	if err == nil && event.Type != "" {
-		return event.Type
+	decodedEvent, err := event.DecodeMsgPush(value)
+	if err == nil && decodedEvent.Type != "" {
+		return decodedEvent.Type
 	}
 	realtimeEvent, err := realtimepush.Decode(value)
 	if err == nil && realtimeEvent.Type != "" {

@@ -13,9 +13,9 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/id"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -228,7 +228,7 @@ func (s *Service) CreateMessage(ctx context.Context, fromUuid, deviceId string, 
 			return nil, fmt.Errorf("CreateMessage: build outbox event failed: %w", buildErr)
 		}
 		createErr := s.repo.CreateWithOutbox(ctx, msg, OutboxEvent{
-			EventType: msgevent.EventTypeMsgPush,
+			EventType: event.EventTypeMsgPush,
 			EntityID:  msg.ConvId,
 			Payload:   payload,
 		})
@@ -277,7 +277,7 @@ func buildMsgPushOutboxPayload(ctx context.Context, req *pb.SendMessageRequest, 
 		return "", fmt.Errorf("marshal MsgItem failed: %w", err)
 	}
 
-	return msgevent.EncodeMsgPush(&pb.MsgPushEvent{
+	return event.EncodeMsgPush(&pb.MsgPushEvent{
 		EventId:      id.GenerateULID(),
 		ReceiverUuid: req.TargetUuid,
 		DeviceId:     msg.DeviceId,
@@ -427,7 +427,7 @@ func (s *Service) RecallMessage(ctx context.Context, convId, msgId, operatorUuid
 	}
 
 	if err := s.repo.UpdateStatusWithOutbox(ctx, convId, msgId, 1, string(recallContent), OutboxEvent{
-		EventType: msgevent.EventTypeMsgPush,
+		EventType: event.EventTypeMsgPush,
 		EntityID:  convId,
 		Payload:   payload,
 	}); err != nil {
@@ -453,7 +453,7 @@ func buildRecallOutboxPayload(ctx context.Context, convId, msgId, operatorUuid s
 	if err != nil {
 		return "", err
 	}
-	return msgevent.EncodeMsgPush(&pb.MsgPushEvent{
+	return event.EncodeMsgPush(&pb.MsgPushEvent{
 		EventId:      id.GenerateULID(),
 		ReceiverUuid: receiverUuid,
 		DeviceId:     ctxmeta.DeviceID(ctx),

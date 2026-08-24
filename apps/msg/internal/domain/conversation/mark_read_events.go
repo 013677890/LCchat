@@ -9,8 +9,8 @@ import (
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/convid"
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/id"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -66,7 +66,7 @@ func buildMarkReadOutboxEvents(ctx context.Context, ownerUuid, convId string, re
 			return nil, err
 		}
 		events = append(events, OutboxEvent{
-			EventType: msgevent.EventTypeMsgPush,
+			EventType: event.EventTypeMsgPush,
 			EntityID:  convId,
 			Payload:   payload,
 		})
@@ -77,7 +77,7 @@ func buildMarkReadOutboxEvents(ctx context.Context, ownerUuid, convId string, re
 
 // encodeMarkReadPushEvent 将已读类事件编码为严格 protojson MsgPushEvent。
 func encodeMarkReadPushEvent(ctx context.Context, spec markReadPushSpec) (string, error) {
-	return msgevent.EncodeMsgPush(&pb.MsgPushEvent{
+	return event.EncodeMsgPush(&pb.MsgPushEvent{
 		EventId:      id.GenerateULID(),
 		ReceiverUuid: spec.receiverUUID,
 		DeviceId:     spec.deviceID,

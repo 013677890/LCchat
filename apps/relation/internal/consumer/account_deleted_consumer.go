@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/relation/internal/repository"
-	"github.com/013677890/LCchat-Backend/pkg/accountevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"gorm.io/gorm"
 )
 
-const relationAccountDeletedIdempotentEventType = accountevent.EventTypeAccountDeleted + ":relation-service"
+const relationAccountDeletedIdempotentEventType = event.EventTypeAccountDeleted + ":relation-service"
 
 // AccountDeletedConsumer 消费 account.deleted 并执行 relation-service 侧关系清理。
 // 使用 ManualConsumerPool；group 与其它服务隔离，由 RelationApp 经 RunIsolatedPool 旁路运行。
@@ -76,7 +76,7 @@ func (c *AccountDeletedConsumer) Close() error {
 // handle 解码并幂等清理 relation 域账号关系。
 // 契约错误进入 dead_events；数据库错误可重试；成功后才推进 offset。
 func (c *AccountDeletedConsumer) handle(ctx context.Context, message []byte) error {
-	payload, err := accountevent.DecodeAccountDeleted(message)
+	payload, err := event.DecodeAccountDeleted(message)
 	if err != nil {
 		return kafka.Permanent(fmt.Errorf("解析 relation account.deleted 事件失败: %w", err))
 	}

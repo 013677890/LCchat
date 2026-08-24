@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 )
 
 // IGroupRepository 定义 group-service 当前阶段需要的仓储抽象。
@@ -90,7 +90,7 @@ type IGroupCacheProjectorRepository interface {
 	//  1. 该方法只负责缓存投影，不做业务权限判断；
 	//  2. 遇到 Redis 可重试错误时直接返回 error，由 Kafka 手动提交模式负责重试；
 	//  3. payload 非法时返回 ErrInvalidProjectorPayload，上层必须标记永久错误并立即落死信。
-	ApplyGroupCacheEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error
+	ApplyGroupCacheEvent(ctx context.Context, payload event.GroupCacheEventPayload) error
 	// ReconcileGroupCache 从 MySQL 权威快照重建指定群的资料、成员、待审批申请
 	// 以及历史成员对应的用户群反向索引；所有写入仍受 cache_version 栅栏保护。
 	ReconcileGroupCache(ctx context.Context, groupUUID string) error

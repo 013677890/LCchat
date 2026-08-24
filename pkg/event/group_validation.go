@@ -1,4 +1,4 @@
-package groupevent
+package event
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 //
 // 该错误属于生产者/协议错误，重试不会自行恢复。所有 group.cache projector 必须共用
 // ValidateGroupCachePayload，禁止每个消费者各自保留一套宽严不同的字段推断或兼容规则。
-var ErrInvalidGroupCachePayload = errors.New("groupevent: invalid group.cache payload")
+var ErrInvalidGroupCachePayload = errors.New("event: invalid group.cache payload")
 
 const (
 	projectedGroupStatusNormal    int32 = 0

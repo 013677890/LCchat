@@ -1,4 +1,4 @@
-package accountevent
+package event
 
 import (
 	"bytes"
@@ -39,15 +39,6 @@ type AccountDeletedPayload struct {
 	EventID   string    `json:"event_id"`
 	UserUUID  string    `json:"user_uuid"`
 	DeletedAt time.Time `json:"deleted_at"`
-}
-
-// Encode 将事件负载序列化为 JSON 字符串，便于写入 outbox_events。
-func Encode(payload any) (string, error) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
 
 // DecodeUserCreated 严格解析当前 user_created 事件负载。

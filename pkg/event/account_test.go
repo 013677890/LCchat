@@ -1,4 +1,4 @@
-package accountevent
+package event
 
 import (
 	"encoding/json"

@@ -7,14 +7,14 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/auth/internal/service"
 	authpb "github.com/013677890/LCchat-Backend/apps/auth/pb"
-	"github.com/013677890/LCchat-Backend/pkg/accountevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"gorm.io/gorm"
 )
 
-const authProfileDisplayChangedIdempotentEventType = accountevent.EventTypeProfileDisplayChanged + ":auth-service"
+const authProfileDisplayChangedIdempotentEventType = event.EventTypeProfileDisplayChanged + ":auth-service"
 
 // ProfileDisplayChangedConsumer 消费 profile_display_changed，回写 auth 域登录展示冗余字段。
 // 编排使用 ManualConsumerPool；进程级由 AuthApp 通过 kafka.RunIsolatedPool 隔离，
@@ -78,7 +78,7 @@ func (c *ProfileDisplayChangedConsumer) Close() error {
 // 契约/解码错误标记 Permanent，由公共层首轮写 dead_events 后再提交；
 // 幂等命中直接成功；DB 或内部服务抖动返回普通 error 以原地重试，成功后才推进 offset。
 func (c *ProfileDisplayChangedConsumer) handle(ctx context.Context, message []byte) error {
-	payload, err := accountevent.DecodeProfileDisplayChanged(message)
+	payload, err := event.DecodeProfileDisplayChanged(message)
 	if err != nil {
 		return kafka.Permanent(fmt.Errorf("解析 profile_display_changed 事件失败: %w", err))
 	}

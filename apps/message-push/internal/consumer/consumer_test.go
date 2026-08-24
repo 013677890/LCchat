@@ -9,8 +9,8 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/pusherr"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"github.com/013677890/LCchat-Backend/pkg/realtimepush"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,7 +45,7 @@ func TestNewConsumerBuildsManualPoolAndRejectsInvalidWorkers(t *testing.T) {
 }
 
 func TestEventTypeForMetric(t *testing.T) {
-	data, err := msgevent.EncodeMsgPush(&msgpb.MsgPushEvent{
+	data, err := event.EncodeMsgPush(&msgpb.MsgPushEvent{
 		EventId:      "evt-test",
 		ReceiverUuid: "user1",
 		Type:         "MSG_READ_RECEIPT",

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 
 	"github.com/stretchr/testify/assert"
@@ -29,8 +29,8 @@ func newGroupMembershipProjectorTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func groupProjectionSnapshot(groupUUID string, status int8, updatedAt time.Time) *groupevent.GroupSnapshot {
-	return &groupevent.GroupSnapshot{
+func groupProjectionSnapshot(groupUUID string, status int8, updatedAt time.Time) *event.GroupSnapshot {
+	return &event.GroupSnapshot{
 		GroupID:         1,
 		GroupUUID:       groupUUID,
 		Name:            "测试群",
@@ -42,12 +42,12 @@ func groupProjectionSnapshot(groupUUID string, status int8, updatedAt time.Time)
 	}
 }
 
-func groupProjectionMember(userUUID string, joinedAt time.Time) groupevent.GroupMemberSnapshot {
+func groupProjectionMember(userUUID string, joinedAt time.Time) event.GroupMemberSnapshot {
 	role := int32(0)
 	if userUUID == "owner-1" {
 		role = 2
 	}
-	return groupevent.GroupMemberSnapshot{
+	return event.GroupMemberSnapshot{
 		UserUUID:       userUUID,
 		Role:           role,
 		JoinedAtUnixMs: joinedAt.UnixMilli(),
@@ -60,14 +60,14 @@ func TestGroupMembershipProjectorProjectsLifecycleWithoutOverwritingPersonalStat
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Millisecond)
 
-	created := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	created := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 1,
 		EventID:           "event-created",
-		Action:            groupevent.ActionGroupCreated,
+		Action:            event.ActionGroupCreated,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, now),
-		Members: []groupevent.GroupMemberSnapshot{
+		Members: []event.GroupMemberSnapshot{
 			groupProjectionMember("owner-1", now),
 			groupProjectionMember("member-1", now),
 		},
@@ -94,11 +94,11 @@ func TestGroupMembershipProjectorProjectsLifecycleWithoutOverwritingPersonalStat
 		}).Error)
 
 	leftAt := now.Add(time.Minute)
-	removed := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	removed := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 2,
 		EventID:           "event-removed",
-		Action:            groupevent.ActionMemberRemoved,
+		Action:            event.ActionMemberRemoved,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, leftAt),
 		UserUUID:          "member-1",
@@ -116,14 +116,14 @@ func TestGroupMembershipProjectorProjectsLifecycleWithoutOverwritingPersonalStat
 	assert.Equal(t, int8(1), member.Status)
 
 	rejoinedAt := now.Add(2 * time.Minute)
-	added := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	added := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 3,
 		EventID:           "event-rejoined",
-		Action:            groupevent.ActionMemberAdded,
+		Action:            event.ActionMemberAdded,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, rejoinedAt),
-		Members:           []groupevent.GroupMemberSnapshot{groupProjectionMember("member-1", rejoinedAt)},
+		Members:           []event.GroupMemberSnapshot{groupProjectionMember("member-1", rejoinedAt)},
 		UserUUIDs:         []string{"member-1"},
 	}
 	require.NoError(t, repo.ApplyGroupCacheEvent(ctx, added))
@@ -150,14 +150,14 @@ func TestGroupMembershipProjectorRejectsVersionGapAndIgnoresStaleVersion(t *test
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Millisecond)
 
-	created := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	created := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 1,
 		EventID:           "event-created",
-		Action:            groupevent.ActionGroupCreated,
+		Action:            event.ActionGroupCreated,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, now),
-		Members:           []groupevent.GroupMemberSnapshot{groupProjectionMember("owner-1", now)},
+		Members:           []event.GroupMemberSnapshot{groupProjectionMember("owner-1", now)},
 		UserUUIDs:         []string{"owner-1"},
 	}
 	created.Group.MemberCount = 1
@@ -166,8 +166,8 @@ func TestGroupMembershipProjectorRejectsVersionGapAndIgnoresStaleVersion(t *test
 	gap := created
 	gap.EventID = "event-gap"
 	gap.ProjectionVersion = 3
-	gap.Action = groupevent.ActionMemberAdded
-	gap.Members = []groupevent.GroupMemberSnapshot{groupProjectionMember("member-2", now)}
+	gap.Action = event.ActionMemberAdded
+	gap.Members = []event.GroupMemberSnapshot{groupProjectionMember("member-2", now)}
 	gap.UserUUIDs = []string{"member-2"}
 	err := repo.ApplyGroupCacheEvent(ctx, gap)
 	require.ErrorIs(t, err, ErrGroupProjectionVersionGap)
@@ -177,11 +177,11 @@ func TestGroupMembershipProjectorRejectsVersionGapAndIgnoresStaleVersion(t *test
 	next.ProjectionVersion = 2
 	require.NoError(t, repo.ApplyGroupCacheEvent(ctx, next))
 
-	staleRemove := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	staleRemove := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 1,
 		EventID:           "event-stale-remove",
-		Action:            groupevent.ActionMemberRemoved,
+		Action:            event.ActionMemberRemoved,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, now),
 		UserUUID:          "member-2",
@@ -200,14 +200,14 @@ func TestGroupMembershipProjectorRejectsInvalidLifecycleTransitions(t *testing.T
 		repo := NewGroupMembershipProjectorRepository(db)
 		now := time.Now().Truncate(time.Millisecond)
 
-		firstAdd := groupevent.GroupCacheEventPayload{
-			SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+		firstAdd := event.GroupCacheEventPayload{
+			SchemaVersion:     event.GroupCacheSchemaVersion,
 			ProjectionVersion: 1,
 			EventID:           "event-first-add",
-			Action:            groupevent.ActionMemberAdded,
+			Action:            event.ActionMemberAdded,
 			GroupUUID:         "group-1",
 			Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, now),
-			Members:           []groupevent.GroupMemberSnapshot{groupProjectionMember("member-1", now)},
+			Members:           []event.GroupMemberSnapshot{groupProjectionMember("member-1", now)},
 			UserUUIDs:         []string{"member-1"},
 		}
 		err := repo.ApplyGroupCacheEvent(context.Background(), firstAdd)
@@ -224,14 +224,14 @@ func TestGroupMembershipProjectorRejectsInvalidLifecycleTransitions(t *testing.T
 		db := newGroupMembershipProjectorTestDB(t)
 		repo := NewGroupMembershipProjectorRepository(db)
 		now := time.Now().Truncate(time.Millisecond)
-		created := groupevent.GroupCacheEventPayload{
-			SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+		created := event.GroupCacheEventPayload{
+			SchemaVersion:     event.GroupCacheSchemaVersion,
 			ProjectionVersion: 1,
 			EventID:           "event-created",
-			Action:            groupevent.ActionGroupCreated,
+			Action:            event.ActionGroupCreated,
 			GroupUUID:         "group-1",
 			Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, now),
-			Members: []groupevent.GroupMemberSnapshot{
+			Members: []event.GroupMemberSnapshot{
 				groupProjectionMember("owner-1", now),
 				groupProjectionMember("member-1", now),
 			},
@@ -256,14 +256,14 @@ func TestGroupMembershipProjectorRejectsRemovingUnknownMember(t *testing.T) {
 	repo := NewGroupMembershipProjectorRepository(db)
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Millisecond)
-	created := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	created := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 1,
 		EventID:           "event-created",
-		Action:            groupevent.ActionGroupCreated,
+		Action:            event.ActionGroupCreated,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, now),
-		Members: []groupevent.GroupMemberSnapshot{
+		Members: []event.GroupMemberSnapshot{
 			groupProjectionMember("owner-1", now),
 			groupProjectionMember("member-1", now),
 		},
@@ -271,11 +271,11 @@ func TestGroupMembershipProjectorRejectsRemovingUnknownMember(t *testing.T) {
 	}
 	require.NoError(t, repo.ApplyGroupCacheEvent(ctx, created))
 
-	removed := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	removed := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 2,
 		EventID:           "event-remove-unknown",
-		Action:            groupevent.ActionMemberRemoved,
+		Action:            event.ActionMemberRemoved,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, now.Add(time.Minute)),
 		UserUUID:          "unknown-member",
@@ -294,14 +294,14 @@ func TestGroupMembershipProjectorDismissalUsesSingleSharedGroupState(t *testing.
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Millisecond)
 
-	created := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	created := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 1,
 		EventID:           "event-created",
-		Action:            groupevent.ActionGroupCreated,
+		Action:            event.ActionGroupCreated,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, now),
-		Members: []groupevent.GroupMemberSnapshot{
+		Members: []event.GroupMemberSnapshot{
 			groupProjectionMember("owner-1", now),
 			groupProjectionMember("member-1", now),
 		},
@@ -310,11 +310,11 @@ func TestGroupMembershipProjectorDismissalUsesSingleSharedGroupState(t *testing.
 	require.NoError(t, repo.ApplyGroupCacheEvent(ctx, created))
 
 	dismissedAt := now.Add(time.Minute)
-	dismissed := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	dismissed := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 2,
 		EventID:           "event-dismissed",
-		Action:            groupevent.ActionGroupDismissed,
+		Action:            event.ActionGroupDismissed,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusDismissed, dismissedAt),
 		UserUUIDs:         []string{"owner-1", "member-1"},
@@ -338,14 +338,14 @@ func TestGroupMembershipProjectorRejectsLegacyOrIncompleteMembershipPayload(t *t
 	db := newGroupMembershipProjectorTestDB(t)
 	repo := NewGroupMembershipProjectorRepository(db)
 
-	payload := groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	payload := event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 1,
 		EventID:           "event-invalid",
-		Action:            groupevent.ActionMemberAdded,
+		Action:            event.ActionMemberAdded,
 		GroupUUID:         "group-1",
 		Group:             groupProjectionSnapshot("group-1", model.GroupConversationStatusNormal, time.Now()),
-		Members:           []groupevent.GroupMemberSnapshot{groupProjectionMember("member-1", time.Now())},
+		Members:           []event.GroupMemberSnapshot{groupProjectionMember("member-1", time.Now())},
 		// 当前 v2 契约要求 user_uuids 与 members 显式表达同一集合；禁止从 members 推导。
 		UserUUIDs: nil,
 	}

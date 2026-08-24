@@ -8,8 +8,8 @@ import (
 
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -177,7 +177,7 @@ func TestCreateMessage_Success(t *testing.T) {
 	assert.Equal(t, result.Msg.ConvId, gotEvent.EntityID)
 	assert.NotEmpty(t, gotEvent.Payload)
 
-	pushEvent, err := msgevent.DecodeMsgPush([]byte(gotEvent.Payload))
+	pushEvent, err := event.DecodeMsgPush([]byte(gotEvent.Payload))
 	require.NoError(t, err)
 	assert.NotEmpty(t, pushEvent.GetEventId())
 	assert.Equal(t, "user_bbb", pushEvent.GetReceiverUuid())
@@ -372,10 +372,10 @@ func TestRecallMessage_SelfRecall_Success(t *testing.T) {
 	assert.Equal(t, "m1", msg.MsgId)
 	assert.Equal(t, int8(1), gotStatus)
 	assert.Contains(t, gotContent, "撤回了一条消息")
-	assert.Equal(t, msgevent.EventTypeMsgPush, gotEvent.EventType)
+	assert.Equal(t, event.EventTypeMsgPush, gotEvent.EventType)
 	assert.Equal(t, "p2p-userA-userB", gotEvent.EntityID)
 
-	pushEvent, err := msgevent.DecodeMsgPush([]byte(gotEvent.Payload))
+	pushEvent, err := event.DecodeMsgPush([]byte(gotEvent.Payload))
 	require.NoError(t, err)
 	assert.NotEmpty(t, pushEvent.GetEventId())
 	assert.Equal(t, "MSG_RECALL", pushEvent.GetType())

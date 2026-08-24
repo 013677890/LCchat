@@ -7,14 +7,14 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/service"
 	userpb "github.com/013677890/LCchat-Backend/apps/user/pb"
-	"github.com/013677890/LCchat-Backend/pkg/accountevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"gorm.io/gorm"
 )
 
-const userCreatedIdempotentEventType = accountevent.EventTypeUserCreated + ":user-service"
+const userCreatedIdempotentEventType = event.EventTypeUserCreated + ":user-service"
 
 // UserCreatedConsumer 消费 user_created，在 user 域完成资料初始化闭环。
 // 使用 ManualConsumerPool；由 UserApp 经 RunIsolatedPool 旁路运行，不拖死资料 gRPC。
@@ -75,7 +75,7 @@ func (c *UserCreatedConsumer) Close() error {
 // handle 解码并幂等初始化 user 域资料。
 // 契约错误标记 Permanent 进入 dead_events；DB/内部服务错误可重试；成功后才推进 offset。
 func (c *UserCreatedConsumer) handle(ctx context.Context, message []byte) error {
-	payload, err := accountevent.DecodeUserCreated(message)
+	payload, err := event.DecodeUserCreated(message)
 	if err != nil {
 		return kafka.Permanent(fmt.Errorf("解析 user_created 事件失败: %w", err))
 	}

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
@@ -95,7 +95,7 @@ func (p *GroupMembershipProjector) WorkerCount() int {
 }
 
 func (p *GroupMembershipProjector) handle(ctx context.Context, message []byte) error {
-	payload, err := groupevent.DecodeGroupCache(message)
+	payload, err := event.DecodeGroupCache(message)
 	if err != nil {
 		return kafka.Permanent(fmt.Errorf("解析 group.cache 当前严格事件失败: %w", err))
 	}

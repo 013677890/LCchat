@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +22,7 @@ type fakeCacheReconcileRepository struct {
 
 func (f *fakeCacheReconcileRepository) ApplyGroupCacheEvent(
 	context.Context,
-	groupevent.GroupCacheEventPayload,
+	event.GroupCacheEventPayload,
 ) error {
 	return nil
 }

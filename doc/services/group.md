@@ -22,7 +22,7 @@ group 服务拥有群资料、群成员、入群申请和群权限事实，负�
 | `apps/group/internal/repository/compose` | 把 store 写路径与 cache 读路径组合成 service 使用的 `IGroupRepository` 门面。 |
 | `apps/group/internal/consumer` | `group.cache` 投影消费者与周期缓存对账任务。 |
 | `proto/group` | GroupService gRPC 契约。 |
-| `pkg/groupevent` | 群缓存事件 payload 编解码和 action 常量。 |
+| `pkg/event` | 群缓存事件 payload 编解码和 action 常量。 |
 ## 数据所有权
 | 数据 | 存储 | 说明 |
 | --- | --- | --- |

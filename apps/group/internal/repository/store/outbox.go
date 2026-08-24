@@ -5,7 +5,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/013677890/LCchat-Backend/pkg/repoerr"
 	idutil "github.com/013677890/LCchat-Backend/pkg/util"
@@ -14,8 +14,8 @@ import (
 
 // insertGroupCreatedEvent 把建群成功事实写入 group.cache Outbox 事件表。
 func (s *Store) insertGroupCreatedEvent(tx *gorm.DB, group *model.GroupInfo, members []*model.GroupMember) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:    groupevent.ActionGroupCreated,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:    event.ActionGroupCreated,
 		GroupUUID: group.Uuid,
 		Group:     buildGroupSnapshot(group),
 		Members:   buildGroupMemberSnapshots(members),
@@ -25,8 +25,8 @@ func (s *Store) insertGroupCreatedEvent(tx *gorm.DB, group *model.GroupInfo, mem
 
 // insertMemberAddedEvent 把新增/恢复成员事实写入 group.cache Outbox 事件表。
 func (s *Store) insertMemberAddedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionMemberAdded,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionMemberAdded,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -37,8 +37,8 @@ func (s *Store) insertMemberAddedEvent(tx *gorm.DB, group *model.GroupInfo, oper
 
 // insertMemberRemovedEvent 把移除成员/退群事实写入 group.cache Outbox 事件表。
 func (s *Store) insertMemberRemovedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID, targetUUID string) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionMemberRemoved,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionMemberRemoved,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -48,8 +48,8 @@ func (s *Store) insertMemberRemovedEvent(tx *gorm.DB, group *model.GroupInfo, op
 
 // insertGroupDismissedEvent 把群解散事实写入 group.cache Outbox 事件表。
 func (s *Store) insertGroupDismissedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, userUUIDs []string) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionGroupDismissed,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionGroupDismissed,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -59,8 +59,8 @@ func (s *Store) insertGroupDismissedEvent(tx *gorm.DB, group *model.GroupInfo, o
 
 // insertGroupInfoUpdatedEvent 把群资料更新事实写入 group.cache Outbox 事件表。
 func (s *Store) insertGroupInfoUpdatedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionGroupInfoUpdated,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionGroupInfoUpdated,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -69,8 +69,8 @@ func (s *Store) insertGroupInfoUpdatedEvent(tx *gorm.DB, group *model.GroupInfo,
 
 // insertOwnerTransferredEvent 把群主转让事实写入 group.cache Outbox 事件表。
 func (s *Store) insertOwnerTransferredEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionOwnerTransferred,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionOwnerTransferred,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -81,8 +81,8 @@ func (s *Store) insertOwnerTransferredEvent(tx *gorm.DB, group *model.GroupInfo,
 
 // insertMemberRoleUpdatedEvent 把成员角色更新事实写入 group.cache Outbox 事件表。
 func (s *Store) insertMemberRoleUpdatedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionMemberRoleUpdated,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionMemberRoleUpdated,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -93,8 +93,8 @@ func (s *Store) insertMemberRoleUpdatedEvent(tx *gorm.DB, group *model.GroupInfo
 
 // insertMemberProfileUpdatedEvent 把成员群名片更新事实写入 group.cache Outbox 事件表。
 func (s *Store) insertMemberProfileUpdatedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionMemberProfileUpdated,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionMemberProfileUpdated,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -105,8 +105,8 @@ func (s *Store) insertMemberProfileUpdatedEvent(tx *gorm.DB, group *model.GroupI
 
 // insertMemberMutedEvent 把成员单人禁言更新事实写入 group.cache Outbox 事件表。
 func (s *Store) insertMemberMutedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string, members []*model.GroupMember) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionMemberMuted,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionMemberMuted,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -117,8 +117,8 @@ func (s *Store) insertMemberMutedEvent(tx *gorm.DB, group *model.GroupInfo, oper
 
 // insertGroupMuteSettingUpdatedEvent 把全员禁言开关更新事实写入 group.cache Outbox 事件表。
 func (s *Store) insertGroupMuteSettingUpdatedEvent(tx *gorm.DB, group *model.GroupInfo, operatorUUID string) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionGroupMuteSettingUpdated,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionGroupMuteSettingUpdated,
 		GroupUUID:    group.Uuid,
 		OperatorUUID: operatorUUID,
 		Group:        buildGroupSnapshot(group),
@@ -127,8 +127,8 @@ func (s *Store) insertGroupMuteSettingUpdatedEvent(tx *gorm.DB, group *model.Gro
 
 // insertJoinRequestCreatedEvent 把新增待审批入群申请事实写入 group.cache Outbox 事件表。
 func (s *Store) insertJoinRequestCreatedEvent(tx *gorm.DB, groupUUID, operatorUUID string, request *model.GroupJoinRequest) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionJoinRequestCreated,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionJoinRequestCreated,
 		GroupUUID:    groupUUID,
 		OperatorUUID: operatorUUID,
 		JoinRequest:  buildGroupJoinRequestSnapshot(request),
@@ -137,8 +137,8 @@ func (s *Store) insertJoinRequestCreatedEvent(tx *gorm.DB, groupUUID, operatorUU
 
 // insertJoinRequestReviewedEvent 把待审批入群申请已处理事实写入 group.cache Outbox 事件表。
 func (s *Store) insertJoinRequestReviewedEvent(tx *gorm.DB, groupUUID, operatorUUID string, request *model.GroupJoinRequest) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionJoinRequestReviewed,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionJoinRequestReviewed,
 		GroupUUID:    groupUUID,
 		OperatorUUID: operatorUUID,
 		JoinRequest:  buildGroupJoinRequestSnapshot(request),
@@ -147,8 +147,8 @@ func (s *Store) insertJoinRequestReviewedEvent(tx *gorm.DB, groupUUID, operatorU
 
 // insertJoinRequestCanceledEvent 把申请人主动撤销待审批申请事实写入 group.cache Outbox 事件表。
 func (s *Store) insertJoinRequestCanceledEvent(tx *gorm.DB, groupUUID, operatorUUID string, request *model.GroupJoinRequest) error {
-	return s.insertGroupCacheEvent(tx, groupevent.GroupCacheEventPayload{
-		Action:       groupevent.ActionJoinRequestCanceled,
+	return s.insertGroupCacheEvent(tx, event.GroupCacheEventPayload{
+		Action:       event.ActionJoinRequestCanceled,
 		GroupUUID:    groupUUID,
 		OperatorUUID: operatorUUID,
 		JoinRequest:  buildGroupJoinRequestSnapshot(request),
@@ -162,8 +162,8 @@ func (s *Store) insertJoinRequestCanceledEvent(tx *gorm.DB, groupUUID, operatorU
 //     并将递增后的版本赋值给 payload.ProjectionVersion；
 //  2. 保证有序投递：event_type 固定为 group.cache，entity_id 固定为 group_uuid，
 //     下游发布到 Kafka 时按 group_uuid 进行分区哈希，保证同一个群的所有事件在同一 Kafka 分区内绝对保序；
-//  3. 契约校验：在落库前使用 groupevent.ValidateGroupCachePayload 进行严格强校验，拒绝任何非法快照。
-func (s *Store) insertGroupCacheEvent(tx *gorm.DB, payload groupevent.GroupCacheEventPayload) error {
+//  3. 契约校验：在落库前使用 event.ValidateGroupCachePayload 进行严格强校验，拒绝任何非法快照。
+func (s *Store) insertGroupCacheEvent(tx *gorm.DB, payload event.GroupCacheEventPayload) error {
 	if tx == nil || payload.GroupUUID == "" || payload.Action == "" {
 		return fmt.Errorf("%w: invalid group cache event payload", repoerr.ErrDatabase)
 	}
@@ -172,21 +172,21 @@ func (s *Store) insertGroupCacheEvent(tx *gorm.DB, payload groupevent.GroupCache
 	if err != nil {
 		return err
 	}
-	payload.SchemaVersion = groupevent.GroupCacheSchemaVersion
+	payload.SchemaVersion = event.GroupCacheSchemaVersion
 	payload.ProjectionVersion = projectionVersion
 	if payload.EventID == "" {
 		payload.EventID = idutil.GenIDString()
 	}
 	// 2. 校验 Payload 契约合法性
-	if err := groupevent.ValidateGroupCachePayload(payload); err != nil {
+	if err := event.ValidateGroupCachePayload(payload); err != nil {
 		return fmt.Errorf("%w: %w", repository.ErrInvalidProjectorPayload, err)
 	}
-	encoded, err := groupevent.Encode(payload)
+	encoded, err := event.Encode(payload)
 	if err != nil {
 		return fmt.Errorf("编码群缓存事件失败: %w", err)
 	}
 	// 3. 将事件写入 MySQL outbox_events 表，同业务事务提交
-	if err := outbox.InsertEvent(tx, groupevent.EventTypeGroupCache, payload.GroupUUID, encoded); err != nil {
+	if err := outbox.InsertEvent(tx, event.EventTypeGroupCache, payload.GroupUUID, encoded); err != nil {
 		return repoerr.WrapDBError(err)
 	}
 	return nil
@@ -222,11 +222,11 @@ func (s *Store) nextGroupCacheProjectionVersion(tx *gorm.DB, groupUUID string) (
 	return projectionVersion, nil
 }
 
-func buildGroupSnapshot(group *model.GroupInfo) *groupevent.GroupSnapshot {
+func buildGroupSnapshot(group *model.GroupInfo) *event.GroupSnapshot {
 	if group == nil {
 		return nil
 	}
-	return &groupevent.GroupSnapshot{
+	return &event.GroupSnapshot{
 		GroupID:         group.Id,
 		GroupUUID:       group.Uuid,
 		Name:            group.Name,
@@ -241,11 +241,11 @@ func buildGroupSnapshot(group *model.GroupInfo) *groupevent.GroupSnapshot {
 	}
 }
 
-func buildGroupMemberSnapshots(members []*model.GroupMember) []groupevent.GroupMemberSnapshot {
+func buildGroupMemberSnapshots(members []*model.GroupMember) []event.GroupMemberSnapshot {
 	if len(members) == 0 {
-		return []groupevent.GroupMemberSnapshot{}
+		return []event.GroupMemberSnapshot{}
 	}
-	result := make([]groupevent.GroupMemberSnapshot, 0, len(members))
+	result := make([]event.GroupMemberSnapshot, 0, len(members))
 	seen := make(map[string]struct{}, len(members))
 	for _, member := range members {
 		if member == nil || member.UserUuid == "" {
@@ -259,7 +259,7 @@ func buildGroupMemberSnapshots(members []*model.GroupMember) []groupevent.GroupM
 		if member.MuteUntil != nil {
 			muteUntilUnixMs = member.MuteUntil.UnixMilli()
 		}
-		result = append(result, groupevent.GroupMemberSnapshot{
+		result = append(result, event.GroupMemberSnapshot{
 			UserUUID:        member.UserUuid,
 			Role:            int32(member.Role),
 			Remark:          member.Remark,
@@ -270,11 +270,11 @@ func buildGroupMemberSnapshots(members []*model.GroupMember) []groupevent.GroupM
 	return result
 }
 
-func buildGroupJoinRequestSnapshot(request *model.GroupJoinRequest) *groupevent.GroupJoinRequestSnapshot {
+func buildGroupJoinRequestSnapshot(request *model.GroupJoinRequest) *event.GroupJoinRequestSnapshot {
 	if request == nil || request.Id <= 0 || request.ApplicantUuid == "" {
 		return nil
 	}
-	return &groupevent.GroupJoinRequestSnapshot{
+	return &event.GroupJoinRequestSnapshot{
 		ApplyID:         request.Id,
 		ApplicantUUID:   request.ApplicantUuid,
 		Reason:          request.Reason,

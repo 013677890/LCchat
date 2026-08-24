@@ -9,8 +9,8 @@ import (
 	connectpb "github.com/013677890/LCchat-Backend/apps/connect/pb"
 	"github.com/013677890/LCchat-Backend/apps/message-push/internal/pusherr"
 	msgpb "github.com/013677890/LCchat-Backend/apps/msg/pb"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	route "github.com/013677890/LCchat-Backend/pkg/presence"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +28,7 @@ func marshalEvent(t *testing.T, e *msgpb.MsgPushEvent) []byte {
 	if e.EventId == "" {
 		e.EventId = "evt-test"
 	}
-	data, err := msgevent.EncodeMsgPush(e)
+	data, err := event.EncodeMsgPush(e)
 	require.NoError(t, err)
 	return []byte(data)
 }

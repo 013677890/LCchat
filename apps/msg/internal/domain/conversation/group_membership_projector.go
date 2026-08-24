@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-const groupMembershipProjectorEventType = groupevent.EventTypeGroupCache + ":msg-membership-projector"
+const groupMembershipProjectorEventType = event.EventTypeGroupCache + ":msg-membership-projector"
 
 var (
 	// ErrInvalidGroupProjectionEvent 表示消息不符合当前 group.cache 严格契约。
@@ -31,7 +31,7 @@ var (
 // group-service 仍是成员关系的唯一事实源；这里保存的 conversation.Membership* 与
 // group_conversation.GroupStatus 只是 msg 会话列表使用的可重建投影。
 type GroupMembershipProjectorRepository interface {
-	ApplyGroupCacheEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error
+	ApplyGroupCacheEvent(ctx context.Context, payload event.GroupCacheEventPayload) error
 }
 
 // NewGroupMembershipProjectorRepository 创建群成员会话投影仓储。
@@ -46,7 +46,7 @@ func NewGroupMembershipProjectorRepository(db *gorm.DB) GroupMembershipProjector
 // 事务边界非常重要：如果成员行已更新而幂等记录尚未写入就崩溃，Kafka 会重投；
 // 把两者放在同一事务后，重投要么看到完整结果并跳过，要么重新执行完整投影，
 // 不会留下“成员状态已变、消费记录未变”的半完成窗口。
-func (r *repositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (r *repositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("ApplyGroupCacheEvent: db 未初始化")
 	}
@@ -104,21 +104,21 @@ func (r *repositoryImpl) ApplyGroupCacheEvent(ctx context.Context, payload group
 // 任何违反状态机的消息都作为生产链路错误进入死信。
 func validateMsgGroupProjectionTransition(
 	current *model.GroupConversation,
-	payload groupevent.GroupCacheEventPayload,
+	payload event.GroupCacheEventPayload,
 ) error {
 	if current == nil {
 		return fmt.Errorf("%w: missing current group state", ErrInvalidGroupProjectionEvent)
 	}
 	switch {
-	case current.ProjectionVersion == 0 && payload.Action != groupevent.ActionGroupCreated:
+	case current.ProjectionVersion == 0 && payload.Action != event.ActionGroupCreated:
 		return fmt.Errorf(
 			"%w: group_uuid=%s first action must be %s, got %s",
 			ErrInvalidGroupProjectionEvent,
 			payload.GroupUUID,
-			groupevent.ActionGroupCreated,
+			event.ActionGroupCreated,
 			payload.Action,
 		)
-	case current.ProjectionVersion > 0 && payload.Action == groupevent.ActionGroupCreated:
+	case current.ProjectionVersion > 0 && payload.Action == event.ActionGroupCreated:
 		return fmt.Errorf(
 			"%w: group_uuid=%s cannot be created twice",
 			ErrInvalidGroupProjectionEvent,
@@ -156,22 +156,22 @@ func lockGroupProjectionState(tx *gorm.DB, groupUUID string) (*model.GroupConver
 	return &state, nil
 }
 
-func applyGroupMembershipAction(tx *gorm.DB, payload groupevent.GroupCacheEventPayload) error {
+func applyGroupMembershipAction(tx *gorm.DB, payload event.GroupCacheEventPayload) error {
 	switch payload.Action {
-	case groupevent.ActionGroupCreated, groupevent.ActionMemberAdded:
+	case event.ActionGroupCreated, event.ActionMemberAdded:
 		return activateProjectedGroupMembers(tx, payload)
-	case groupevent.ActionMemberRemoved:
+	case event.ActionMemberRemoved:
 		return deactivateProjectedGroupMember(tx, payload)
-	case groupevent.ActionGroupDismissed,
-		groupevent.ActionGroupInfoUpdated,
-		groupevent.ActionOwnerTransferred,
-		groupevent.ActionMemberRoleUpdated,
-		groupevent.ActionMemberProfileUpdated,
-		groupevent.ActionMemberMuted,
-		groupevent.ActionGroupMuteSettingUpdated,
-		groupevent.ActionJoinRequestCreated,
-		groupevent.ActionJoinRequestReviewed,
-		groupevent.ActionJoinRequestCanceled:
+	case event.ActionGroupDismissed,
+		event.ActionGroupInfoUpdated,
+		event.ActionOwnerTransferred,
+		event.ActionMemberRoleUpdated,
+		event.ActionMemberProfileUpdated,
+		event.ActionMemberMuted,
+		event.ActionGroupMuteSettingUpdated,
+		event.ActionJoinRequestCreated,
+		event.ActionJoinRequestReviewed,
+		event.ActionJoinRequestCanceled:
 		// 这些 action 不改变 msg 的逐成员集合，但仍必须推进单群版本。
 		// 如果直接忽略 offset，下一条真正的成员事件就会被误判为版本缺口。
 		return nil
@@ -180,7 +180,7 @@ func applyGroupMembershipAction(tx *gorm.DB, payload groupevent.GroupCacheEventP
 	}
 }
 
-func activateProjectedGroupMembers(tx *gorm.DB, payload groupevent.GroupCacheEventPayload) error {
+func activateProjectedGroupMembers(tx *gorm.DB, payload event.GroupCacheEventPayload) error {
 	rows := make([]*model.Conversation, 0, len(payload.Members))
 	appliedAt := time.Now()
 	for _, member := range payload.Members {
@@ -219,7 +219,7 @@ func activateProjectedGroupMembers(tx *gorm.DB, payload groupevent.GroupCacheEve
 	return nil
 }
 
-func deactivateProjectedGroupMember(tx *gorm.DB, payload groupevent.GroupCacheEventPayload) error {
+func deactivateProjectedGroupMember(tx *gorm.DB, payload event.GroupCacheEventPayload) error {
 	leftAt := time.UnixMilli(payload.Group.UpdatedAtUnixMs)
 	// 在当前空库基线和严格状态机下，被移除者必然已经由 group_created/member_added
 	// 建立为 Active。这里故意不用 upsert：缺行、重复移除或成员行版本超前都说明投影
@@ -256,7 +256,7 @@ func deactivateProjectedGroupMember(tx *gorm.DB, payload groupevent.GroupCacheEv
 func advanceGroupProjectionState(
 	tx *gorm.DB,
 	current *model.GroupConversation,
-	payload groupevent.GroupCacheEventPayload,
+	payload event.GroupCacheEventPayload,
 ) error {
 	updates := map[string]interface{}{
 		"projection_version": payload.ProjectionVersion,
@@ -264,7 +264,7 @@ func advanceGroupProjectionState(
 	if payload.Group != nil {
 		updates["group_status"] = int8(payload.Group.Status)
 	}
-	if payload.Action == groupevent.ActionGroupCreated {
+	if payload.Action == event.ActionGroupCreated {
 		createdAt := time.UnixMilli(payload.Group.UpdatedAtUnixMs)
 
 		// 没有消息的新群也需要稳定的列表排序位点。若消息发送已经抢先写入真实
@@ -301,8 +301,8 @@ func markGroupProjectionEventProcessed(tx *gorm.DB, eventID string) error {
 // validateMsgGroupProjectionEvent 把共享的 group.cache v2 契约错误映射为 msg projector
 // 的永久错误类型。group Redis 与 msg 会话投影必须调用同一个校验器，避免一条事件在
 // 两个消费者中出现不同解释。
-func validateMsgGroupProjectionEvent(payload groupevent.GroupCacheEventPayload) error {
-	if err := groupevent.ValidateGroupCachePayload(payload); err != nil {
+func validateMsgGroupProjectionEvent(payload event.GroupCacheEventPayload) error {
+	if err := event.ValidateGroupCachePayload(payload); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidGroupProjectionEvent, err)
 	}
 	return nil

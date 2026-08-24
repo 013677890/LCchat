@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/group/internal/repository"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/stretchr/testify/assert"
@@ -19,13 +19,13 @@ import (
 
 // fakeProjectorRepoForConsumer 用于验证 consumer 的分支行为。
 type fakeProjectorRepoForConsumer struct {
-	applyFn     func(context.Context, groupevent.GroupCacheEventPayload) error
+	applyFn     func(context.Context, event.GroupCacheEventPayload) error
 	applyCalls  int
-	lastPayload groupevent.GroupCacheEventPayload
+	lastPayload event.GroupCacheEventPayload
 }
 
 // ApplyGroupCacheEvent 实现 IGroupCacheProjectorRepository。
-func (f *fakeProjectorRepoForConsumer) ApplyGroupCacheEvent(ctx context.Context, payload groupevent.GroupCacheEventPayload) error {
+func (f *fakeProjectorRepoForConsumer) ApplyGroupCacheEvent(ctx context.Context, payload event.GroupCacheEventPayload) error {
 	f.applyCalls++
 	f.lastPayload = payload
 	if f.applyFn == nil {
@@ -68,13 +68,13 @@ func newConsumerTestDB(t *testing.T) *gorm.DB {
 func buildConsumerTestMessage(t *testing.T, eventID string) []byte {
 	t.Helper()
 
-	encoded, err := groupevent.Encode(groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	encoded, err := event.Encode(event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 7,
 		EventID:           eventID,
-		Action:            groupevent.ActionGroupInfoUpdated,
+		Action:            event.ActionGroupInfoUpdated,
 		GroupUUID:         "group-1",
-		Group: &groupevent.GroupSnapshot{
+		Group: &event.GroupSnapshot{
 			GroupUUID:       "group-1",
 			Name:            "测试群",
 			Status:          0,
@@ -122,7 +122,7 @@ func TestHandleSkipsProcessedEvent(t *testing.T) {
 func TestHandleMarksInvalidPayloadPermanent(t *testing.T) {
 	db := newConsumerTestDB(t)
 	repo := &fakeProjectorRepoForConsumer{
-		applyFn: func(context.Context, groupevent.GroupCacheEventPayload) error {
+		applyFn: func(context.Context, event.GroupCacheEventPayload) error {
 			return repository.ErrInvalidProjectorPayload
 		},
 	}
@@ -139,7 +139,7 @@ func TestHandleMarksInvalidPayloadPermanent(t *testing.T) {
 func TestHandleReturnsProjectorError(t *testing.T) {
 	db := newConsumerTestDB(t)
 	repo := &fakeProjectorRepoForConsumer{
-		applyFn: func(context.Context, groupevent.GroupCacheEventPayload) error {
+		applyFn: func(context.Context, event.GroupCacheEventPayload) error {
 			return errors.New("redis down")
 		},
 	}

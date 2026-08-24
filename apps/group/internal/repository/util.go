@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 )
 
 const (
@@ -203,7 +203,7 @@ func BuildGroupInfoFromCache(entry *GroupInfoCacheEntry, projectionVersion int64
 //
 // projector 侧不应为了回填缓存再回源 MySQL，
 // 因此这里直接把事件携带的最终态快照转换成可复用的 model.GroupInfo。
-func BuildGroupInfoFromSnapshot(snapshot *groupevent.GroupSnapshot) *model.GroupInfo {
+func BuildGroupInfoFromSnapshot(snapshot *event.GroupSnapshot) *model.GroupInfo {
 	if snapshot == nil || snapshot.GroupUUID == "" {
 		return nil
 	}
@@ -285,7 +285,7 @@ func BuildGroupMemberFromCache(userUUID string, entry *GroupMemberCacheEntry) *m
 }
 
 // BuildGroupMemberFromSnapshot 把事件快照还原为成员模型。
-func BuildGroupMemberFromSnapshot(groupUUID string, snapshot groupevent.GroupMemberSnapshot) *model.GroupMember {
+func BuildGroupMemberFromSnapshot(groupUUID string, snapshot event.GroupMemberSnapshot) *model.GroupMember {
 	if groupUUID == "" || snapshot.UserUUID == "" {
 		return nil
 	}
@@ -309,7 +309,7 @@ func BuildGroupMemberFromSnapshot(groupUUID string, snapshot groupevent.GroupMem
 //
 // 这里统一复用 member model，是为了让 projector 和权威对账共用同一套严格缓存编码，
 // 避免事件快照与数据库快照分别维护两份容易漂移的字段映射。
-func BuildGroupMembersFromSnapshots(groupUUID string, snapshots []groupevent.GroupMemberSnapshot) []*model.GroupMember {
+func BuildGroupMembersFromSnapshots(groupUUID string, snapshots []event.GroupMemberSnapshot) []*model.GroupMember {
 	if groupUUID == "" || len(snapshots) == 0 {
 		return []*model.GroupMember{}
 	}
@@ -377,7 +377,7 @@ func BuildGroupJoinRequestFromCache(entry *GroupJoinRequestCacheEntry) *model.Gr
 }
 
 // BuildGroupJoinRequestFromSnapshot 把事件快照还原成申请模型。
-func BuildGroupJoinRequestFromSnapshot(snapshot *groupevent.GroupJoinRequestSnapshot) *model.GroupJoinRequest {
+func BuildGroupJoinRequestFromSnapshot(snapshot *event.GroupJoinRequestSnapshot) *model.GroupJoinRequest {
 	if snapshot == nil || snapshot.ApplyID <= 0 || snapshot.ApplicantUUID == "" {
 		return nil
 	}

@@ -34,7 +34,7 @@ Debezium/Kafka Connect 不会因为同一成员数组中同时出现零值和毫
 transforms.outbox.table.expand.json.payload=true
 ```
 
-action 的终态语义由 `pkg/groupevent.ValidateGroupCachePayload` 唯一定义，group Redis
+action 的终态语义由 `pkg/event.ValidateGroupCachePayload` 唯一定义，group Redis
 projector 与 msg membership projector 共用该校验器；禁止消费者各自放宽字段、推导目标
 集合或保留第二套契约。
 

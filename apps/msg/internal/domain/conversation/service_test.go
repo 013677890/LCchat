@@ -8,8 +8,8 @@ import (
 	pb "github.com/013677890/LCchat-Backend/apps/msg/pb"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
-	"github.com/013677890/LCchat-Backend/pkg/msgevent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -478,12 +478,12 @@ func TestMarkRead_GroupNonMemberWithoutConversationDenied(t *testing.T) {
 	assert.False(t, upsertCalled)
 }
 
-func assertMarkReadEvent(t *testing.T, event OutboxEvent, convId, pushType, receiverUUID, deviceID string, convType pb.ConvType, readSeq int64) {
+func assertMarkReadEvent(t *testing.T, outboxEvent OutboxEvent, convId, pushType, receiverUUID, deviceID string, convType pb.ConvType, readSeq int64) {
 	t.Helper()
-	assert.Equal(t, msgevent.EventTypeMsgPush, event.EventType)
-	assert.Equal(t, convId, event.EntityID)
+	assert.Equal(t, event.EventTypeMsgPush, outboxEvent.EventType)
+	assert.Equal(t, convId, outboxEvent.EntityID)
 
-	pushEvent, err := msgevent.DecodeMsgPush([]byte(event.Payload))
+	pushEvent, err := event.DecodeMsgPush([]byte(outboxEvent.Payload))
 	require.NoError(t, err)
 	assert.NotEmpty(t, pushEvent.GetEventId())
 	assert.Equal(t, pushType, pushEvent.GetType())

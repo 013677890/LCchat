@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/013677890/LCchat-Backend/apps/msg/internal/domain/conversation"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/kafka"
 
 	"github.com/stretchr/testify/assert"
@@ -14,14 +14,14 @@ import (
 )
 
 type fakeGroupMembershipProjectorRepository struct {
-	applyFn func(context.Context, groupevent.GroupCacheEventPayload) error
-	payload groupevent.GroupCacheEventPayload
+	applyFn func(context.Context, event.GroupCacheEventPayload) error
+	payload event.GroupCacheEventPayload
 	calls   int
 }
 
 func (f *fakeGroupMembershipProjectorRepository) ApplyGroupCacheEvent(
 	ctx context.Context,
-	payload groupevent.GroupCacheEventPayload,
+	payload event.GroupCacheEventPayload,
 ) error {
 	f.calls++
 	f.payload = payload
@@ -33,13 +33,13 @@ func (f *fakeGroupMembershipProjectorRepository) ApplyGroupCacheEvent(
 
 func validProjectorMessage(t *testing.T) []byte {
 	t.Helper()
-	encoded, err := groupevent.Encode(groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+	encoded, err := event.Encode(event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: 1,
 		EventID:           "event-1",
-		Action:            groupevent.ActionJoinRequestReviewed,
+		Action:            event.ActionJoinRequestReviewed,
 		GroupUUID:         "group-1",
-		JoinRequest: &groupevent.GroupJoinRequestSnapshot{
+		JoinRequest: &event.GroupJoinRequestSnapshot{
 			ApplyID:         1,
 			ApplicantUUID:   "user-1",
 			CreatedAtUnixMs: 1710000000123,
@@ -66,7 +66,7 @@ func TestGroupMembershipProjectorHandleParksContractAndVersionErrors(t *testing.
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo := &fakeGroupMembershipProjectorRepository{
-				applyFn: func(context.Context, groupevent.GroupCacheEventPayload) error {
+				applyFn: func(context.Context, event.GroupCacheEventPayload) error {
 					return applyErr
 				},
 			}
@@ -81,7 +81,7 @@ func TestGroupMembershipProjectorHandleParksContractAndVersionErrors(t *testing.
 
 func TestGroupMembershipProjectorHandleRetriesDatabaseError(t *testing.T) {
 	repo := &fakeGroupMembershipProjectorRepository{
-		applyFn: func(context.Context, groupevent.GroupCacheEventPayload) error {
+		applyFn: func(context.Context, event.GroupCacheEventPayload) error {
 			return errors.New("mysql unavailable")
 		},
 	}

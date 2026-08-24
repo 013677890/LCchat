@@ -9,9 +9,9 @@ import (
 
 	"github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
-	"github.com/013677890/LCchat-Backend/pkg/accountevent"
 	"github.com/013677890/LCchat-Backend/pkg/async"
 	"github.com/013677890/LCchat-Backend/pkg/cachex"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	"github.com/013677890/LCchat-Backend/pkg/outbox"
 	"github.com/013677890/LCchat-Backend/pkg/redisbloom"
 	"github.com/013677890/LCchat-Backend/pkg/redisretry"
@@ -455,7 +455,7 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 		}
 
 		eventID := util.GenIDString()
-		payload, err := accountevent.Encode(accountevent.ProfileDisplayChangedPayload{
+		payload, err := event.Encode(event.ProfileDisplayChangedPayload{
 			EventID:  eventID,
 			UserUUID: profile.UserUuid,
 			Nickname: profile.Nickname,
@@ -466,7 +466,7 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 			return err
 		}
 
-		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, profile.UserUuid, payload); err != nil {
+		if err := outbox.InsertEvent(tx, event.EventTypeProfileDisplayChanged, profile.UserUuid, payload); err != nil {
 			return repoerr.WrapDBError(err)
 		}
 		return nil
@@ -493,7 +493,7 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 		}
 
 		eventID := util.GenIDString()
-		payload, err := accountevent.Encode(accountevent.ProfileDisplayChangedPayload{
+		payload, err := event.Encode(event.ProfileDisplayChangedPayload{
 			EventID:  eventID,
 			UserUUID: profile.UserUuid,
 			Nickname: profile.Nickname,
@@ -504,7 +504,7 @@ func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context
 			return err
 		}
 
-		if err := outbox.InsertEvent(tx, accountevent.EventTypeProfileDisplayChanged, profile.UserUuid, payload); err != nil {
+		if err := outbox.InsertEvent(tx, event.EventTypeProfileDisplayChanged, profile.UserUuid, payload); err != nil {
 			return repoerr.WrapDBError(err)
 		}
 		return nil

@@ -11,7 +11,7 @@ import (
 	rediskey "github.com/013677890/LCchat-Backend/consts/redisKey"
 	"github.com/013677890/LCchat-Backend/model"
 	"github.com/013677890/LCchat-Backend/pkg/cachex"
-	"github.com/013677890/LCchat-Backend/pkg/groupevent"
+	"github.com/013677890/LCchat-Backend/pkg/event"
 	miniredis "github.com/alicebob/miniredis/v2"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -46,8 +46,8 @@ func newProjectorReconcileTestRepository(t *testing.T) (*Repository, *goredis.Cl
 	return repo, client, db
 }
 
-func projectorGroupSnapshot(groupUUID, name string, memberCount int, status int8, updatedAt time.Time) *groupevent.GroupSnapshot {
-	return &groupevent.GroupSnapshot{
+func projectorGroupSnapshot(groupUUID, name string, memberCount int, status int8, updatedAt time.Time) *event.GroupSnapshot {
+	return &event.GroupSnapshot{
 		GroupID:         1,
 		GroupUUID:       groupUUID,
 		Name:            name,
@@ -61,17 +61,17 @@ func projectorGroupSnapshot(groupUUID, name string, memberCount int, status int8
 	}
 }
 
-func projectorMemberSnapshot(userUUID string, role int8, joinedAt time.Time) groupevent.GroupMemberSnapshot {
-	return groupevent.GroupMemberSnapshot{
+func projectorMemberSnapshot(userUUID string, role int8, joinedAt time.Time) event.GroupMemberSnapshot {
+	return event.GroupMemberSnapshot{
 		UserUUID:       userUUID,
 		Role:           int32(role),
 		JoinedAtUnixMs: joinedAt.UnixMilli(),
 	}
 }
 
-func projectorPayload(version int64, action string, group *groupevent.GroupSnapshot) groupevent.GroupCacheEventPayload {
-	return groupevent.GroupCacheEventPayload{
-		SchemaVersion:     groupevent.GroupCacheSchemaVersion,
+func projectorPayload(version int64, action string, group *event.GroupSnapshot) event.GroupCacheEventPayload {
+	return event.GroupCacheEventPayload{
+		SchemaVersion:     event.GroupCacheSchemaVersion,
 		ProjectionVersion: version,
 		EventID:           fmt.Sprintf("event-%d-%s", version, action),
 		Action:            action,
@@ -109,10 +109,10 @@ func TestApplyGroupCreatedBuildsStrictVersionedProjection(t *testing.T) {
 	now := time.UnixMilli(1710000000123)
 	payload := projectorPayload(
 		10,
-		groupevent.ActionGroupCreated,
+		event.ActionGroupCreated,
 		projectorGroupSnapshot("group-1", "v10", 2, repository.GroupStatusNormal, now),
 	)
-	payload.Members = []groupevent.GroupMemberSnapshot{
+	payload.Members = []event.GroupMemberSnapshot{
 		projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now),
 		projectorMemberSnapshot("member-1", repository.MemberRoleMember, now),
 	}
@@ -143,13 +143,13 @@ func TestProjectionRejectsOutOfOrderGroupInfo(t *testing.T) {
 	repo, _ := newProjectorTestRepository(t)
 	now := time.UnixMilli(1710001000123)
 
-	created := projectorPayload(10, groupevent.ActionGroupCreated, projectorGroupSnapshot("group-1", "v10", 1, 0, now))
-	created.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now)}
+	created := projectorPayload(10, event.ActionGroupCreated, projectorGroupSnapshot("group-1", "v10", 1, 0, now))
+	created.Members = []event.GroupMemberSnapshot{projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now)}
 	created.UserUUIDs = []string{"owner-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), created))
 
-	newer := projectorPayload(12, groupevent.ActionGroupInfoUpdated, projectorGroupSnapshot("group-1", "v12", 1, 0, now.Add(time.Second)))
-	older := projectorPayload(11, groupevent.ActionGroupInfoUpdated, projectorGroupSnapshot("group-1", "v11", 1, 0, now.Add(2*time.Second)))
+	newer := projectorPayload(12, event.ActionGroupInfoUpdated, projectorGroupSnapshot("group-1", "v12", 1, 0, now.Add(time.Second)))
+	older := projectorPayload(11, event.ActionGroupInfoUpdated, projectorGroupSnapshot("group-1", "v11", 1, 0, now.Add(2*time.Second)))
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), newer))
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), older))
 
@@ -161,17 +161,17 @@ func TestProjectionRejectsOutOfOrderGroupInfo(t *testing.T) {
 func TestOwnerTransferUpdatesTwoMembersInOneVersionedLua(t *testing.T) {
 	repo, client := newProjectorTestRepository(t)
 	now := time.UnixMilli(1710002000123)
-	created := projectorPayload(1, groupevent.ActionGroupCreated, projectorGroupSnapshot("group-1", "group", 2, 0, now))
-	created.Members = []groupevent.GroupMemberSnapshot{
+	created := projectorPayload(1, event.ActionGroupCreated, projectorGroupSnapshot("group-1", "group", 2, 0, now))
+	created.Members = []event.GroupMemberSnapshot{
 		projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now),
 		projectorMemberSnapshot("member-1", repository.MemberRoleMember, now),
 	}
 	created.UserUUIDs = []string{"owner-1", "member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), created))
 
-	transfer := projectorPayload(2, groupevent.ActionOwnerTransferred, projectorGroupSnapshot("group-1", "group", 2, 0, now.Add(time.Second)))
+	transfer := projectorPayload(2, event.ActionOwnerTransferred, projectorGroupSnapshot("group-1", "group", 2, 0, now.Add(time.Second)))
 	transfer.Group.OwnerUUID = "member-1"
-	transfer.Members = []groupevent.GroupMemberSnapshot{
+	transfer.Members = []event.GroupMemberSnapshot{
 		projectorMemberSnapshot("owner-1", repository.MemberRoleMember, now),
 		projectorMemberSnapshot("member-1", repository.MemberRoleOwner, now),
 	}
@@ -190,20 +190,20 @@ func TestOwnerTransferUpdatesTwoMembersInOneVersionedLua(t *testing.T) {
 func TestRemovalTombstoneRejectsLateAdd(t *testing.T) {
 	repo, client := newProjectorTestRepository(t)
 	now := time.UnixMilli(1710003000123)
-	created := projectorPayload(5, groupevent.ActionGroupCreated, projectorGroupSnapshot("group-1", "group", 2, 0, now))
-	created.Members = []groupevent.GroupMemberSnapshot{
+	created := projectorPayload(5, event.ActionGroupCreated, projectorGroupSnapshot("group-1", "group", 2, 0, now))
+	created.Members = []event.GroupMemberSnapshot{
 		projectorMemberSnapshot("owner-1", repository.MemberRoleOwner, now),
 		projectorMemberSnapshot("member-1", repository.MemberRoleMember, now),
 	}
 	created.UserUUIDs = []string{"owner-1", "member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), created))
 
-	removed := projectorPayload(7, groupevent.ActionMemberRemoved, projectorGroupSnapshot("group-1", "group", 1, 0, now.Add(2*time.Second)))
+	removed := projectorPayload(7, event.ActionMemberRemoved, projectorGroupSnapshot("group-1", "group", 1, 0, now.Add(2*time.Second)))
 	removed.UserUUID = "member-1"
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), removed))
 
-	lateAdd := projectorPayload(6, groupevent.ActionMemberAdded, projectorGroupSnapshot("group-1", "group", 2, 0, now.Add(time.Second)))
-	lateAdd.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("member-1", repository.MemberRoleMember, now)}
+	lateAdd := projectorPayload(6, event.ActionMemberAdded, projectorGroupSnapshot("group-1", "group", 2, 0, now.Add(time.Second)))
+	lateAdd.Members = []event.GroupMemberSnapshot{projectorMemberSnapshot("member-1", repository.MemberRoleMember, now)}
 	lateAdd.UserUUIDs = []string{"member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(context.Background(), lateAdd))
 
@@ -239,13 +239,13 @@ func TestOldCacheFormatIsDeletedInsteadOfAdapted(t *testing.T) {
 	now := time.UnixMilli(1710005000123)
 
 	require.NoError(t, client.Set(ctx, rediskey.GroupInfoKey("group-1"), `{"group_uuid":"group-1"}`, time.Hour).Err())
-	update := projectorPayload(2, groupevent.ActionGroupInfoUpdated, projectorGroupSnapshot("group-1", "new", 1, 0, now))
+	update := projectorPayload(2, event.ActionGroupInfoUpdated, projectorGroupSnapshot("group-1", "new", 1, 0, now))
 	require.NoError(t, repo.ApplyGroupCacheEvent(ctx, update))
 	assert.Equal(t, int64(0), client.Exists(ctx, rediskey.GroupInfoKey("group-1")).Val())
 
 	require.NoError(t, client.HSet(ctx, rediskey.GroupMembersKey("group-1"), "member-1", `{}`).Err())
-	roleUpdate := projectorPayload(3, groupevent.ActionMemberRoleUpdated, projectorGroupSnapshot("group-1", "new", 1, 0, now))
-	roleUpdate.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("member-1", repository.MemberRoleAdmin, now)}
+	roleUpdate := projectorPayload(3, event.ActionMemberRoleUpdated, projectorGroupSnapshot("group-1", "new", 1, 0, now))
+	roleUpdate.Members = []event.GroupMemberSnapshot{projectorMemberSnapshot("member-1", repository.MemberRoleAdmin, now)}
 	roleUpdate.UserUUIDs = []string{"member-1"}
 	require.NoError(t, repo.ApplyGroupCacheEvent(ctx, roleUpdate))
 	assert.Equal(t, int64(0), client.Exists(ctx, rediskey.GroupMembersKey("group-1")).Val())
@@ -381,7 +381,7 @@ func TestReconcileGroupCacheRepairsAllProjectionsFromDB(t *testing.T) {
 		require.NoError(t, client.HSet(ctx, rediskey.UserGroupVersionKey(userUUID), map[string]string{
 			repository.GroupProjectionSchemaField: repository.GroupCacheSchemaVersion,
 			repository.UserGroupsReadyField:       "1",
-			"group-1":                  "3",
+			"group-1":                             "3",
 		}).Err())
 	}
 
@@ -544,7 +544,7 @@ func TestReconcileUserGroupsRemovesEqualVersionStrayGroup(t *testing.T) {
 	require.NoError(t, client.HSet(ctx, rediskey.UserGroupVersionKey("user-1"), map[string]string{
 		repository.GroupProjectionSchemaField: repository.GroupCacheSchemaVersion,
 		repository.UserGroupsReadyField:       "1",
-		group.Uuid:                 "5",
+		group.Uuid:                            "5",
 	}).Err())
 
 	require.NoError(t, repo.ReconcileUserGroupsCache(ctx, "user-1"))
@@ -685,8 +685,8 @@ func TestUserReadReconcileCannotUndoNewerRemoval(t *testing.T) {
 
 func TestValidateGroupCachePayloadRejectsCompatibilityFallbacks(t *testing.T) {
 	now := time.UnixMilli(1710008000123)
-	valid := projectorPayload(1, groupevent.ActionMemberAdded, projectorGroupSnapshot("group-1", "group", 1, 0, now))
-	valid.Members = []groupevent.GroupMemberSnapshot{projectorMemberSnapshot("user-1", repository.MemberRoleMember, now)}
+	valid := projectorPayload(1, event.ActionMemberAdded, projectorGroupSnapshot("group-1", "group", 1, 0, now))
+	valid.Members = []event.GroupMemberSnapshot{projectorMemberSnapshot("user-1", repository.MemberRoleMember, now)}
 	valid.UserUUIDs = []string{"user-1"}
 	require.NoError(t, validateGroupCacheEventPayload(valid))
 
@@ -705,7 +705,7 @@ func TestValidateGroupCachePayloadRejectsCompatibilityFallbacks(t *testing.T) {
 
 	dismissedWithNormalStatus := projectorPayload(
 		2,
-		groupevent.ActionGroupDismissed,
+		event.ActionGroupDismissed,
 		projectorGroupSnapshot("group-1", "group", 1, repository.GroupStatusNormal, now),
 	)
 	dismissedWithNormalStatus.UserUUIDs = []string{"user-1"}
@@ -714,11 +714,11 @@ func TestValidateGroupCachePayloadRejectsCompatibilityFallbacks(t *testing.T) {
 
 	invalidTransfer := projectorPayload(
 		3,
-		groupevent.ActionOwnerTransferred,
+		event.ActionOwnerTransferred,
 		projectorGroupSnapshot("group-1", "group", 2, repository.GroupStatusNormal, now),
 	)
 	invalidTransfer.Group.OwnerUUID = "new-owner"
-	invalidTransfer.Members = []groupevent.GroupMemberSnapshot{
+	invalidTransfer.Members = []event.GroupMemberSnapshot{
 		projectorMemberSnapshot("old-owner", repository.MemberRoleAdmin, now),
 		projectorMemberSnapshot("new-owner", repository.MemberRoleOwner, now),
 	}

@@ -1,4 +1,4 @@
-package groupevent
+package event
 
 import (
 	"bytes"
@@ -157,15 +157,6 @@ type GroupCacheEventPayload struct {
 	JoinRequest       *GroupJoinRequestSnapshot `json:"join_request,omitempty"`
 	UserUUID          string                    `json:"user_uuid,omitempty"`
 	UserUUIDs         []string                  `json:"user_uuids,omitempty"`
-}
-
-// Encode 把群缓存事件编码成 JSON 字符串。
-func Encode(payload any) (string, error) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
 
 // DecodeGroupCache 解析 group.cache 事件消息。
