@@ -3,13 +3,13 @@ package middleware
 import (
 	"errors"
 	"net"
-	"net/http/httputil"
 	"os"
 	"strings"
 
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/httplog"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/gin-gonic/gin"
@@ -43,16 +43,14 @@ func RecoverMiddleware(stack bool) gin.HandlerFunc {
 					return
 				}
 
-				httpRequest, _ := httputil.DumpRequest(c.Request, false)
 				panicErr := apperr.NewFromPanic(recovered)
 				logger.Error(ctx, "Connect 服务捕获到 panic",
 					logger.Any("error", recovered),
 					logger.String("method", c.Request.Method),
 					logger.String("path", c.Request.URL.Path),
-					logger.String("query", c.Request.URL.RawQuery),
+					logger.String("query", httplog.SanitizeQuery(c.Request.URL.RawQuery)),
 					logger.String("ip", c.ClientIP()),
 					logger.String("user-agent", c.Request.UserAgent()),
-					logger.String("request", string(httpRequest)),
 					logger.String("top_frame", apperr.TopFrame(panicErr)),
 					logger.StackFrames("stack", apperr.Frames(panicErr)),
 				)

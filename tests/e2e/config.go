@@ -9,6 +9,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,8 @@ type Config struct {
 	ConnectBase      string
 	ConnectWSBase    string
 	ConnectWSOrigin  string
+	KafkaConnectBase string
+	OutboxConnector  string
 	RedisAddr        string
 	MySQLDSN         string
 	RequestTimeout   time.Duration
@@ -44,6 +47,8 @@ func LoadConfig() Config {
 		ConnectBase:      envString("LCCHAT_CONNECT_HTTP_BASE_URL", "http://127.0.0.1:8081"),
 		ConnectWSBase:    envString("LCCHAT_CONNECT_WS_BASE_URL", "ws://127.0.0.1:8081"),
 		ConnectWSOrigin:  os.Getenv("LCCHAT_CONNECT_WS_ORIGIN"),
+		KafkaConnectBase: envString("LCCHAT_KAFKA_CONNECT_BASE_URL", "http://127.0.0.1:8083"),
+		OutboxConnector:  envString("LCCHAT_OUTBOX_CONNECTOR_NAME", "lcchat-outbox-connector"),
 		RedisAddr:        envString("LCCHAT_REDIS_ADDR", "127.0.0.1:16379"),
 		MySQLDSN:         envString("LCCHAT_MYSQL_DSN", "root:root@tcp(127.0.0.1:13306)/chat_server?parseTime=true&multiStatements=true"),
 		RequestTimeout:   envDuration("LCCHAT_REQUEST_TIMEOUT", 10*time.Second),
@@ -52,6 +57,33 @@ func LoadConfig() Config {
 		ComposeProject:   os.Getenv("COMPOSE_PROJECT_NAME"),
 		ComposeDirectory: envString("LCCHAT_ROOT", repositoryRoot()),
 	}
+}
+
+// checkOutboxConnectorSet 保证当前专用 Kafka Connect 只运行一个 Outbox Connector。
+// 两个 Connector 同时读取 outbox_events 会让同一事件以不同 offset 重复进入业务 Topic。
+func checkOutboxConnectorSet(ctx context.Context, cfg Config) error {
+	endpoint := strings.TrimRight(cfg.KafkaConnectBase, "/") + "/connectors"
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, response.Body)
+		return fmt.Errorf("%s 返回 HTTP %d", endpoint, response.StatusCode)
+	}
+	var connectors []string
+	if err := json.NewDecoder(response.Body).Decode(&connectors); err != nil {
+		return fmt.Errorf("解析 Kafka Connect connector 列表失败: %w", err)
+	}
+	if len(connectors) != 1 || connectors[0] != cfg.OutboxConnector {
+		return fmt.Errorf("Outbox Connector 必须且只能有 %q，实际为 %v", cfg.OutboxConnector, connectors)
+	}
+	return nil
 }
 
 func envString(key, fallback string) string {

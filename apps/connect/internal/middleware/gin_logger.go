@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/httplog"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -16,7 +17,7 @@ func GinLogger() gin.HandlerFunc {
 		start := time.Now()
 		method := c.Request.Method
 		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
+		query := httplog.SanitizeQuery(c.Request.URL.RawQuery)
 		ip := ctxmeta.ClientIPFromGin(c)
 		if ip == "" {
 			ip = c.ClientIP()
@@ -47,7 +48,7 @@ func GinLogger() gin.HandlerFunc {
 		}
 
 		switch {
-		case path == "/ws" && statusCode == http.StatusSwitchingProtocols:
+		case path == "/ws" && statusCode < http.StatusInternalServerError:
 			logger.Info(ctx, "Connect HTTP 请求完成", fields...)
 		case statusCode >= 500:
 			logger.Error(ctx, "Connect HTTP 请求完成", fields...)

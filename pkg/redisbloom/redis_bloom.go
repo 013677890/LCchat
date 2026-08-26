@@ -66,11 +66,15 @@ func (f Filter) Exists(ctx context.Context, client *goredis.Client, item string)
 	if err := f.Ensure(ctx, client); err != nil {
 		return false, false, err
 	}
-	value, err := client.Do(ctx, "BF.EXISTS", f.Key, item).Int()
+	value, err := client.Do(ctx, "BF.EXISTS", f.Key, item).Result()
 	if err != nil {
 		return false, false, err
 	}
-	return value == 1, true, nil
+	exists, err = parseBoolReply(value)
+	if err != nil {
+		return false, false, err
+	}
+	return exists, true, nil
 }
 
 // MExists 用 BF.MEXISTS 批量判断元素是否可能存在。

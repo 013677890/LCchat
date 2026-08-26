@@ -58,7 +58,7 @@ LCCHAT_E2E=1 go test -tags=e2e -count=1 -v ./tests/e2e   # Docker Compose 端到
 
 - 业务服务在**同一 MySQL 事务**内写业务表 + `outbox_events`（`pkg/outbox.InsertEvent`），Debezium 监听 binlog，EventRouter 按 `event_type` 字段路由到同名 Kafka Topic。数据库侧不维护 pending/failed 状态机，无进程内分发循环。
 - CDC Outbox 事件：`user_created`、`account.deleted`（auth）、`group.cache`（group）、`msg.push`（msg）。直接 Producer 事件：`profile_display_changed`（user）、`realtime.push`（relation/group）、`auth.redis.invalidate`（auth）、`user.redis.invalidate`（user）、`relation.redis.invalidate`（relation）；Redis 补偿 payload 只允许安全 `DEL`。
-- 消费端幂等：`idempotent_events` 表，唯一键 `(event_type, event_id)`，用 `pkg/outbox.CheckIdempotent/MarkIdempotent`。
+- 状态投影消费幂等：`idempotent_events` 表，唯一键 `(event_type, event_id)`，用 `pkg/outbox.CheckIdempotent/MarkIdempotent`。`msg.push` 的 message-push 下行不写该表，允许 Kafka 至少一次重复并由客户端按 `conv_id + seq` 合并。
 - `group.cache` 有两个独立消费组：group-service 投影 Redis；msg-service 按单群连续版本投影 `conversation.membership_*` 和 `group_conversation.group_status`。两者 group ID 禁止相同，message-push 不参与该链路。
 - `group.cache` 固定 **3 partitions**（Compose `kafka-topics-init`）；group/msg 各进程用 `pkg/kafka.ManualConsumerPool` 启动 N 个独立 Reader（默认 N=3，`KAFKA_GROUP_CACHE_PROJECTOR_CONCURRENCY` / `KAFKA_MSG_GROUP_MEMBERSHIP_PROJECTOR_CONCURRENCY`）。不同 partition 并行，同 partition 串行；同群 key=`group_uuid` 严格有序。禁止应用在线 alter partitions。
 - 所有服务侧 Kafka 消费统一经 `ManualConsumerPool` 启动：auth/user/relation 的领域事件与 Redis 补偿、message-push 的 msg.push/realtime.push 也各自使用独立 Pool。workers 默认 3、显式值只接受 1～64，由 Consumer Group rebalance 分配 partition；API 服务隔离并重启旁路 Pool，message-push 的 Pool 致命失败则退出进程。

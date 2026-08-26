@@ -53,7 +53,8 @@ message MsgPushEvent {
   // seq: 透传到 MessageEnvelope.seq 的事件顺序键。
   // MSG_PUSH 填 MsgItem.seq；MSG_RECALL / MSG_MARK_READ / MSG_READ_RECEIPT 填 0。
   int64 seq = 9;
-  // event_id: msg.push outbox 事件 ID，用于 CDC 重放和下游幂等。
+  // event_id: msg.push outbox 事件 ID，用于 CDC 重放定位和重复投递观测。
+  // message-push 不以该字段做服务端幂等；客户端必须按 conv_id + seq 合并重复下行。
   string event_id = 10;
 }
 

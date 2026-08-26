@@ -6,6 +6,7 @@ import (
 
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
 	"github.com/013677890/LCchat-Backend/pkg/ctxmeta"
+	"github.com/013677890/LCchat-Backend/pkg/httplog"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -22,7 +23,7 @@ func GinLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
+		query := httplog.SanitizeQuery(c.Request.URL.RawQuery)
 		clientIP := ctxmeta.ClientIPFromGin(c)
 		if clientIP == "" {
 			clientIP = c.ClientIP()

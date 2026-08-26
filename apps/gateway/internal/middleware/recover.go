@@ -3,12 +3,12 @@ package middleware
 import (
 	"errors"
 	"net"
-	"net/http/httputil"
 	"os"
 	"strings"
 
 	"github.com/013677890/LCchat-Backend/consts"
 	"github.com/013677890/LCchat-Backend/pkg/apperr"
+	"github.com/013677890/LCchat-Backend/pkg/httplog"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
 	"github.com/013677890/LCchat-Backend/pkg/result"
 	"github.com/gin-gonic/gin"
@@ -55,8 +55,6 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 				}
 
 				// 9. 记录日志
-				httpRequest, _ := httputil.DumpRequest(c.Request, false)
-
 				// 10. 创建错误
 				panicErr := apperr.NewFromPanic(recovered)
 
@@ -65,10 +63,9 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 					logger.Any("error", recovered),
 					logger.String("method", c.Request.Method),
 					logger.String("path", c.Request.URL.Path),
-					logger.String("query", c.Request.URL.RawQuery),
+					logger.String("query", httplog.SanitizeQuery(c.Request.URL.RawQuery)),
 					logger.String("ip", c.ClientIP()),
 					logger.String("user-agent", c.Request.UserAgent()),
-					logger.String("request", string(httpRequest)),
 					logger.String("top_frame", apperr.TopFrame(panicErr)),
 					logger.StackFrames("stack", apperr.Frames(panicErr)),
 				)

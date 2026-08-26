@@ -59,6 +59,9 @@ func NewFixture(t *testing.T) *Fixture {
 	if err := waitForHTTPHealth(ctx, cfg); err != nil {
 		t.Fatalf("Docker 服务未就绪: %v", err)
 	}
+	if err := checkOutboxConnectorSet(ctx, cfg); err != nil {
+		t.Fatalf("Kafka Connect 配置不安全: %v", err)
+	}
 
 	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	if err := redisClient.Ping(ctx).Err(); err != nil {

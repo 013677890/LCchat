@@ -210,7 +210,7 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 | `server_ts` | int64 | 服务端时间，Unix 毫秒。 |
 | `from_uuid` | string | 发送方 UUID。 |
 | `seq` | int64 | 下行事件顺序键。 |
-| `event_id` | string | Outbox 事件 ID，用于 CDC 重放和下游幂等。 |
+| `event_id` | string | Outbox 事件 ID，用于 CDC 重放定位和重复投递观测；message-push 不以此做服务端幂等。 |
 
 支持类型：
 
@@ -247,7 +247,7 @@ Outbox 表 `outbox_events` 由 Debezium MySQL Connector 监听，EventRouter 配
 
 | 场景 | 策略 |
 | --- | --- |
-| Outbox 重复投递 | 消费者通过 `idempotent_events` 去重。 |
+| Outbox 重复投递 | 状态投影消费者通过 `idempotent_events` 去重；`msg.push` 是 best-effort 下行，客户端按 `conv_id + seq` 合并重复消息。 |
 | 投影、领域事件、Redis 补偿 payload 解析失败 | 视为永久错误；先写 `dead_events`，成功后才提交。 |
 | `msg.push` / `realtime.push` 永久业务错误 | 记录告警并提交跳过；客户端通过 seq 补拉。 |
 | Redis 临时失败 | 返回可重试错误，由消费者重试。 |

@@ -30,6 +30,26 @@ while true; do
     sleep 2
 done
 
+case "${CONNECTOR_NAME}" in
+    ''|*[!A-Za-z0-9._-]*)
+        echo "[cdc-init] connector name contains unsupported characters" >&2
+        exit 1
+        ;;
+esac
+
+# 当前 Connect worker 专用于 LCChat Outbox，只允许存在本脚本管理的唯一 connector。
+# 多个 source connector 同时读取 outbox_events 会把同一 binlog 事件重复写入业务 Topic。
+connectors_payload="$(curl -fsS "${CONNECT_URL}/connectors")"
+compact_connectors="$(printf '%s' "${connectors_payload}" | tr -d '[:space:]')"
+case "${compact_connectors}" in
+    '[]'|"[\"${CONNECTOR_NAME}\"]")
+        ;;
+    *)
+        echo "[cdc-init] unexpected connector set; expected none or only ${CONNECTOR_NAME}: ${compact_connectors}" >&2
+        exit 1
+        ;;
+esac
+
 cat <<EOF >/tmp/outbox-connector.json
 {
   "connector.class": "io.debezium.connector.mysql.MySqlConnector",
@@ -146,7 +166,7 @@ curl -fsS -X PUT \
   -H "Accept: application/json" \
   -H "Content-Type: application/json" \
   --data @/tmp/outbox-connector.json \
-  "${CONNECT_URL}/connectors/${CONNECTOR_NAME}/config"
+  "${CONNECT_URL}/connectors/${CONNECTOR_NAME}/config" >/dev/null
 
 if [ "${connector_was_stopped}" = "true" ]; then
     # 更新 stopped connector 的配置后显式恢复；resume 对 STOPPED 是当前固定契约，
