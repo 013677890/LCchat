@@ -191,7 +191,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	// 2. 至少提供一个字段
-	if req.Nickname == "" && req.Gender == nil && req.Birthday == "" && req.Signature == "" {
+	if req.Nickname == "" && req.Gender == nil && req.Birthday == nil && req.Signature == nil {
 		result.Fail(c, nil, consts.CodeParamError)
 		return
 	}

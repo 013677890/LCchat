@@ -37,7 +37,7 @@ type fakeUserSvcRepo struct {
 
 	getByUUIDFn                       func(context.Context, string) (*model.UserProfile, error)
 	searchUserFn                      func(context.Context, string, int, int) ([]*model.UserProfile, int64, error)
-	updateBasicInfoWithDisplayEventFn func(context.Context, string, string, string, string, int8) (*model.UserProfile, error)
+	updateBasicInfoWithDisplayEventFn func(context.Context, string, repository.BasicInfoUpdate) (*model.UserProfile, error)
 	updateAvatarWithDisplayEventFn    func(context.Context, string, string) (*model.UserProfile, error)
 	getQRCodeByUserUUIDFn             func(context.Context, string) (string, time.Time, error)
 	saveQRCodeFn                      func(context.Context, string, string) error
@@ -59,11 +59,11 @@ func (f *fakeUserSvcRepo) SearchUser(ctx context.Context, keyword string, page, 
 	return f.searchUserFn(ctx, keyword, page, pageSize)
 }
 
-func (f *fakeUserSvcRepo) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID, nickname, signature, birthday string, gender int8) (*model.UserProfile, error) {
+func (f *fakeUserSvcRepo) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, update repository.BasicInfoUpdate) (*model.UserProfile, error) {
 	if f.updateBasicInfoWithDisplayEventFn == nil {
 		return nil, errors.New("unexpected UpdateBasicInfoWithDisplayEvent call")
 	}
-	return f.updateBasicInfoWithDisplayEventFn(ctx, userUUID, nickname, signature, birthday, gender)
+	return f.updateBasicInfoWithDisplayEventFn(ctx, userUUID, update)
 }
 
 func (f *fakeUserSvcRepo) UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserProfile, error) {
@@ -187,16 +187,17 @@ func TestUserServiceUpdateAndAvatar(t *testing.T) {
 
 	t.Run("update_profile_birthday_format_error", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{})
-		resp, err := svc.UpdateProfile(userSvcCtx("u1"), &pb.UpdateProfileRequest{Birthday: "2026/02/06"})
+		birthday := "2026/02/06"
+		resp, err := svc.UpdateProfile(userSvcCtx("u1"), &pb.UpdateProfileRequest{Birthday: &birthday})
 		require.Nil(t, resp)
 		requireUserSvcStatus(t, err, codes.InvalidArgument, consts.CodeBirthdayFormatError)
 	})
 
 	t.Run("update_profile_success", func(t *testing.T) {
 		svc := NewProfileUserService(&fakeUserSvcRepo{
-			updateBasicInfoWithDisplayEventFn: func(_ context.Context, userUUID, nickname, _, _ string, _ int8) (*model.UserProfile, error) {
+			updateBasicInfoWithDisplayEventFn: func(_ context.Context, userUUID string, update repository.BasicInfoUpdate) (*model.UserProfile, error) {
 				require.Equal(t, "u1", userUUID)
-				require.Equal(t, "new-nick", nickname)
+				require.Equal(t, "new-nick", update.Nickname)
 				return &model.UserProfile{UserUuid: "u1", Nickname: "new-nick"}, nil
 			},
 		})
@@ -204,6 +205,23 @@ func TestUserServiceUpdateAndAvatar(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 		assert.Equal(t, "new-nick", resp.UserInfo.Nickname)
+	})
+
+	t.Run("update_profile_clears_signature", func(t *testing.T) {
+		emptySignature := ""
+		svc := NewProfileUserService(&fakeUserSvcRepo{
+			updateBasicInfoWithDisplayEventFn: func(_ context.Context, userUUID string, update repository.BasicInfoUpdate) (*model.UserProfile, error) {
+				require.Equal(t, "u1", userUUID)
+				require.NotNil(t, update.Signature)
+				require.Empty(t, *update.Signature)
+				return &model.UserProfile{UserUuid: "u1", Signature: ""}, nil
+			},
+		})
+
+		resp, err := svc.UpdateProfile(userSvcCtx("u1"), &pb.UpdateProfileRequest{Signature: &emptySignature})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Empty(t, resp.UserInfo.Signature)
 	})
 
 	t.Run("upload_avatar_empty_url", func(t *testing.T) {
@@ -265,22 +283,26 @@ func TestUserServiceQRCodeDeleteAndBatch(t *testing.T) {
 		require.Nil(t, resp1)
 		requireUserSvcStatus(t, err1, codes.InvalidArgument, consts.CodeQRCodeFormatError)
 
+		respInvalid, errInvalid := svc.ParseQRCode(context.Background(), &pb.ParseQRCodeRequest{Token: "invalid-token"})
+		require.Nil(t, respInvalid)
+		requireUserSvcStatus(t, errInvalid, codes.InvalidArgument, consts.CodeQRCodeFormatError)
+
 		svcExpired := NewProfileUserService(&fakeUserSvcRepo{
 			getUUIDByQRCodeTokenFn: func(_ context.Context, _ string) (string, error) {
 				return "", repoerr.ErrRedisNil
 			},
 		})
-		resp2, err2 := svcExpired.ParseQRCode(context.Background(), &pb.ParseQRCodeRequest{Token: "tk1"})
+		resp2, err2 := svcExpired.ParseQRCode(context.Background(), &pb.ParseQRCodeRequest{Token: "2093614799740768256"})
 		require.Nil(t, resp2)
 		requireUserSvcStatus(t, err2, codes.NotFound, consts.CodeQRCodeExpired)
 
 		svcOK := NewProfileUserService(&fakeUserSvcRepo{
 			getUUIDByQRCodeTokenFn: func(_ context.Context, token string) (string, error) {
-				require.Equal(t, "tk1", token)
+				require.Equal(t, "2093614799740768256", token)
 				return "u1", nil
 			},
 		})
-		resp3, err3 := svcOK.ParseQRCode(context.Background(), &pb.ParseQRCodeRequest{Token: "tk1"})
+		resp3, err3 := svcOK.ParseQRCode(context.Background(), &pb.ParseQRCodeRequest{Token: "2093614799740768256"})
 		require.NoError(t, err3)
 		require.NotNil(t, resp3)
 		assert.Equal(t, "u1", resp3.UserUuid)

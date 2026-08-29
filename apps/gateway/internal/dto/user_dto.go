@@ -28,10 +28,10 @@ type GetOtherProfileResponse struct {
 
 // UpdateProfileRequest 更新基本信息请求 DTO
 type UpdateProfileRequest struct {
-	Nickname  string `json:"nickname" binding:"omitempty,min=2,max=20"` // 昵称(2-20字符)
-	Gender    *int32 `json:"gender" binding:"omitempty,oneof=1 2 3"`    // 性别(1:男 2:女 3:未知)
-	Birthday  string `json:"birthday" binding:"omitempty"`              // 生日(YYYY-MM-DD)
-	Signature string `json:"signature" binding:"omitempty,max=100"`     // 个性签名
+	Nickname  string  `json:"nickname" binding:"omitempty,min=2,max=20"` // 昵称(2-20字符)
+	Gender    *int32  `json:"gender" binding:"omitempty,oneof=1 2 3"`    // 性别(1:男 2:女 3:未知)
+	Birthday  *string `json:"birthday" binding:"omitempty"`              // 生日(YYYY-MM-DD)，空字符串表示清空
+	Signature *string `json:"signature" binding:"omitempty,max=100"`     // 个性签名，空字符串表示清空
 }
 
 // UpdateProfileResponse 更新基本信息响应 DTO
@@ -138,13 +138,15 @@ func ConvertToProtoUpdateProfileRequest(dto *UpdateProfileRequest) *userpb.Updat
 	if dto == nil {
 		return nil
 	}
-	req := &userpb.UpdateProfileRequest{
-		Nickname:  dto.Nickname,
-		Birthday:  dto.Birthday,
-		Signature: dto.Signature,
-	}
+	req := &userpb.UpdateProfileRequest{Nickname: dto.Nickname}
 	if dto.Gender != nil {
 		req.Gender = *dto.Gender
+	}
+	if dto.Birthday != nil {
+		req.Birthday = dto.Birthday
+	}
+	if dto.Signature != nil {
+		req.Signature = dto.Signature
 	}
 	return req
 }

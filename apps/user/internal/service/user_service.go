@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/013677890/LCchat-Backend/apps/user/internal/repository"
@@ -155,27 +157,32 @@ func (s *userServiceImpl) UpdateProfile(ctx context.Context, req *pb.UpdateProfi
 	}
 
 	// 四个展示字段都没传时没有更新意义，按参数错误返回。
-	if req.Nickname == "" && req.Birthday == "" && req.Signature == "" && req.Gender == 0 {
+	if req.Nickname == "" && req.Birthday == nil && req.Signature == nil && req.Gender == 0 {
 		return nil, apperr.New(consts.CodeParamError)
 	}
 
 	// 生日字段额外做双重校验：先校验格式，再校验是否是日历中的真实日期。
-	if req.Birthday != "" {
+	if req.Birthday != nil && req.GetBirthday() != "" {
 		// 先要求严格的 YYYY-MM-DD 文本格式，避免仓储层落入脏字符串。
 		birthdayPattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-		if !birthdayPattern.MatchString(req.Birthday) {
+		if !birthdayPattern.MatchString(req.GetBirthday()) {
 			return nil, apperr.New(consts.CodeBirthdayFormatError)
 		}
 
 		// 再用 time.Parse 校验真实日期，拦住诸如 2024-02-31 这类非法值。
-		_, err := time.Parse("2006-01-02", req.Birthday)
+		_, err := time.Parse("2006-01-02", req.GetBirthday())
 		if err != nil {
 			return nil, apperr.New(consts.CodeBirthdayFormatError)
 		}
 	}
 
 	// 真正的资料写入和展示字段事件由 repository 在事务内统一完成，service 不重复拼事务。
-	userInfo, err := s.userRepo.UpdateBasicInfoWithDisplayEvent(ctx, userUUID, req.Nickname, req.Signature, req.Birthday, int8(req.Gender))
+	userInfo, err := s.userRepo.UpdateBasicInfoWithDisplayEvent(ctx, userUUID, repository.BasicInfoUpdate{
+		Nickname:  req.Nickname,
+		Signature: req.Signature,
+		Birthday:  req.Birthday,
+		Gender:    int8(req.Gender),
+	})
 	if err != nil {
 		if errors.Is(err, repoerr.ErrRecordNotFound) {
 			return nil, apperr.New(consts.CodeUserNotFound)
@@ -341,13 +348,15 @@ func (s *userServiceImpl) BatchGetProfile(ctx context.Context, req *pb.BatchGetP
 //   - codes.NotFound: 二维码已过期或用户不存在
 //   - codes.Internal: 系统内部错误
 func (s *userServiceImpl) ParseQRCode(ctx context.Context, req *pb.ParseQRCodeRequest) (*pb.ParseQRCodeResponse, error) {
-	// token 为空时连最基本的二维码标识都没有，直接按格式错误返回。
-	if req.Token == "" {
+	// 二维码 token 当前由 Snowflake 生成；非正整数文本应归类为格式错误，而不是“已过期”。
+	token := strings.TrimSpace(req.Token)
+	tokenID, parseErr := strconv.ParseInt(token, 10, 64)
+	if parseErr != nil || tokenID <= 0 {
 		return nil, apperr.New(consts.CodeQRCodeFormatError)
 	}
 
 	// 二维码解析完全依赖 Redis 中的短期映射；命中后只返回 user_uuid 供上游继续拉资料。
-	userUUID, err := s.userRepo.GetUUIDByQRCodeToken(ctx, req.Token)
+	userUUID, err := s.userRepo.GetUUIDByQRCodeToken(ctx, token)
 	if err != nil {
 		if errors.Is(err, repoerr.ErrRedisNil) {
 			// Redis 中不存在该 token，说明二维码已过期或无效。

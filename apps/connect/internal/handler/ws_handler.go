@@ -121,6 +121,7 @@ func (h *WSHandler) ServeWS(c *gin.Context) {
 	if err != nil {
 		logger.Warn(connCtx, "WebSocket 升级失败",
 			logger.ErrorField("error", err),
+			logger.String("origin", c.GetHeader("Origin")),
 		)
 		return
 	}

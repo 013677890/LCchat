@@ -7,6 +7,14 @@ import (
 	"github.com/013677890/LCchat-Backend/model"
 )
 
+// BasicInfoUpdate 表示一次资料基础字段更新；指针字段可区分“未传”和“显式清空”。
+type BasicInfoUpdate struct {
+	Nickname  string
+	Signature *string
+	Birthday  *string
+	Gender    int8
+}
+
 // IUserRepository 资料域数据访问接口。
 type IUserRepository interface {
 	// GetByUUID 根据 UUID 查询用户资料。
@@ -22,7 +30,7 @@ type IUserRepository interface {
 	UpdateAvatarWithDisplayEvent(ctx context.Context, userUUID, avatar string) (*model.UserProfile, error)
 
 	// UpdateBasicInfoWithDisplayEvent 更新基本信息并在同一事务中写入展示字段变更事件。
-	UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) (*model.UserProfile, error)
+	UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, update BasicInfoUpdate) (*model.UserProfile, error)
 
 	// Delete 软删除用户（注销账号）
 	Delete(ctx context.Context, userUUID string) error

@@ -481,10 +481,10 @@ func (r *userRepositoryImpl) UpdateAvatarWithDisplayEvent(ctx context.Context, u
 }
 
 // UpdateBasicInfoWithDisplayEvent 更新基本信息并写入展示字段变更事件。
-func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, nickname, signature, birthday string, gender int8) (*model.UserProfile, error) {
+func (r *userRepositoryImpl) UpdateBasicInfoWithDisplayEvent(ctx context.Context, userUUID string, update BasicInfoUpdate) (*model.UserProfile, error) {
 	var profile model.UserProfile
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := r.applyBasicInfoUpdate(tx, userUUID, nickname, signature, birthday, gender); err != nil {
+		if err := r.applyBasicInfoUpdate(tx, userUUID, update); err != nil {
 			return err
 		}
 
@@ -552,26 +552,30 @@ func (r *userRepositoryImpl) setUserProfileEmptyCacheAsync(ctx context.Context, 
 	}, async.AsyncRedisTimeout)
 }
 
-// applyBasicInfoUpdate 按“仅更新有值字段”的规则写入资料基础字段。
+// applyBasicInfoUpdate 按“仅更新明确提交字段”的规则写入资料基础字段。
 //
 // 该帮助函数只负责构造更新集和执行 SQL，不承担事件写入；展示字段变更事件由外层事务
 // 在拿到最新快照后统一写入 outbox。
-func (r *userRepositoryImpl) applyBasicInfoUpdate(db *gorm.DB, userUUID string, nickname, signature, birthday string, gender int8) error {
+func (r *userRepositoryImpl) applyBasicInfoUpdate(db *gorm.DB, userUUID string, update BasicInfoUpdate) error {
 	updates := map[string]interface{}{
 		"updated_at": time.Now(),
 	}
 
-	if nickname != "" {
-		updates["nickname"] = nickname
+	if update.Nickname != "" {
+		updates["nickname"] = update.Nickname
 	}
-	if signature != "" {
-		updates["signature"] = signature
+	if update.Signature != nil {
+		updates["signature"] = *update.Signature
 	}
-	if birthday != "" {
-		updates["birthday"] = birthday
+	if update.Birthday != nil {
+		if *update.Birthday == "" {
+			updates["birthday"] = nil
+		} else {
+			updates["birthday"] = *update.Birthday
+		}
 	}
-	if gender > 0 {
-		updates["gender"] = gender
+	if update.Gender > 0 {
+		updates["gender"] = update.Gender
 	}
 
 	if err := db.Model(&model.UserProfile{}).

@@ -73,6 +73,33 @@ func TestUserRepositoryBatchReadFallsBackToDBWhenRedisMissing(t *testing.T) {
 	require.Equal(t, "u2", profiles[1].UserUuid)
 }
 
+func TestApplyBasicInfoUpdateClearsOptionalFields(t *testing.T) {
+	repo := newUserRepositoryForTest(t)
+	ctx := context.Background()
+	birthday := time.Date(2000, time.January, 2, 0, 0, 0, 0, time.UTC)
+	now := time.Now()
+	require.NoError(t, repo.db.Create(&model.UserProfile{
+		UserUuid:  "user-clear-1",
+		Nickname:  "alice",
+		Gender:    3,
+		Birthday:  &birthday,
+		Signature: "hello",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}).Error)
+
+	empty := ""
+	require.NoError(t, repo.applyBasicInfoUpdate(repo.db.WithContext(ctx), "user-clear-1", BasicInfoUpdate{
+		Birthday:  &empty,
+		Signature: &empty,
+	}))
+
+	var profile model.UserProfile
+	require.NoError(t, repo.db.Where("user_uuid = ?", "user-clear-1").First(&profile).Error)
+	require.Nil(t, profile.Birthday)
+	require.Empty(t, profile.Signature)
+}
+
 func TestUserRepositoryCreateProfileIsIdempotent(t *testing.T) {
 	repo := newUserRepositoryForTest(t)
 	ctx := context.Background()

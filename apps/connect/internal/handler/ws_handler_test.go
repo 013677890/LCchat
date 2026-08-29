@@ -1,6 +1,10 @@
 package handler
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestMessageAckSeqWithinDelivered(t *testing.T) {
 	tests := []struct {
@@ -23,5 +27,27 @@ func TestMessageAckSeqWithinDelivered(t *testing.T) {
 				t.Fatalf("messageAckSeqWithinDelivered(%d, %d) = %v, want %v", tt.ackSeq, tt.maxDeliveredSeq, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildCheckOriginAllowsConfiguredElectronFileOrigin(t *testing.T) {
+	t.Setenv("CONNECT_ALLOWED_ORIGINS", "http://localhost:5173,file://")
+
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/ws", nil)
+	req.Header.Set("Origin", "file://")
+
+	if !buildCheckOrigin()(req) {
+		t.Fatal("configured Electron file:// origin should be allowed")
+	}
+}
+
+func TestBuildCheckOriginRejectsUnconfiguredElectronFileOrigin(t *testing.T) {
+	t.Setenv("CONNECT_ALLOWED_ORIGINS", "http://localhost:5173")
+
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8081/ws", nil)
+	req.Header.Set("Origin", "file://")
+
+	if buildCheckOrigin()(req) {
+		t.Fatal("unconfigured Electron file:// origin should be rejected")
 	}
 }

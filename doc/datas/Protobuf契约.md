@@ -82,6 +82,8 @@ Gateway 对外暴露 HTTP JSON，不直接暴露 Protobuf 字段名。
 
 `UserInfo` 与 HTTP `UserProfile` 对应，包含 `uuid`、`nickname`、`avatar`、`gender`、`signature`、`birthday`。
 
+`UpdateProfileRequest.birthday` 与 `UpdateProfileRequest.signature` 使用 proto3 `optional` 记录字段是否出现：未传表示保持原值，显式传空字符串表示清空。
+
 ## 5. relation 契约
 
 ### 5.1 `FriendService`

@@ -430,6 +430,24 @@ func TestUserHandlerChangePasswordAndUpdateProfile(t *testing.T) {
 		assert.Equal(t, consts.CodeSuccess, decodeUserHandlerCode(t, w))
 	})
 
+	t.Run("update_profile_clear_signature_success", func(t *testing.T) {
+		h := NewUserHandler(&fakeUserHTTPService{
+			updateProfileFn: func(_ context.Context, req *dto.UpdateProfileRequest) (*dto.UpdateProfileResponse, error) {
+				require.NotNil(t, req.Signature)
+				require.Empty(t, *req.Signature)
+				return &dto.UpdateProfileResponse{}, nil
+			},
+		})
+		w := httptest.NewRecorder()
+		req := newUserJSONRequest(t, http.MethodPut, "/api/v1/auth/user/profile", `{"signature":""}`)
+		c, _ := gin.CreateTestContext(w)
+		c.Request = req
+
+		h.UpdateProfile(c)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, consts.CodeSuccess, decodeUserHandlerCode(t, w))
+	})
+
 	t.Run("update_profile_gender_only_success", func(t *testing.T) {
 		h := NewUserHandler(&fakeUserHTTPService{
 			updateProfileFn: func(_ context.Context, req *dto.UpdateProfileRequest) (*dto.UpdateProfileResponse, error) {
