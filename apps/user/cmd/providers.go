@@ -62,8 +62,8 @@ func provideUserAsyncReleaseTimeout(cfg config.AsyncConfig) userAsyncReleaseTime
 	return userAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
 
-func provideUserMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
-	return mysql.Build(cfg)
+func provideUserMySQLDB(log *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
+	return mysql.Build(log, cfg)
 }
 
 // user-service 允许 Redis 缺失后降级运行，因此这里返回 nil 而不是中断整个依赖图。

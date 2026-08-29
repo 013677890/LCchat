@@ -134,6 +134,15 @@ func appendContextFields(ctx context.Context, fields []zap.Field) []zap.Field {
 	return fields
 }
 
+// WithContext 为指定 logger 注入请求上下文字段。
+// 适用于 GORM 等需要持有独立 logger、但仍需复用统一链路字段的基础设施适配器。
+func WithContext(ctx context.Context, log *zap.Logger) *zap.Logger {
+	if log == nil {
+		return zap.NewNop()
+	}
+	return log.With(appendContextFields(ctx, nil)...)
+}
+
 func Info(ctx context.Context, msg string, fields ...zap.Field) {
 	global.Info(msg, appendContextFields(ctx, fields)...)
 }

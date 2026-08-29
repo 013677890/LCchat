@@ -65,8 +65,8 @@ func provideAsyncReleaseTimeout(cfg config.AsyncConfig) msgAsyncReleaseTimeout {
 	return msgAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
 
-func provideMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
-	return mysql.Build(cfg)
+func provideMySQLDB(log *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
+	return mysql.Build(log, cfg)
 }
 
 func provideRedisClient(_ *zap.Logger, cfg config.RedisConfig) (*goredis.Client, error) {

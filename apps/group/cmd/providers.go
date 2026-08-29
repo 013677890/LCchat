@@ -71,8 +71,8 @@ func provideGroupAsyncReleaseTimeout(cfg config.AsyncConfig) groupAsyncReleaseTi
 	return groupAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
 
-func provideGroupMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
-	return mysql.Build(cfg)
+func provideGroupMySQLDB(log *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
+	return mysql.Build(log, cfg)
 }
 
 // group-service 允许 Redis 缺失后以 MySQL-Only 模式降级运行。

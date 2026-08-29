@@ -71,8 +71,8 @@ func provideRelationAsyncReleaseTimeout(cfg config.AsyncConfig) relationAsyncRel
 	return relationAsyncReleaseTimeout(cfg.ReleaseTimeout)
 }
 
-func provideRelationMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
-	return mysql.Build(cfg)
+func provideRelationMySQLDB(log *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
+	return mysql.Build(log, cfg)
 }
 
 // relation-service 允许 Redis 缺失后降级运行。

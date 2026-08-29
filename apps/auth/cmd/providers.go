@@ -54,8 +54,8 @@ func provideAuthLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
 	return logger.Build(cfg)
 }
 
-func provideAuthMySQLDB(_ *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
-	return mysql.Build(cfg)
+func provideAuthMySQLDB(log *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
+	return mysql.Build(log, cfg)
 }
 
 // auth-service 允许 Redis 缺失后降级运行。

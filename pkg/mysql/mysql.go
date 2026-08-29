@@ -2,10 +2,7 @@ package mysql
 
 import (
 	"errors"
-	"log"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/013677890/LCchat-Backend/config"
 	"github.com/013677890/LCchat-Backend/pkg/logger"
@@ -14,7 +11,6 @@ import (
 	"go.uber.org/zap"
 	gmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/plugin/dbresolver"
 )
 
@@ -29,13 +25,13 @@ func ReplaceGlobal(db *gorm.DB) { global = db }
 // Build 基于配置初始化 GORM，并注册读写分离：
 // - 当前读/写同库；若配置了从库 DSN，将注册 dbresolver 以区分读写。
 // - 连接池参数、日志级别、慢查询阈值等在此集中设置。
-func Build(cfg config.MySQLConfig) (*gorm.DB, error) {
+func Build(log *zap.Logger, cfg config.MySQLConfig) (*gorm.DB, error) {
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return nil, errors.New("mysql dsn is empty")
 	}
 
-	// 构建 gorm 日志（默认走 stdout；若已有 zap 全局 logger，复用 zap）。
-	gormLog := newGormLogger(cfg.LogLevel)
+	// 使用当前服务显式注入的 zap logger，避免绑定尚未安装的进程级全局 logger。
+	gormLog := newGormLogger(log, cfg.LogLevel)
 
 	// 为每个 DSN 补齐 socket 级超时（timeout/readTimeout/writeTimeout）。
 	// 这是「DB 挂死导致消费者分区永久冻结」的根因兜底：与 ctx 无关，由驱动在 socket 层强制。
@@ -117,46 +113,4 @@ func ensureDSNTimeouts(dsn string, cfg config.MySQLConfig) string {
 		parsed.WriteTimeout = cfg.WriteTimeout
 	}
 	return parsed.FormatDSN()
-}
-
-// newGormLogger 构造 gorm logger，优先复用 zap 的全局 logger。
-func newGormLogger(level string) gormlogger.Interface {
-	logLevel := parseLogLevel(level)
-
-	var base *log.Logger
-	if zl := logger.L(); zl != nil {
-		base = zapAsStdLog(zl)
-	} else {
-		// 退化到 stdout 打印
-		base = log.New(os.Stdout, "gorm ", log.LstdFlags)
-	}
-
-	return gormlogger.New(
-		base,
-		gormlogger.Config{
-			SlowThreshold:             200 * time.Millisecond, // 慢查询阈值
-			LogLevel:                  logLevel,
-			IgnoreRecordNotFoundError: true,
-			ParameterizedQueries:      true, // 避免打印完整 SQL 参数
-		},
-	)
-}
-
-// parseLogLevel 将字符串解析为 gorm 日志级别，默认 warn。
-func parseLogLevel(level string) gormlogger.LogLevel {
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "silent":
-		return gormlogger.Silent
-	case "error":
-		return gormlogger.Error
-	case "info":
-		return gormlogger.Info
-	default:
-		return gormlogger.Warn
-	}
-}
-
-// zapAsStdLog 将 zap Logger 转换为 *log.Logger，供 gorm logger 使用。
-func zapAsStdLog(zl *zap.Logger) *log.Logger {
-	return zap.NewStdLog(zl)
 }
